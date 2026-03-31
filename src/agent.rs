@@ -76,7 +76,6 @@ pub async fn run_turn(
         while let Some(event) = stream.next().await {
             match event {
                 StreamEvent::Text(t) => {
-                    event_handler(&AgentEvent::Text(t.clone()));
                     text_content.push_str(&t);
                 }
                 StreamEvent::ToolUse(tu) => {
@@ -91,6 +90,11 @@ pub async fn run_turn(
                     return;
                 }
             }
+        }
+
+        // Emit buffered text as a single block
+        if !text_content.is_empty() {
+            event_handler(&AgentEvent::Text(text_content.clone()));
         }
 
         // Build assistant message content
