@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
-const DEFAULT_MAX_TURNS: usize = 25;
+const DEFAULT_MAX_TURNS: usize = 100;
 const DEFAULT_MAX_TOKENS: u32 = 16384;
 
 pub struct Config {

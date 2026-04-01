@@ -25,6 +25,11 @@ impl AgentState {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.messages.clear();
+        self.total_usage = Usage::default();
+    }
+
     pub fn add_user_message(&mut self, text: &str) {
         self.messages.push(Message::User {
             content: vec![ContentBlock::Text {

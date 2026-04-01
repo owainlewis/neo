@@ -3,16 +3,16 @@ use crate::model::types::Usage;
 use std::io::Write;
 
 // ANSI codes
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
+pub const RESET: &str = "\x1b[0m";
+pub const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
 const RED: &str = "\x1b[31m";
 const GREEN: &str = "\x1b[32m";
 const CYAN: &str = "\x1b[36m";
 const WHITE: &str = "\x1b[37m";
+const YELLOW: &str = "\x1b[33m";
 
 // Glyphs
-const RESPONSE_INDICATOR: &str = "⎿";
 const SUCCESS: &str = "✓";
 const FAILURE: &str = "✗";
 
@@ -28,11 +28,24 @@ impl Renderer {
     }
 
     pub fn banner(&self, model: &str) {
-        println!(
-            "\n  {}{}opus{} {}v0.1.0{}",
-            BOLD, WHITE, RESET, DIM, RESET
-        );
-        println!("  {}Model: {}{}\n", DIM, model, RESET);
+        let cwd = std::env::current_dir()
+            .map(|p| {
+                let home = std::env::var("HOME").unwrap_or_default();
+                let s = p.to_string_lossy().to_string();
+                if !home.is_empty() && s.starts_with(&home) {
+                    format!("~{}", &s[home.len()..])
+                } else {
+                    s
+                }
+            })
+            .unwrap_or_else(|_| ".".to_string());
+
+        println!();
+        println!("  {}{}›_{} {}opus{} v0.1.0", BOLD, WHITE, RESET, BOLD, RESET);
+        println!();
+        println!("  {}model:     {}{}", DIM, RESET, model);
+        println!("  {}directory: {}{}", DIM, RESET, cwd);
+        println!();
     }
 
     pub fn handle_event(&mut self, event: &AgentEvent) {
@@ -53,13 +66,13 @@ impl Renderer {
     fn render_text(&mut self, text: &str) {
         if !self.response_started {
             self.response_started = true;
-            print!("\n  {} ", RESPONSE_INDICATOR);
+            println!();
         }
         for (i, line) in text.split('\n').enumerate() {
             if i > 0 {
-                print!("\n    ");
+                print!("\n");
             }
-            print!("{}", line);
+            print!("  {}", line);
         }
         let _ = std::io::stdout().flush();
     }
@@ -79,7 +92,7 @@ impl Renderer {
 
         let display_input = tool_input_summary(name, input);
         let time_str = if duration_ms > 1000 {
-            format!(" {DIM}({:.1}s){RESET}", duration_ms as f64 / 1000.0)
+            format!(" {}({:.1}s){}", DIM, duration_ms as f64 / 1000.0, RESET)
         } else {
             String::new()
         };
@@ -92,18 +105,12 @@ impl Renderer {
 
         println!();
         println!(
-            "    {}{}{} {}{}{}",
+            "  {}{}{} {}{}{}",
             BOLD, name, RESET, DIM, display_input, RESET
         );
         println!(
-            "    {}{}{} {}{}{}{}",
-            glyph_color,
-            glyph,
-            RESET,
-            DIM,
-            truncate_result(result, 200),
-            RESET,
-            time_str,
+            "  {}{}{} {}{}{}{}",
+            glyph_color, glyph, RESET, DIM, truncate_result(result, 200), RESET, time_str,
         );
     }
 
@@ -113,8 +120,12 @@ impl Renderer {
         }
         self.response_started = false;
         println!(
-            "\n  {}tokens: {} in · {} out{}\n",
-            DIM, usage.input_tokens, usage.output_tokens, RESET
+            "\n  {}{} · {} in · {} out{}\n",
+            DIM,
+            short_model_name(),
+            format_tokens(usage.input_tokens),
+            format_tokens(usage.output_tokens),
+            RESET
         );
     }
 
@@ -126,8 +137,39 @@ impl Renderer {
         eprintln!("\n  {}{}error:{} {}", RED, BOLD, RESET, error);
     }
 
+    pub fn info(&self, msg: &str) {
+        println!("\n  {}{}{}", DIM, msg, RESET);
+    }
+
+    pub fn warn(&self, msg: &str) {
+        println!("\n  {}{}{}", YELLOW, msg, RESET);
+    }
+
     pub fn goodbye(&self) {
         println!("\n  {}Goodbye.{}", DIM, RESET);
+    }
+}
+
+fn short_model_name() -> String {
+    let model = std::env::var("OPUS_MODEL").unwrap_or_default();
+    if model.is_empty() {
+        return "opus".to_string();
+    }
+    // Extract the short name: "claude-opus-4-5-20250918" -> "opus-4-5"
+    model
+        .strip_prefix("claude-")
+        .unwrap_or(&model)
+        .split('-')
+        .take_while(|s| s.parse::<u32>().is_ok() || s.len() <= 6)
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn format_tokens(tokens: u32) -> String {
+    if tokens >= 1000 {
+        format!("{:.1}k", tokens as f64 / 1000.0)
+    } else {
+        tokens.to_string()
     }
 }
 
@@ -150,9 +192,15 @@ fn tool_input_summary(name: &str, input_json: &str) -> String {
 }
 
 fn shorten_path(path: &str) -> String {
-    let parts: Vec<&str> = path.split('/').collect();
-    if parts.len() <= 3 {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = if !home.is_empty() && path.starts_with(&home) {
+        format!("~{}", &path[home.len()..])
+    } else {
         path.to_string()
+    };
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() <= 4 {
+        path
     } else {
         format!(".../{}", parts[parts.len() - 3..].join("/"))
     }
@@ -177,5 +225,35 @@ fn truncate_result(s: &str, max: usize) -> String {
 }
 
 pub fn prompt_string() -> String {
-    format!("  {}>{} ", CYAN, RESET)
+    format!("  {}›{} ", CYAN, RESET)
+}
+
+/// Prompt user to approve a write tool execution.
+/// Shows the tool name and a summary of what it will do.
+pub fn prompt_approval(tool_name: &str, input: &serde_json::Value) -> bool {
+    let summary = match tool_name {
+        "bash" => input["command"]
+            .as_str()
+            .map(|c| truncate_line(c, 80))
+            .unwrap_or_default(),
+        "edit" | "write" => input["file_path"]
+            .as_str()
+            .map(|p| shorten_path(p))
+            .unwrap_or_default(),
+        _ => format!("{:?}", input),
+    };
+
+    println!();
+    println!(
+        "  {}{}{} {}{}{}",
+        BOLD, tool_name, RESET, DIM, summary, RESET
+    );
+    print!("  {}Allow? [y/n]{} ", YELLOW, RESET);
+    let _ = std::io::stdout().flush();
+
+    let mut response = String::new();
+    if std::io::stdin().read_line(&mut response).is_err() {
+        return false;
+    }
+    matches!(response.trim().to_lowercase().as_str(), "y" | "yes")
 }
