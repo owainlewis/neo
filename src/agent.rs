@@ -70,6 +70,9 @@ pub async fn run_turn(
             break;
         }
 
+        // Clear old tool results before sending — the model already digested them
+        clear_stale_tool_results(&mut state.messages);
+
         // Stream model response
         let mut stream = provider
             .stream(&state.system_prompt, &state.messages, &tool_defs)
@@ -157,6 +160,30 @@ pub async fn run_turn(
         state.messages.push(Message::User {
             content: tool_results_content,
         });
+    }
+}
+
+/// Replace all tool result content with "[cleared]" except in the last user message.
+/// The model has already incorporated old results into its subsequent reasoning —
+/// the raw file contents, bash output, etc. are dead weight.
+fn clear_stale_tool_results(messages: &mut [Message]) {
+    let last_user_idx = messages
+        .iter()
+        .rposition(|m| matches!(m, Message::User { .. }));
+
+    for (i, message) in messages.iter_mut().enumerate() {
+        if Some(i) == last_user_idx {
+            continue;
+        }
+        if let Message::User { content } = message {
+            for block in content.iter_mut() {
+                if let ContentBlock::ToolResult { content, .. } = block {
+                    if *content != "[cleared]" {
+                        *content = "[cleared]".to_string();
+                    }
+                }
+            }
+        }
     }
 }
 

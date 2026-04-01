@@ -5,7 +5,6 @@ use crate::model::types::*;
 use futures::Stream;
 use std::pin::Pin;
 
-#[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait Provider: Send + Sync {
     async fn stream(

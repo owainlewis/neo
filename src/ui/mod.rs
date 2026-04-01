@@ -110,7 +110,7 @@ impl Renderer {
         );
         println!(
             "  {}{}{} {}{}{}{}",
-            glyph_color, glyph, RESET, DIM, truncate_result(result, 200), RESET, time_str,
+            glyph_color, glyph, RESET, DIM, truncate_line(result, 200), RESET, time_str,
         );
     }
 
@@ -215,14 +215,7 @@ fn truncate_line(s: &str, max: usize) -> String {
     }
 }
 
-fn truncate_result(s: &str, max: usize) -> String {
-    let first_line = s.lines().next().unwrap_or(s);
-    if first_line.len() <= max {
-        first_line.to_string()
-    } else {
-        format!("{}…", &first_line[..max])
-    }
-}
+// truncate_result was identical to truncate_line — use truncate_line instead
 
 pub fn prompt_string() -> String {
     format!("  {}›{} ", CYAN, RESET)

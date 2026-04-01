@@ -52,11 +52,7 @@ async fn main() {
 
                 agent::run_turn(&mut state, &provider, &registry, &mut event_handler).await;
             }
-            Err(rustyline::error::ReadlineError::Interrupted) => {
-                renderer.goodbye();
-                break;
-            }
-            Err(rustyline::error::ReadlineError::Eof) => {
+            Err(rustyline::error::ReadlineError::Interrupted | rustyline::error::ReadlineError::Eof) => {
                 renderer.goodbye();
                 break;
             }
