@@ -513,7 +513,7 @@ impl App {
             if self.usage.input_tokens > 0 {
                 parts.push(Span::styled(
                     format!(
-                        " · {}in {}out",
+                        " · {} in {} out",
                         format_tokens(self.usage.input_tokens),
                         format_tokens(self.usage.output_tokens),
                     ),
@@ -581,7 +581,7 @@ impl App {
         let mut parts = vec![short_model_name(&self.model)];
         if self.usage.input_tokens > 0 {
             parts.push(format!(
-                "{}in {}out",
+                "{} in {} out",
                 format_tokens(self.usage.input_tokens),
                 format_tokens(self.usage.output_tokens),
             ));
@@ -654,9 +654,9 @@ fn truncate_line(s: &str, max: usize) -> String {
 
 fn format_tokens(tokens: u32) -> String {
     if tokens >= 1000 {
-        format!("{:.1}k ", tokens as f64 / 1000.0)
+        format!("{:.1}k", tokens as f64 / 1000.0)
     } else {
-        format!("{} ", tokens)
+        tokens.to_string()
     }
 }
 
