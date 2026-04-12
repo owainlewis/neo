@@ -269,6 +269,59 @@ impl App {
                     self.should_quit = true;
                     return None;
                 }
+                KeyCode::Char('w') if self.mode == Mode::Input => {
+                    // Delete word backward
+                    if self.cursor > 0 {
+                        let mut end = self.cursor;
+                        // Skip trailing whitespace
+                        while end > 0 && self.input.as_bytes().get(end - 1) == Some(&b' ') {
+                            end -= 1;
+                        }
+                        // Delete back to word boundary
+                        let mut start = end;
+                        while start > 0 {
+                            let b = self.input.as_bytes()[start - 1];
+                            if b == b' ' || b == b'\n' {
+                                break;
+                            }
+                            start -= 1;
+                        }
+                        if start == end {
+                            // Was only whitespace/newlines — delete those
+                            start = end.saturating_sub(1);
+                            // Back up over the whitespace/newline we skipped past
+                            while start > 0 {
+                                let b = self.input.as_bytes()[start - 1];
+                                if b != b' ' && b != b'\n' {
+                                    break;
+                                }
+                                start -= 1;
+                            }
+                        }
+                        self.input.drain(start..self.cursor);
+                        self.cursor = start;
+                    }
+                    return None;
+                }
+                KeyCode::Char('u') if self.mode == Mode::Input => {
+                    // Kill line backward (cursor to start of current line)
+                    let line_start = self.input[..self.cursor]
+                        .rfind('\n')
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
+                    self.input.drain(line_start..self.cursor);
+                    self.cursor = line_start;
+                    return None;
+                }
+                KeyCode::Char('k') if self.mode == Mode::Input => {
+                    // Kill to end of line
+                    let line_end = self.input[self.cursor..]
+                        .find('\n')
+                        .map(|p| self.cursor + p)
+                        .unwrap_or(self.input.len());
+                    self.input.drain(self.cursor..line_end);
+                    return None;
+                }
                 _ => {}
             }
         }
