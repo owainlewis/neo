@@ -423,7 +423,8 @@ impl App {
 
     fn input_height(&self) -> u16 {
         let line_count = self.input.chars().filter(|c| *c == '\n').count() + 1;
-        (line_count as u16).max(1)
+        // Add 1 for top padding row
+        (line_count as u16).max(1) + 1
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
@@ -432,12 +433,14 @@ impl App {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(1),              // output area
-                Constraint::Length(input_h),      // input grows with content
+                Constraint::Length(1),            // separator
+                Constraint::Length(input_h),      // input
             ])
             .split(frame.area());
 
         self.draw_output(frame, chunks[0]);
-        self.draw_input(frame, chunks[1]);
+        self.draw_separator(frame, chunks[1]);
+        self.draw_input(frame, chunks[2]);
     }
 
     fn draw_output(&self, frame: &mut Frame, area: Rect) {
@@ -451,7 +454,30 @@ impl App {
         frame.render_widget(paragraph, area);
     }
 
+    fn draw_separator(&self, frame: &mut Frame, area: Rect) {
+        let sep = "─".repeat(area.width as usize);
+        let line = Paragraph::new(Line::from(Span::styled(
+            sep,
+            Style::default().fg(Color::Rgb(50, 50, 50)),
+        )));
+        frame.render_widget(line, area);
+    }
+
     fn draw_input(&mut self, frame: &mut Frame, area: Rect) {
+        let input_bg = Color::Rgb(25, 25, 30);
+
+        // Fill entire input area with background
+        let bg_block = Block::default().style(Style::default().bg(input_bg));
+        frame.render_widget(bg_block, area);
+
+        // Content starts 1 row down (padding row)
+        let content_area = Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height.saturating_sub(1),
+        };
+
         if self.mode == Mode::Approval {
             if let Some(ref req) = self.pending_approval {
                 let line = Line::from(vec![
@@ -464,24 +490,22 @@ impl App {
                         format!("({}) ", req.summary),
                         Style::default().fg(Color::Yellow).dim(),
                     ),
-                    Span::styled(
-                        "[y/n]",
-                        Style::default().fg(Color::Yellow),
-                    ),
+                    Span::styled("[y/n]", Style::default().fg(Color::Yellow)),
                 ]);
-                frame.render_widget(Paragraph::new(line), area);
+                frame.render_widget(
+                    Paragraph::new(line).style(Style::default().bg(input_bg)),
+                    content_area,
+                );
                 return;
             }
         }
 
         if self.mode == Mode::Processing {
             self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
-            let mut parts = vec![
-                Span::styled(
-                    format!("  {} ", SPINNER_FRAMES[self.spinner_frame]),
-                    Style::default().fg(Color::Cyan),
-                ),
-            ];
+            let mut parts = vec![Span::styled(
+                format!("  {} ", SPINNER_FRAMES[self.spinner_frame]),
+                Style::default().fg(Color::Cyan),
+            )];
             parts.push(Span::styled(
                 short_model_name(&self.model),
                 Style::default().dim(),
@@ -497,9 +521,15 @@ impl App {
                 ));
             }
             if self.plan_mode {
-                parts.push(Span::styled(" PLAN", Style::default().fg(Color::Yellow).bold()));
+                parts.push(Span::styled(
+                    " PLAN",
+                    Style::default().fg(Color::Yellow).bold(),
+                ));
             }
-            frame.render_widget(Paragraph::new(Line::from(parts)), area);
+            frame.render_widget(
+                Paragraph::new(Line::from(parts)).style(Style::default().bg(input_bg)),
+                content_area,
+            );
             return;
         }
 
@@ -513,12 +543,12 @@ impl App {
                 Span::styled(prefix, Style::default().fg(Color::Cyan)),
                 Span::raw(text.to_string()),
             ];
-            // Right-align status on the first line when single-line
+            // Right-align status on first line when single-line
             if i == 0 && input_lines.len() == 1 {
                 let status = self.build_status_string();
                 if !status.is_empty() {
                     let used = 4 + text.chars().count();
-                    let width = area.width as usize;
+                    let width = content_area.width as usize;
                     if used + status.len() + 2 < width {
                         spans.push(Span::raw(" ".repeat(width - used - status.len())));
                         spans.push(Span::styled(status, Style::default().dim()));
@@ -528,7 +558,10 @@ impl App {
             lines.push(Line::from(spans));
         }
 
-        frame.render_widget(Paragraph::new(lines), area);
+        frame.render_widget(
+            Paragraph::new(lines).style(Style::default().bg(input_bg)),
+            content_area,
+        );
 
         // Position cursor in multiline input
         let text_before_cursor = &self.input[..self.cursor];
@@ -538,7 +571,10 @@ impl App {
             Some(pos) => text_before_cursor[pos + 1..].chars().count() as u16,
             None => text_before_cursor.chars().count() as u16,
         };
-        frame.set_cursor_position((area.x + 4 + col, area.y + cursor_line));
+        frame.set_cursor_position((
+            content_area.x + 4 + col,
+            content_area.y + cursor_line,
+        ));
     }
 
     fn build_status_string(&self) -> String {
