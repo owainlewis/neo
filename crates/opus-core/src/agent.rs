@@ -67,6 +67,10 @@ pub async fn run_turn(
     event_handler: &mut (dyn FnMut(&AgentEvent) + Send),
 ) {
     let mut turn_count = 0;
+    // Only clear tool results from messages that existed *before* this
+    // run_turn invocation. Tool results generated within this run (multi-turn
+    // tool loops) are preserved so the model retains context mid-loop.
+    let preserve_from = state.messages.len();
 
     loop {
         turn_count += 1;
@@ -75,7 +79,7 @@ pub async fn run_turn(
             break;
         }
 
-        clear_stale_tool_results(&mut state.messages);
+        clear_stale_tool_results(&mut state.messages, preserve_from);
         hooks.transform_context(&mut state.messages).await;
 
         let system = hooks
@@ -177,6 +181,14 @@ pub async fn run_turn(
         let results = registry.execute_tools(&tool_uses, hooks).await;
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
+        // Accumulate token usage from tools that run subagents
+        for result in &results {
+            if let Some(ref u) = result.usage {
+                state.total_usage.input_tokens += u.input_tokens;
+                state.total_usage.output_tokens += u.output_tokens;
+            }
+        }
+
         let mut tool_results_content: Vec<ContentBlock> = Vec::new();
         for (i, result) in results.iter().enumerate() {
             let tu = tool_uses
@@ -205,15 +217,11 @@ pub async fn run_turn(
     }
 }
 
-fn clear_stale_tool_results(messages: &mut [Message]) {
-    let last_user_idx = messages
-        .iter()
-        .rposition(|m| matches!(m, Message::User { .. }));
-
-    for (i, message) in messages.iter_mut().enumerate() {
-        if Some(i) == last_user_idx {
-            continue;
-        }
+/// Clear tool result content from messages that predate the current run_turn
+/// invocation. Messages from `preserve_from` onward are left intact so the
+/// model retains context across multi-turn tool loops within a single run.
+fn clear_stale_tool_results(messages: &mut [Message], preserve_from: usize) {
+    for message in messages[..preserve_from].iter_mut() {
         if let Message::User { content } = message {
             for block in content.iter_mut() {
                 if let ContentBlock::ToolResult { content, .. } = block {

@@ -16,6 +16,8 @@ pub struct SubagentSpec {
     pub system_prompt: Option<String>,
     /// Maximum tool-call loops before the subagent gives up.
     pub max_turns: usize,
+    /// Timeout in seconds. The subagent is killed if it exceeds this.
+    pub timeout_secs: u64,
 }
 
 /// Opaque handle to a running subagent. Call `join()` to await its result.
@@ -87,6 +89,7 @@ impl SubagentSpawner for DefaultSpawner {
             .unwrap_or_else(|| self.system_prompt.clone());
         let task = spec.task;
         let max_turns = spec.max_turns;
+        let timeout = std::time::Duration::from_secs(spec.timeout_secs);
 
         let handle = tokio::spawn(async move {
             let mut state = AgentState::new(max_turns, system_prompt);
@@ -96,19 +99,30 @@ impl SubagentSpawner for DefaultSpawner {
             let mut error: Option<String> = None;
             let hooks = NoHooks;
 
-            run_turn(
-                &mut state,
-                &*provider,
-                &*registry,
-                &hooks,
-                &mut |ev| match ev {
-                    AgentEvent::TextDelta(t) => output.push_str(t),
-                    AgentEvent::Text(t) => output.push_str(t),
-                    AgentEvent::Error(e) => error = Some(e.clone()),
-                    _ => {}
-                },
+            let timed_out = tokio::time::timeout(
+                timeout,
+                run_turn(
+                    &mut state,
+                    &*provider,
+                    &*registry,
+                    &hooks,
+                    &mut |ev| match ev {
+                        AgentEvent::TextDelta(t) => output.push_str(t),
+                        AgentEvent::Text(t) => output.push_str(t),
+                        AgentEvent::Error(e) => error = Some(e.clone()),
+                        _ => {}
+                    },
+                ),
             )
             .await;
+
+            if timed_out.is_err() {
+                return SubagentResult {
+                    text: format!("Subagent timed out after {}s", timeout.as_secs()),
+                    usage: state.total_usage,
+                    is_error: true,
+                };
+            }
 
             match error {
                 Some(e) => SubagentResult {

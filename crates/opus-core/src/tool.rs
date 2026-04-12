@@ -1,5 +1,5 @@
 use crate::hooks::{HookDecision, Hooks};
-use crate::types::{ToolDefinition, ToolResult, ToolUseBlock};
+use crate::types::{ToolDefinition, ToolOutput, ToolResult, ToolUseBlock};
 
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
@@ -8,7 +8,7 @@ pub trait Tool: Send + Sync {
     fn input_schema(&self) -> serde_json::Value;
     fn is_read_only(&self) -> bool;
 
-    async fn execute(&self, input: serde_json::Value) -> Result<String, String>;
+    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, String>;
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
@@ -73,6 +73,7 @@ impl Registry {
                         tool_use_id: tu.id.clone(),
                         content: format!("Unknown tool: '{}'", tu.name),
                         is_error: true,
+                        usage: None,
                     });
                     i += 1;
                 }
@@ -128,17 +129,20 @@ async fn run_one(tool_use: &ToolUseBlock, tool: &dyn Tool, hooks: &dyn Hooks) ->
             tool_use_id: tool_use.id.clone(),
             content: reason,
             is_error: true,
+            usage: None,
         },
         HookDecision::Allow => match tool.execute(tool_use.input.clone()).await {
-            Ok(content) => ToolResult {
+            Ok(output) => ToolResult {
                 tool_use_id: tool_use.id.clone(),
-                content,
+                content: output.content,
                 is_error: false,
+                usage: output.usage,
             },
             Err(e) => ToolResult {
                 tool_use_id: tool_use.id.clone(),
                 content: e,
                 is_error: true,
+                usage: None,
             },
         },
     };

@@ -1,4 +1,4 @@
-use opus_core::Tool;
+use opus_core::{Tool, ToolOutput};
 use serde_json::json;
 use tokio::process::Command;
 
@@ -35,7 +35,7 @@ impl Tool for BashTool {
         false
     }
 
-    async fn execute(&self, input: serde_json::Value) -> Result<String, String> {
+    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, String> {
         let command = input["command"]
             .as_str()
             .ok_or("Missing 'command' field")?;
@@ -66,11 +66,11 @@ impl Tool for BashTool {
                 }
 
                 if output.status.success() {
-                    Ok(if result.is_empty() {
+                    Ok(ToolOutput::text(if result.is_empty() {
                         "(no output)".to_string()
                     } else {
                         result
-                    })
+                    }))
                 } else {
                     Err(format!(
                         "Exit code {}\n{}",

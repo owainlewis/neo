@@ -1,4 +1,4 @@
-use opus_core::Tool;
+use opus_core::{Tool, ToolOutput};
 use serde_json::json;
 use std::path::Path;
 
@@ -35,7 +35,7 @@ impl Tool for WriteTool {
         false
     }
 
-    async fn execute(&self, input: serde_json::Value) -> Result<String, String> {
+    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, String> {
         let file_path = input["file_path"]
             .as_str()
             .ok_or("Missing 'file_path' field")?;
@@ -54,6 +54,9 @@ impl Tool for WriteTool {
             .map_err(|e| format!("Failed to write {}: {}", file_path, e))?;
 
         let line_count = content.lines().count();
-        Ok(format!("Wrote {} ({} lines)", file_path, line_count))
+        Ok(ToolOutput::text(format!(
+            "Wrote {} ({} lines)",
+            file_path, line_count
+        )))
     }
 }

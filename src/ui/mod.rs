@@ -10,7 +10,7 @@ const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦
 pub struct ApprovalRequest {
     pub tool_name: String,
     pub summary: String,
-    pub responder: std::sync::mpsc::Sender<bool>,
+    pub responder: tokio::sync::oneshot::Sender<bool>,
 }
 
 // --- App state ---

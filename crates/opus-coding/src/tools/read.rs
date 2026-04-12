@@ -1,4 +1,4 @@
-use opus_core::Tool;
+use opus_core::{Tool, ToolOutput};
 use serde_json::json;
 
 pub struct ReadTool;
@@ -38,7 +38,7 @@ impl Tool for ReadTool {
         true
     }
 
-    async fn execute(&self, input: serde_json::Value) -> Result<String, String> {
+    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, String> {
         let file_path = input["file_path"]
             .as_str()
             .ok_or("Missing 'file_path' field")?;
@@ -60,9 +60,9 @@ impl Tool for ReadTool {
         }
 
         if result.is_empty() {
-            Ok("(empty file)".to_string())
+            Ok(ToolOutput::text("(empty file)".to_string()))
         } else {
-            Ok(result)
+            Ok(ToolOutput::text(result))
         }
     }
 }

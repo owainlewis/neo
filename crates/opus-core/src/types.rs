@@ -51,11 +51,37 @@ pub struct ToolUseBlock {
     pub input: serde_json::Value,
 }
 
+/// Return value from `Tool::execute`. Most tools return `ToolOutput::text(...)`;
+/// tools that consume tokens (e.g. dispatch/subagents) attach usage.
+#[derive(Debug, Clone)]
+pub struct ToolOutput {
+    pub content: String,
+    pub usage: Option<Usage>,
+}
+
+impl ToolOutput {
+    pub fn text(content: String) -> Self {
+        Self {
+            content,
+            usage: None,
+        }
+    }
+    pub fn with_usage(content: String, usage: Usage) -> Self {
+        Self {
+            content,
+            usage: Some(usage),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     pub tool_use_id: String,
     pub content: String,
     pub is_error: bool,
+    /// Token usage from tools that run subagents. Accumulated into
+    /// `AgentState.total_usage` by the agent loop.
+    pub usage: Option<Usage>,
 }
 
 // --- Token usage ---

@@ -1,4 +1,4 @@
-use opus_core::Tool;
+use opus_core::{Tool, ToolOutput};
 use serde_json::json;
 
 pub struct EditTool;
@@ -38,7 +38,7 @@ impl Tool for EditTool {
         false
     }
 
-    async fn execute(&self, input: serde_json::Value) -> Result<String, String> {
+    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, String> {
         let file_path = input["file_path"]
             .as_str()
             .ok_or("Missing 'file_path' field")?;
@@ -75,6 +75,6 @@ impl Tool for EditTool {
             .await
             .map_err(|e| format!("Failed to write {}: {}", file_path, e))?;
 
-        Ok(format!("Successfully edited {}", file_path))
+        Ok(ToolOutput::text(format!("Successfully edited {}", file_path)))
     }
 }

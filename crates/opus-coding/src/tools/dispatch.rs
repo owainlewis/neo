@@ -1,4 +1,4 @@
-use opus_core::{SubagentSpec, SubagentSpawner, Tool};
+use opus_core::{SubagentSpec, SubagentSpawner, Tool, ToolOutput, Usage};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -49,6 +49,10 @@ impl Tool for DispatchTool {
                 "max_turns_per_task": {
                     "type": "integer",
                     "description": "Maximum tool-call loops per worker (default: 20)"
+                },
+                "timeout_secs": {
+                    "type": "integer",
+                    "description": "Timeout in seconds per worker (default: 300)"
                 }
             },
             "required": ["tasks"]
@@ -59,7 +63,7 @@ impl Tool for DispatchTool {
         false
     }
 
-    async fn execute(&self, input: serde_json::Value) -> Result<String, String> {
+    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, String> {
         let tasks = input["tasks"]
             .as_array()
             .ok_or("Missing 'tasks' array")?;
@@ -69,6 +73,7 @@ impl Tool for DispatchTool {
         }
 
         let max_turns = input["max_turns_per_task"].as_u64().unwrap_or(20) as usize;
+        let timeout_secs = input["timeout_secs"].as_u64().unwrap_or(300);
 
         // Parse task descriptions
         let descriptions: Vec<String> = tasks
@@ -89,6 +94,7 @@ impl Tool for DispatchTool {
                     task: desc.clone(),
                     system_prompt: None,
                     max_turns,
+                    timeout_secs,
                 })
                 .await;
             handles.push(handle);
@@ -100,14 +106,13 @@ impl Tool for DispatchTool {
             results.push(handle.join().await);
         }
 
-        // Format output
-        let mut total_input = 0u32;
-        let mut total_output = 0u32;
+        // Format output and accumulate usage
+        let mut total_usage = Usage::default();
         let mut output = format!("Dispatched {} workers\n", results.len());
 
         for (i, (desc, result)) in descriptions.iter().zip(results.iter()).enumerate() {
-            total_input += result.usage.input_tokens;
-            total_output += result.usage.output_tokens;
+            total_usage.input_tokens += result.usage.input_tokens;
+            total_usage.output_tokens += result.usage.output_tokens;
 
             output.push_str(&format!("\n## Worker {} — {}\n", i + 1, desc));
             if result.is_error {
@@ -122,9 +127,9 @@ impl Tool for DispatchTool {
 
         output.push_str(&format!(
             "\n---\nTotal subagent usage: {} input, {} output tokens",
-            total_input, total_output
+            total_usage.input_tokens, total_usage.output_tokens
         ));
 
-        Ok(output)
+        Ok(ToolOutput::with_usage(output, total_usage))
     }
 }

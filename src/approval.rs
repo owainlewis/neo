@@ -17,7 +17,7 @@ impl Hooks for ApprovalHook {
             return HookDecision::Allow;
         }
 
-        let (resp_tx, resp_rx) = std::sync::mpsc::channel();
+        let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
         let summary = ui::tool_input_summary(
             &call.name,
             &serde_json::to_string(&call.input).unwrap_or_default(),
@@ -28,8 +28,8 @@ impl Hooks for ApprovalHook {
             responder: resp_tx,
         });
 
-        // Block the current async task until the UI sends back a response.
-        let approved = tokio::task::block_in_place(|| resp_rx.recv().unwrap_or(false));
+        // Await the UI response without blocking the Tokio runtime.
+        let approved = resp_rx.await.unwrap_or(false);
 
         if approved {
             HookDecision::Allow
