@@ -104,6 +104,7 @@ async fn main() {
     // Spawn agent task
     let agent_event_tx = event_tx.clone();
     let agent_provider = provider.clone();
+    let agent_plan_enabled = plan_enabled.clone();
     tokio::spawn(async move {
         let mut state = AgentState::new(max_turns, system_prompt);
 
@@ -117,14 +118,14 @@ async fn main() {
                     continue;
                 }
                 "/plan" => {
-                    plan_enabled.store(true, Ordering::Relaxed);
+                    agent_plan_enabled.store(true, Ordering::Relaxed);
                     let _ = agent_event_tx.send(AgentEvent::Info(
                         "Plan mode — read-only tools only. Use /execute to switch back.".into(),
                     ));
                     continue;
                 }
                 "/execute" => {
-                    plan_enabled.store(false, Ordering::Relaxed);
+                    agent_plan_enabled.store(false, Ordering::Relaxed);
                     let _ =
                         agent_event_tx.send(AgentEvent::Info("Execute mode — all tools.".into()));
                     continue;
@@ -177,6 +178,7 @@ async fn main() {
     // Initialize terminal
     let mut terminal = ratatui::init();
     let mut app = App::new(model_name);
+    app.set_plan_enabled(plan_enabled.clone());
 
     // Main event loop
     loop {
@@ -197,13 +199,6 @@ async fn main() {
 
                     if matches!(trimmed.as_str(), "/quit" | "/exit" | "/q") {
                         break;
-                    }
-
-                    if trimmed == "/plan" {
-                        app.plan_mode = true;
-                    }
-                    if trimmed == "/execute" {
-                        app.plan_mode = false;
                     }
 
                     app.echo_input(&trimmed);

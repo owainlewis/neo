@@ -2,6 +2,8 @@ use neo_core::{AgentEvent, Usage};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_RESULT_LINES: usize = 4;
@@ -40,9 +42,10 @@ pub struct App {
     streaming_buffer: String,
     streaming_start_idx: Option<usize>,
 
+    plan_enabled: Option<Arc<AtomicBool>>,
+
     pub model: String,
     pub usage: Usage,
-    pub plan_mode: bool,
     pub should_quit: bool,
 }
 
@@ -61,9 +64,9 @@ impl App {
             streaming: false,
             streaming_buffer: String::new(),
             streaming_start_idx: None,
+            plan_enabled: None,
             model,
             usage: Usage::default(),
-            plan_mode: false,
             should_quit: false,
         };
 
@@ -76,6 +79,35 @@ impl App {
         app.output.push(Line::from(""));
 
         app
+    }
+
+    /// Connect the plan mode toggle so the UI can flip it via Shift+Tab.
+    pub fn set_plan_enabled(&mut self, handle: Arc<AtomicBool>) {
+        self.plan_enabled = Some(handle);
+    }
+
+    pub fn is_plan_mode(&self) -> bool {
+        self.plan_enabled
+            .as_ref()
+            .map(|h| h.load(Ordering::Relaxed))
+            .unwrap_or(false)
+    }
+
+    fn toggle_plan_mode(&mut self) {
+        if let Some(ref handle) = self.plan_enabled {
+            let was = handle.load(Ordering::Relaxed);
+            handle.store(!was, Ordering::Relaxed);
+            let msg = if !was {
+                "Plan mode — read-only tools only"
+            } else {
+                "Execute mode — all tools"
+            };
+            self.output.push(Line::from(Span::styled(
+                format!("  {}", msg),
+                Style::default().dim(),
+            )));
+            self.scroll_offset = 0;
+        }
     }
 
     pub fn set_processing(&mut self) {
@@ -372,6 +404,12 @@ impl App {
             return None;
         }
 
+        // Shift+Tab toggles plan/execute mode (works in any non-approval mode)
+        if key.code == KeyCode::BackTab && self.mode != Mode::Approval {
+            self.toggle_plan_mode();
+            return None;
+        }
+
         if self.mode == Mode::Processing {
             match key.code {
                 KeyCode::PageUp => self.scroll_up(10),
@@ -539,12 +577,35 @@ impl App {
     }
 
     fn draw_separator(&self, frame: &mut Frame, area: Rect) {
-        let sep = "─".repeat(area.width as usize);
-        let line = Paragraph::new(Line::from(Span::styled(
-            sep,
-            Style::default().fg(Color::Rgb(50, 50, 50)),
-        )));
-        frame.render_widget(line, area);
+        let dim = Style::default().fg(Color::Rgb(50, 50, 50));
+        let w = area.width as usize;
+
+        let (label, label_style) = if self.is_plan_mode() {
+            (
+                " PLAN ",
+                Style::default().fg(Color::Yellow).bold(),
+            )
+        } else {
+            (
+                " EXECUTE ",
+                Style::default().fg(Color::Green).dim(),
+            )
+        };
+
+        let hint = " shift+tab to toggle ";
+        let label_len = label.len();
+        let hint_len = hint.len();
+        let left_sep = 2;
+        let right_sep = w.saturating_sub(left_sep + label_len + hint_len + 2);
+
+        let line = Line::from(vec![
+            Span::styled("─".repeat(left_sep), dim),
+            Span::styled(label, label_style),
+            Span::styled("─".repeat(right_sep), dim),
+            Span::styled(hint, Style::default().fg(Color::Rgb(60, 60, 70)).italic()),
+            Span::styled("─", dim),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
     }
 
     fn draw_input(&mut self, frame: &mut Frame, area: Rect) {
@@ -604,7 +665,7 @@ impl App {
                     Style::default().dim(),
                 ));
             }
-            if self.plan_mode {
+            if self.is_plan_mode() {
                 parts.push(Span::styled(
                     " PLAN",
                     Style::default().fg(Color::Yellow).bold(),
@@ -670,7 +731,7 @@ impl App {
                 format_tokens(self.usage.output_tokens),
             ));
         }
-        if self.plan_mode {
+        if self.is_plan_mode() {
             parts.push("PLAN".into());
         }
         parts.join(" · ")
