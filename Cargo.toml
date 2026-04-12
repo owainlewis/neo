@@ -1,15 +1,16 @@
+[workspace]
+members = ["crates/opus-core", "crates/opus-coding"]
+
 [package]
 name = "opus"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+opus-core = { path = "crates/opus-core" }
+opus-coding = { path = "crates/opus-coding" }
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["stream", "json"] }
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-futures = "0.3"
 async-trait = "0.1"
-tokio-stream = "0.1"
-glob = "0.3"
-rustyline = "15"
+ratatui = "0.29"
+crossterm = "0.28"

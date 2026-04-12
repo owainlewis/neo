@@ -1,6 +1,8 @@
 use std::path::Path;
 
-pub fn build_system_prompt(cwd: &str) -> String {
+/// The default system prompt for the coding bundle. Used when no custom prompt
+/// is supplied via CLI flag or config.
+pub fn coding_system_prompt(cwd: &str) -> String {
     let mut sections = Vec::new();
 
     sections.push(intro());
@@ -91,10 +93,7 @@ fn environment(cwd: &str) -> String {
 }
 
 fn chrono_free_date() -> String {
-    // Get date from system without adding a chrono dependency
-    let output = std::process::Command::new("date")
-        .arg("+%Y-%m-%d")
-        .output();
+    let output = std::process::Command::new("date").arg("+%Y-%m-%d").output();
     match output {
         Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         Err(_) => "unknown".to_string(),

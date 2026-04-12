@@ -1,8 +1,9 @@
-use crate::model::types::*;
-use crate::model::Provider;
-use crate::prompt;
-use crate::tools::Registry;
+use crate::hooks::Hooks;
+use crate::provider::Provider;
+use crate::tool::Registry;
+use crate::types::*;
 use futures::StreamExt;
+use std::collections::HashMap;
 
 pub struct AgentState {
     messages: Vec<Message>,
@@ -12,16 +13,12 @@ pub struct AgentState {
 }
 
 impl AgentState {
-    pub fn new(max_turns: usize) -> Self {
-        let cwd = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| ".".to_string());
-
+    pub fn new(max_turns: usize, system_prompt: String) -> Self {
         Self {
             messages: Vec::new(),
             max_turns,
             total_usage: Usage::default(),
-            system_prompt: prompt::build_system_prompt(&cwd),
+            system_prompt,
         }
     }
 
@@ -40,8 +37,12 @@ impl AgentState {
 }
 
 /// Events emitted by the agent loop for the UI to render.
+#[derive(Clone)]
 pub enum AgentEvent {
+    Thinking,
+    ResponseReceived,
     Text(String),
+    TextDelta(String),
     ToolComplete {
         name: String,
         input: String,
@@ -49,18 +50,22 @@ pub enum AgentEvent {
         is_error: bool,
         duration_ms: u64,
     },
-    Done { usage: Usage },
+    Done {
+        usage: Usage,
+    },
     Error(String),
+    Info(String),
+    Warning(String),
 }
 
-/// Run one turn of the agent loop: stream response, execute tools, repeat until done.
+/// Run one turn of the agent loop: stream response, execute tools, repeat.
 pub async fn run_turn(
     state: &mut AgentState,
     provider: &dyn Provider,
     registry: &Registry,
-    event_handler: &mut dyn FnMut(&AgentEvent),
+    hooks: &dyn Hooks,
+    event_handler: &mut (dyn FnMut(&AgentEvent) + Send),
 ) {
-    let tool_defs = registry.definitions();
     let mut turn_count = 0;
 
     loop {
@@ -70,42 +75,79 @@ pub async fn run_turn(
             break;
         }
 
-        // Clear old tool results before sending — the model already digested them
         clear_stale_tool_results(&mut state.messages);
+        hooks.transform_context(&mut state.messages).await;
 
-        // Stream model response
-        let mut stream = provider
-            .stream(&state.system_prompt, &state.messages, &tool_defs)
+        let system = hooks
+            .augment_system_prompt(state.system_prompt.clone())
             .await;
+        let tool_defs = hooks.filter_tools(registry.definitions()).await;
+
+        event_handler(&AgentEvent::Thinking);
+
+        // --- Stream the response ---
+        let request = StreamRequest {
+            system,
+            messages: state.messages.clone(),
+            tools: tool_defs,
+        };
+        let mut stream = provider.stream(request);
 
         let mut text_content = String::new();
         let mut tool_uses: Vec<ToolUseBlock> = Vec::new();
+        let mut tool_json_buffers: HashMap<String, String> = HashMap::new();
+        let mut usage = Usage::default();
+        let mut response_signaled = false;
 
         while let Some(event) = stream.next().await {
+            if !response_signaled {
+                event_handler(&AgentEvent::ResponseReceived);
+                response_signaled = true;
+            }
+
             match event {
-                StreamEvent::Text(t) => {
-                    text_content.push_str(&t);
+                ProviderEvent::TextDelta(delta) => {
+                    text_content.push_str(&delta);
+                    event_handler(&AgentEvent::TextDelta(delta));
                 }
-                StreamEvent::ToolUse(tu) => {
-                    tool_uses.push(tu);
+                ProviderEvent::ToolUseStart { id, name } => {
+                    tool_json_buffers.insert(id.clone(), String::new());
+                    tool_uses.push(ToolUseBlock {
+                        id,
+                        name,
+                        input: serde_json::Value::Null,
+                    });
                 }
-                StreamEvent::Done(usage) => {
-                    state.total_usage.input_tokens += usage.input_tokens;
-                    state.total_usage.output_tokens += usage.output_tokens;
+                ProviderEvent::ToolInputDelta { id, json_fragment } => {
+                    if let Some(buf) = tool_json_buffers.get_mut(&id) {
+                        buf.push_str(&json_fragment);
+                    }
                 }
-                StreamEvent::Error(e) => {
+                ProviderEvent::ToolUseEnd { id } => {
+                    if let Some(json_str) = tool_json_buffers.remove(&id) {
+                        if !json_str.is_empty() {
+                            let input: serde_json::Value =
+                                serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
+                            if let Some(tu) = tool_uses.iter_mut().find(|t| t.id == id) {
+                                tu.input = input;
+                            }
+                        }
+                    }
+                }
+                ProviderEvent::Done { usage: u, .. } => {
+                    usage = u;
+                }
+                ProviderEvent::Error(e) => {
                     event_handler(&AgentEvent::Error(e));
                     return;
                 }
             }
         }
 
-        // Emit buffered text as a single block
-        if !text_content.is_empty() {
-            event_handler(&AgentEvent::Text(text_content.clone()));
-        }
+        state.total_usage.input_tokens += usage.input_tokens;
+        state.total_usage.output_tokens += usage.output_tokens;
 
-        // Build assistant message content
+        // --- Build assistant message ---
         let mut assistant_content: Vec<ContentBlock> = Vec::new();
         if !text_content.is_empty() {
             assistant_content.push(ContentBlock::Text { text: text_content });
@@ -130,9 +172,9 @@ pub async fn run_turn(
             break;
         }
 
-        // Execute tools and emit combined events
+        // --- Execute tools ---
         let start = std::time::Instant::now();
-        let results = registry.execute_tools(&tool_uses).await;
+        let results = registry.execute_tools(&tool_uses, hooks).await;
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
         let mut tool_results_content: Vec<ContentBlock> = Vec::new();
@@ -163,9 +205,6 @@ pub async fn run_turn(
     }
 }
 
-/// Replace all tool result content with "[cleared]" except in the last user message.
-/// The model has already incorporated old results into its subsequent reasoning —
-/// the raw file contents, bash output, etc. are dead weight.
 fn clear_stale_tool_results(messages: &mut [Message]) {
     let last_user_idx = messages
         .iter()
@@ -191,6 +230,10 @@ fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}… ({} chars truncated)", &s[..max], s.len() - max)
+        let mut end = max;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}… ({} chars truncated)", &s[..end], s.len() - end)
     }
 }

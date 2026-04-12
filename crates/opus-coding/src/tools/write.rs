@@ -1,4 +1,4 @@
-use crate::tools::Tool;
+use opus_core::Tool;
 use serde_json::json;
 use std::path::Path;
 
@@ -43,7 +43,6 @@ impl Tool for WriteTool {
             .as_str()
             .ok_or("Missing 'content' field")?;
 
-        // Create parent directories if needed
         if let Some(parent) = Path::new(file_path).parent() {
             tokio::fs::create_dir_all(parent)
                 .await

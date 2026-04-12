@@ -1,4 +1,4 @@
-use crate::tools::Tool;
+use opus_core::Tool;
 use serde_json::json;
 
 pub struct EditTool;
@@ -53,7 +53,6 @@ impl Tool for EditTool {
             .await
             .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
 
-        // Count occurrences
         let count = content.matches(old_string).count();
 
         if count == 0 {

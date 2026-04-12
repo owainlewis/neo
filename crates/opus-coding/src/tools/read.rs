@@ -1,4 +1,4 @@
-use crate::tools::Tool;
+use opus_core::Tool;
 use serde_json::json;
 
 pub struct ReadTool;
@@ -46,10 +46,9 @@ impl Tool for ReadTool {
         let offset = input["offset"].as_u64().unwrap_or(1).max(1) as usize;
         let limit = input["limit"].as_u64().unwrap_or(2000) as usize;
 
-        let content =
-            tokio::fs::read_to_string(file_path)
-                .await
-                .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+        let content = tokio::fs::read_to_string(file_path)
+            .await
+            .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
 
         let lines: Vec<&str> = content.lines().collect();
         let start = (offset - 1).min(lines.len());

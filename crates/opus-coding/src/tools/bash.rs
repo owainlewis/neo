@@ -1,4 +1,4 @@
-use crate::tools::Tool;
+use opus_core::Tool;
 use serde_json::json;
 use tokio::process::Command;
 
