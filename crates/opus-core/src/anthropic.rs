@@ -146,6 +146,18 @@ async fn consume_sse(
             }
         }
     }
+
+    // Process any remaining partial line left in the buffer after the stream
+    // closes. If the final SSE data line arrived without a trailing newline,
+    // dropping it would lose the Done event and hang the consumer.
+    let remaining = buffer.trim();
+    if let Some(data) = remaining.strip_prefix("data: ") {
+        if let Some(event) =
+            parse_sse_event(data, &mut block_ids, &mut input_tokens, &mut output_tokens)
+        {
+            let _ = tx.send(event).await;
+        }
+    }
 }
 
 fn parse_sse_event(

@@ -1,4 +1,4 @@
-use opus_core::{HookDecision, Hooks, Message, ToolDefinition, ToolResult, ToolUseBlock};
+use opus_core::{Hooks, ToolDefinition};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -57,13 +57,4 @@ impl Hooks for PlanModeHook {
         tools.into_iter().filter(|t| t.read_only).collect()
     }
 
-    async fn before_tool_call(&self, _call: &ToolUseBlock) -> HookDecision {
-        HookDecision::Allow
-    }
-
-    async fn after_tool_call(&self, _call: &ToolUseBlock, result: ToolResult) -> ToolResult {
-        result
-    }
-
-    async fn transform_context(&self, _messages: &mut Vec<Message>) {}
 }
