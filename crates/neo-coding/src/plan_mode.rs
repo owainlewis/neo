@@ -56,5 +56,80 @@ impl Hooks for PlanModeHook {
         }
         tools.into_iter().filter(|t| t.read_only).collect()
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    fn tool_def(name: &str, read_only: bool) -> ToolDefinition {
+        ToolDefinition {
+            name: name.into(),
+            description: "test".into(),
+            input_schema: serde_json::json!({}),
+            read_only,
+        }
+    }
+
+    #[tokio::test]
+    async fn disabled_passes_prompt_through() {
+        let hook = PlanModeHook::new();
+        let result = hook.augment_system_prompt("base".into()).await;
+        assert_eq!(result, "base");
+    }
+
+    #[tokio::test]
+    async fn enabled_appends_plan_instructions() {
+        let hook = PlanModeHook::new();
+        hook.enabled().store(true, Ordering::Relaxed);
+        let result = hook.augment_system_prompt("base".into()).await;
+        assert!(result.starts_with("base"));
+        assert!(result.contains("PLAN"));
+        assert!(result.contains("Do NOT make any changes"));
+    }
+
+    #[tokio::test]
+    async fn disabled_returns_all_tools() {
+        let hook = PlanModeHook::new();
+        let tools = vec![tool_def("read", true), tool_def("bash", false)];
+        let filtered = hook.filter_tools(tools).await;
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn enabled_filters_to_read_only() {
+        let hook = PlanModeHook::new();
+        hook.enabled().store(true, Ordering::Relaxed);
+        let tools = vec![
+            tool_def("read", true),
+            tool_def("bash", false),
+            tool_def("edit", false),
+        ];
+        let filtered = hook.filter_tools(tools).await;
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "read");
+    }
+
+    #[tokio::test]
+    async fn toggle_at_runtime() {
+        let hook = PlanModeHook::new();
+        let handle = hook.enabled();
+
+        let tools = vec![tool_def("read", true), tool_def("bash", false)];
+
+        // Off — all tools
+        let filtered = hook.filter_tools(tools.clone()).await;
+        assert_eq!(filtered.len(), 2);
+
+        // On — read only
+        handle.store(true, Ordering::Relaxed);
+        let filtered = hook.filter_tools(tools.clone()).await;
+        assert_eq!(filtered.len(), 1);
+
+        // Off again
+        handle.store(false, Ordering::Relaxed);
+        let filtered = hook.filter_tools(tools).await;
+        assert_eq!(filtered.len(), 2);
+    }
 }

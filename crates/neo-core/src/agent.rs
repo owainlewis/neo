@@ -245,3 +245,125 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}… ({} chars truncated)", &s[..end], s.len() - end)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_result_msg(id: &str, content: &str) -> Message {
+        Message::User {
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: id.to_string(),
+                content: content.to_string(),
+                is_error: None,
+            }],
+        }
+    }
+
+    fn text_msg(text: &str) -> Message {
+        Message::User {
+            content: vec![ContentBlock::Text {
+                text: text.to_string(),
+            }],
+        }
+    }
+
+    fn assistant_msg(text: &str) -> Message {
+        Message::Assistant {
+            content: vec![ContentBlock::Text {
+                text: text.to_string(),
+            }],
+        }
+    }
+
+    fn get_tool_result_content(msg: &Message) -> Option<&str> {
+        if let Message::User { content } = msg {
+            for block in content {
+                if let ContentBlock::ToolResult { content, .. } = block {
+                    return Some(content);
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn clears_results_before_preserve_from() {
+        let mut msgs = vec![
+            text_msg("hello"),
+            assistant_msg("response"),
+            tool_result_msg("t1", "file contents here"),
+            assistant_msg("thanks"),
+            text_msg("next question"),
+        ];
+
+        clear_stale_tool_results(&mut msgs, 5);
+        assert_eq!(get_tool_result_content(&msgs[2]), Some("[cleared]"));
+    }
+
+    #[test]
+    fn preserves_results_after_preserve_from() {
+        let mut msgs = vec![
+            text_msg("old question"),
+            assistant_msg("old response"),
+            tool_result_msg("t1", "old result"),
+            // --- preserve_from = 3 ---
+            assistant_msg("new response"),
+            tool_result_msg("t2", "new result"),
+        ];
+
+        clear_stale_tool_results(&mut msgs, 3);
+        assert_eq!(get_tool_result_content(&msgs[2]), Some("[cleared]"));
+        assert_eq!(get_tool_result_content(&msgs[4]), Some("new result"));
+    }
+
+    #[test]
+    fn preserve_from_zero_clears_nothing() {
+        let mut msgs = vec![
+            tool_result_msg("t1", "keep me"),
+            tool_result_msg("t2", "keep me too"),
+        ];
+
+        clear_stale_tool_results(&mut msgs, 0);
+        assert_eq!(get_tool_result_content(&msgs[0]), Some("keep me"));
+        assert_eq!(get_tool_result_content(&msgs[1]), Some("keep me too"));
+    }
+
+    #[test]
+    fn already_cleared_not_double_cleared() {
+        let mut msgs = vec![tool_result_msg("t1", "[cleared]")];
+        clear_stale_tool_results(&mut msgs, 1);
+        assert_eq!(get_tool_result_content(&msgs[0]), Some("[cleared]"));
+    }
+
+    #[test]
+    fn assistant_messages_untouched() {
+        let mut msgs = vec![assistant_msg("hello")];
+        clear_stale_tool_results(&mut msgs, 1);
+        if let Message::Assistant { content } = &msgs[0] {
+            if let ContentBlock::Text { text } = &content[0] {
+                assert_eq!(text, "hello");
+            }
+        }
+    }
+
+    #[test]
+    fn truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_long_string() {
+        let result = truncate("hello world", 5);
+        assert!(result.starts_with("hello"));
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn truncate_unicode_boundary() {
+        // 'é' is 2 bytes in UTF-8
+        let result = truncate("café latte", 4);
+        // Should not panic, and should truncate at a valid boundary
+        assert!(result.len() > 0);
+    }
+}

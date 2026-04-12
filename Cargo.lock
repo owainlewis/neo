@@ -852,6 +852,7 @@ dependencies = [
  "async-trait",
  "neo-core",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

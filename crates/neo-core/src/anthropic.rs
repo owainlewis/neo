@@ -245,3 +245,149 @@ fn parse_sse_event(
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(data: &str, block_ids: &mut Vec<Option<String>>) -> Option<ProviderEvent> {
+        let mut input = 0u32;
+        let mut output = 0u32;
+        parse_sse_event(data, block_ids, &mut input, &mut output)
+    }
+
+    #[test]
+    fn text_delta() {
+        let mut ids = vec![];
+        let event = parse(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#,
+            &mut ids,
+        );
+        assert!(matches!(event, Some(ProviderEvent::TextDelta(t)) if t == "Hello"));
+    }
+
+    #[test]
+    fn tool_use_start() {
+        let mut ids = vec![];
+        let event = parse(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"bash"}}"#,
+            &mut ids,
+        );
+        assert!(matches!(event, Some(ProviderEvent::ToolUseStart { ref id, ref name }) if id == "t1" && name == "bash"));
+        assert_eq!(ids[0], Some("t1".to_string()));
+    }
+
+    #[test]
+    fn tool_input_delta_maps_to_correct_id() {
+        let mut ids = vec![Some("t1".into())];
+        let event = parse(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"cmd\":"}}"#,
+            &mut ids,
+        );
+        assert!(matches!(event, Some(ProviderEvent::ToolInputDelta { ref id, .. }) if id == "t1"));
+    }
+
+    #[test]
+    fn tool_use_end() {
+        let mut ids = vec![Some("t1".into())];
+        let event = parse(
+            r#"{"type":"content_block_stop","index":0}"#,
+            &mut ids,
+        );
+        assert!(matches!(event, Some(ProviderEvent::ToolUseEnd { ref id }) if id == "t1"));
+    }
+
+    #[test]
+    fn content_block_stop_for_text_returns_none() {
+        let mut ids = vec![None]; // index 0 was a text block
+        let event = parse(r#"{"type":"content_block_stop","index":0}"#, &mut ids);
+        assert!(event.is_none());
+    }
+
+    #[test]
+    fn message_start_captures_input_tokens() {
+        let mut ids = vec![];
+        let mut input = 0u32;
+        let mut output = 0u32;
+        let event = parse_sse_event(
+            r#"{"type":"message_start","message":{"usage":{"input_tokens":150}}}"#,
+            &mut ids,
+            &mut input,
+            &mut output,
+        );
+        assert!(event.is_none());
+        assert_eq!(input, 150);
+    }
+
+    #[test]
+    fn message_delta_emits_done_with_usage() {
+        let mut ids = vec![];
+        let mut input = 100u32;
+        let mut output = 0u32;
+        let event = parse_sse_event(
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}"#,
+            &mut ids,
+            &mut input,
+            &mut output,
+        );
+        match event {
+            Some(ProviderEvent::Done { usage, stop_reason }) => {
+                assert_eq!(usage.input_tokens, 100);
+                assert_eq!(usage.output_tokens, 42);
+                assert_eq!(stop_reason, StopReason::EndTurn);
+            }
+            _ => panic!("expected Done"),
+        }
+    }
+
+    #[test]
+    fn message_delta_tool_use_stop_reason() {
+        let mut ids = vec![];
+        let mut input = 0u32;
+        let mut output = 0u32;
+        let event = parse_sse_event(
+            r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":10}}"#,
+            &mut ids,
+            &mut input,
+            &mut output,
+        );
+        assert!(matches!(event, Some(ProviderEvent::Done { stop_reason: StopReason::ToolUse, .. })));
+    }
+
+    #[test]
+    fn ping_returns_none() {
+        let mut ids = vec![];
+        assert!(parse(r#"{"type":"ping"}"#, &mut ids).is_none());
+    }
+
+    #[test]
+    fn invalid_json_returns_none() {
+        let mut ids = vec![];
+        assert!(parse("not json at all", &mut ids).is_none());
+    }
+
+    #[test]
+    fn multiple_content_blocks_tracked_by_index() {
+        let mut ids = vec![];
+        // Text block at index 0
+        parse(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            &mut ids,
+        );
+        // Tool at index 1
+        parse(
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t1","name":"read"}}"#,
+            &mut ids,
+        );
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids[0], None);
+        assert_eq!(ids[1], Some("t1".into()));
+
+        // Delta on index 1 maps to t1
+        let event = parse(
+            r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}"#,
+            &mut ids,
+        );
+        assert!(matches!(event, Some(ProviderEvent::ToolInputDelta { ref id, .. }) if id == "t1"));
+    }
+}

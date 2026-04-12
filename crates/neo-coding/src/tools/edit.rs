@@ -78,3 +78,77 @@ impl Tool for EditTool {
         Ok(ToolOutput::text(format!("Successfully edited {}", file_path)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    async fn run_edit(content: &str, old: &str, new: &str) -> Result<ToolOutput, String> {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "{}", content).unwrap();
+        let path = f.path().to_str().unwrap().to_string();
+
+        EditTool
+            .execute(serde_json::json!({
+                "file_path": path,
+                "old_string": old,
+                "new_string": new,
+            }))
+            .await
+    }
+
+    #[tokio::test]
+    async fn successful_edit() {
+        let result = run_edit("hello world", "world", "rust").await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().content.contains("Successfully edited"));
+    }
+
+    #[tokio::test]
+    async fn old_string_not_found() {
+        let result = run_edit("hello world", "missing", "rust").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn old_string_not_unique() {
+        let result = run_edit("aaa bbb aaa", "aaa", "ccc").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("2 times"));
+    }
+
+    #[tokio::test]
+    async fn edit_preserves_surrounding_content() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "line1\nline2\nline3").unwrap();
+        let path = f.path().to_str().unwrap().to_string();
+
+        let _ = EditTool
+            .execute(serde_json::json!({
+                "file_path": path,
+                "old_string": "line2",
+                "new_string": "replaced",
+            }))
+            .await
+            .unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "line1\nreplaced\nline3");
+    }
+
+    #[tokio::test]
+    async fn nonexistent_file() {
+        let result = EditTool
+            .execute(serde_json::json!({
+                "file_path": "/tmp/neo_test_nonexistent_file_12345",
+                "old_string": "x",
+                "new_string": "y",
+            }))
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to read"));
+    }
+}

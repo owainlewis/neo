@@ -156,3 +156,179 @@ enum BatchItem<'a> {
     },
     Unknown(&'a ToolUseBlock),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hooks::NoHooks;
+    use crate::types::{ToolOutput, Usage};
+
+    // Mock read-only tool that returns its name
+    struct MockReadTool;
+
+    #[async_trait::async_trait]
+    impl Tool for MockReadTool {
+        fn name(&self) -> &str { "mock_read" }
+        fn description(&self) -> &str { "mock" }
+        fn input_schema(&self) -> serde_json::Value { serde_json::json!({}) }
+        fn is_read_only(&self) -> bool { true }
+        async fn execute(&self, _: serde_json::Value) -> Result<ToolOutput, String> {
+            Ok(ToolOutput::text("read_result".into()))
+        }
+    }
+
+    // Mock write tool
+    struct MockWriteTool;
+
+    #[async_trait::async_trait]
+    impl Tool for MockWriteTool {
+        fn name(&self) -> &str { "mock_write" }
+        fn description(&self) -> &str { "mock" }
+        fn input_schema(&self) -> serde_json::Value { serde_json::json!({}) }
+        fn is_read_only(&self) -> bool { false }
+        async fn execute(&self, _: serde_json::Value) -> Result<ToolOutput, String> {
+            Ok(ToolOutput::text("write_result".into()))
+        }
+    }
+
+    // Mock tool that returns usage
+    struct MockUsageTool;
+
+    #[async_trait::async_trait]
+    impl Tool for MockUsageTool {
+        fn name(&self) -> &str { "mock_usage" }
+        fn description(&self) -> &str { "mock" }
+        fn input_schema(&self) -> serde_json::Value { serde_json::json!({}) }
+        fn is_read_only(&self) -> bool { false }
+        async fn execute(&self, _: serde_json::Value) -> Result<ToolOutput, String> {
+            Ok(ToolOutput::with_usage("done".into(), Usage { input_tokens: 100, output_tokens: 50 }))
+        }
+    }
+
+    // Mock tool that always errors
+    struct MockErrorTool;
+
+    #[async_trait::async_trait]
+    impl Tool for MockErrorTool {
+        fn name(&self) -> &str { "mock_error" }
+        fn description(&self) -> &str { "mock" }
+        fn input_schema(&self) -> serde_json::Value { serde_json::json!({}) }
+        fn is_read_only(&self) -> bool { true }
+        async fn execute(&self, _: serde_json::Value) -> Result<ToolOutput, String> {
+            Err("something went wrong".into())
+        }
+    }
+
+    fn tool_use(id: &str, name: &str) -> ToolUseBlock {
+        ToolUseBlock { id: id.into(), name: name.into(), input: serde_json::json!({}) }
+    }
+
+    #[test]
+    fn definitions_returns_all_tools() {
+        let registry = Registry::new(vec![
+            Box::new(MockReadTool),
+            Box::new(MockWriteTool),
+        ]);
+        let defs = registry.definitions();
+        assert_eq!(defs.len(), 2);
+        assert!(defs[0].read_only);
+        assert!(!defs[1].read_only);
+    }
+
+    #[test]
+    fn write_tool_names_filters_correctly() {
+        let registry = Registry::new(vec![
+            Box::new(MockReadTool),
+            Box::new(MockWriteTool),
+        ]);
+        let names = registry.write_tool_names();
+        assert_eq!(names, vec!["mock_write"]);
+    }
+
+    #[test]
+    fn get_finds_tool_by_name() {
+        let registry = Registry::new(vec![Box::new(MockReadTool)]);
+        assert!(registry.get("mock_read").is_some());
+        assert!(registry.get("nonexistent").is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_unknown_tool_returns_error() {
+        let registry = Registry::new(vec![Box::new(MockReadTool)]);
+        let uses = vec![tool_use("t1", "nonexistent")];
+        let results = registry.execute_tools(&uses, &NoHooks).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_error);
+        assert!(results[0].content.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn execute_read_tool_succeeds() {
+        let registry = Registry::new(vec![Box::new(MockReadTool)]);
+        let uses = vec![tool_use("t1", "mock_read")];
+        let results = registry.execute_tools(&uses, &NoHooks).await;
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].is_error);
+        assert_eq!(results[0].content, "read_result");
+        assert!(results[0].usage.is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_tool_with_usage_propagates() {
+        let registry = Registry::new(vec![Box::new(MockUsageTool)]);
+        let uses = vec![tool_use("t1", "mock_usage")];
+        let results = registry.execute_tools(&uses, &NoHooks).await;
+        assert!(!results[0].is_error);
+        let usage = results[0].usage.as_ref().unwrap();
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
+    }
+
+    #[tokio::test]
+    async fn execute_error_tool_returns_error() {
+        let registry = Registry::new(vec![Box::new(MockErrorTool)]);
+        let uses = vec![tool_use("t1", "mock_error")];
+        let results = registry.execute_tools(&uses, &NoHooks).await;
+        assert!(results[0].is_error);
+        assert_eq!(results[0].content, "something went wrong");
+    }
+
+    #[tokio::test]
+    async fn execute_multiple_read_tools_concurrently() {
+        let registry = Registry::new(vec![Box::new(MockReadTool)]);
+        let uses = vec![
+            tool_use("t1", "mock_read"),
+            tool_use("t2", "mock_read"),
+            tool_use("t3", "mock_read"),
+        ];
+        let results = registry.execute_tools(&uses, &NoHooks).await;
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().all(|r| !r.is_error));
+    }
+
+    #[tokio::test]
+    async fn blocked_tool_returns_error_result() {
+        use crate::hooks::HookChain;
+        use std::sync::Arc;
+
+        struct BlockBash;
+
+        #[async_trait::async_trait]
+        impl crate::hooks::Hooks for BlockBash {
+            async fn before_tool_call(&self, call: &ToolUseBlock) -> HookDecision {
+                if call.name == "mock_write" {
+                    HookDecision::Block { reason: "denied".into() }
+                } else {
+                    HookDecision::Allow
+                }
+            }
+        }
+
+        let registry = Registry::new(vec![Box::new(MockWriteTool)]);
+        let hooks = HookChain::new().add(Arc::new(BlockBash));
+        let uses = vec![tool_use("t1", "mock_write")];
+        let results = registry.execute_tools(&uses, &hooks).await;
+        assert!(results[0].is_error);
+        assert_eq!(results[0].content, "denied");
+    }
+}
