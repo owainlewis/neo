@@ -13,14 +13,7 @@ Build the best Rust coding agent in the world.
 - [x] **Plan mode** — Read-only exploration mode via `PlanModeHook`
 - [x] **Write tool + permission system** — Approval prompts for non-read-only tools
 
-## Critical Fixes
-
-These were flagged in code review and should be addressed first.
-
-- [ ] **Replace `block_in_place` in ApprovalHook** — Use `tokio::sync::oneshot` and `.await` instead of blocking the Tokio worker thread. Current approach risks deadlock under thread pool saturation.
-- [ ] **Propagate subagent token usage to parent** — `DispatchTool` collects usage in its output string but never adds it to `AgentState.total_usage`. User sees incorrect cumulative counts.
-- [ ] **Add timeout to subagent tasks** — Wrap `run_turn` in `tokio::time::timeout` inside `DefaultSpawner::spawn`. A stuck API call currently blocks the dispatch tool indefinitely.
-- [ ] **Fix `clear_stale_tool_results` mid-loop clearing** — Within a single `run_turn` invocation (multi-turn tool loop), tool results from turn N are cleared before the API call for turn N+1. The model loses context about previous tool outputs mid-loop.
+- [x] **Critical fixes** — Async approval (oneshot), subagent usage propagation (`ToolOutput`), subagent timeout, mid-loop tool result preservation
 
 ## Phase 1: Core Robustness
 
