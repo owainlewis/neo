@@ -87,8 +87,20 @@ impl App {
         self.mode = Mode::Approval;
     }
 
+    /// Push a blank line only if the last line isn't already blank.
+    fn push_blank(&mut self) {
+        let last_is_blank = self
+            .output
+            .last()
+            .map(|l| l.spans.is_empty() || l.spans.iter().all(|s| s.content.trim().is_empty()))
+            .unwrap_or(true);
+        if !last_is_blank {
+            self.output.push(Line::from(""));
+        }
+    }
+
     pub fn echo_input(&mut self, text: &str) {
-        self.output.push(Line::from(""));
+        self.push_blank();
         for (i, line) in text.split('\n').enumerate() {
             let prefix = if i == 0 { "  > " } else { "  : " };
             self.output.push(Line::from(vec![
@@ -96,7 +108,7 @@ impl App {
                 Span::styled(line.to_string(), Style::default().fg(Color::White).bold()),
             ]));
         }
-        self.output.push(Line::from(""));
+        self.push_blank();
         self.scroll_offset = 0;
     }
 
@@ -123,7 +135,8 @@ impl App {
 
                 let start = self.streaming_start_idx.unwrap();
                 self.output.truncate(start);
-                for line in self.streaming_buffer.split('\n') {
+                let trimmed = self.streaming_buffer.trim_start_matches('\n');
+                for line in trimmed.split('\n') {
                     self.output.push(Line::from(Span::styled(
                         format!("  {}", line),
                         Style::default().fg(Color::Rgb(220, 220, 230)),
@@ -158,7 +171,7 @@ impl App {
                     ("●", Color::Green)
                 };
 
-                self.output.push(Line::from(""));
+                self.push_blank();
 
                 let mut header = vec![
                     Span::styled(
@@ -226,12 +239,12 @@ impl App {
                 self.end_streaming();
                 self.usage = usage;
                 self.mode = Mode::Input;
-                self.output.push(Line::from(""));
+                self.push_blank();
                 self.scroll_offset = 0;
             }
             AgentEvent::Error(e) => {
                 self.end_streaming();
-                self.output.push(Line::from(""));
+                self.push_blank();
                 self.output.push(Line::from(vec![
                     Span::styled("  ✗ ", Style::default().fg(Color::Red)),
                     Span::styled(e, Style::default().fg(Color::Red)),
