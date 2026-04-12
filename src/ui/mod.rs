@@ -124,16 +124,20 @@ impl App {
                 let start = self.streaming_start_idx.unwrap();
                 self.output.truncate(start);
                 for line in self.streaming_buffer.split('\n') {
-                    self.output
-                        .push(Line::from(format!("  {}", line)));
+                    self.output.push(Line::from(Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(Color::Rgb(220, 220, 230)),
+                    )));
                 }
                 self.scroll_offset = 0;
             }
             AgentEvent::Text(text) => {
                 self.end_streaming();
                 for line in text.lines() {
-                    self.output
-                        .push(Line::from(format!("  {}", line)));
+                    self.output.push(Line::from(Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(Color::Rgb(220, 220, 230)),
+                    )));
                 }
                 self.scroll_offset = 0;
             }
@@ -194,11 +198,11 @@ impl App {
                     self.output.push(Line::from(vec![
                         Span::styled(
                             format!("    {} ", connector),
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(Color::Rgb(60, 60, 70)),
                         ),
                         Span::styled(
                             truncate_line(line, 120),
-                            Style::default().dim(),
+                            Style::default().fg(Color::Rgb(150, 150, 165)),
                         ),
                     ]));
                 }
@@ -302,8 +306,12 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                // Shift+Enter inserts a newline for multiline input
+            KeyCode::Enter
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    || key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                // Shift+Enter or Alt+Enter inserts a newline for multiline input.
+                // Alt+Enter works in most terminals; Shift+Enter needs kitty protocol.
                 self.input.insert(self.cursor, '\n');
                 self.cursor += 1;
                 None
@@ -423,8 +431,8 @@ impl App {
 
     fn input_height(&self) -> u16 {
         let line_count = self.input.chars().filter(|c| *c == '\n').count() + 1;
-        // Add 1 for top padding row
-        (line_count as u16).max(1) + 1
+        // +2 for top and bottom padding rows
+        (line_count as u16).max(1) + 2
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
@@ -470,12 +478,12 @@ impl App {
         let bg_block = Block::default().style(Style::default().bg(input_bg));
         frame.render_widget(bg_block, area);
 
-        // Content starts 1 row down (padding row)
+        // Content sits between top and bottom padding rows
         let content_area = Rect {
             x: area.x,
             y: area.y + 1,
             width: area.width,
-            height: area.height.saturating_sub(1),
+            height: area.height.saturating_sub(2),
         };
 
         if self.mode == Mode::Approval {
