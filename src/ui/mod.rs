@@ -4,6 +4,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const MAX_RESULT_LINES: usize = 4;
 
 // --- Approval channel types ---
 
@@ -35,8 +36,6 @@ pub struct App {
     pending_approval: Option<ApprovalRequest>,
     spinner_frame: usize,
 
-    // Streaming state: accumulates text deltas and re-renders the
-    // streaming section on each delta.
     streaming: bool,
     streaming_buffer: String,
     streaming_start_idx: Option<usize>,
@@ -68,12 +67,11 @@ impl App {
             should_quit: false,
         };
 
-        // Banner
+        // Minimal banner
         app.output.push(Line::from(""));
         app.output.push(Line::from(vec![
-            Span::styled("  ⟩_ ", Style::default().bold()),
-            Span::styled("neo", Style::default().bold()),
-            Span::raw(" v0.1.0"),
+            Span::styled("  neo", Style::default().bold().fg(Color::White)),
+            Span::styled(" v0.1.0", Style::default().dim()),
         ]));
         app.output.push(Line::from(""));
 
@@ -90,10 +88,12 @@ impl App {
     }
 
     pub fn echo_input(&mut self, text: &str) {
+        self.output.push(Line::from(""));
         self.output.push(Line::from(vec![
-            Span::styled("  › ", Style::default().fg(Color::Cyan)),
-            Span::raw(text.to_string()),
+            Span::styled("  > ", Style::default().fg(Color::White).bold()),
+            Span::styled(text.to_string(), Style::default().fg(Color::White).bold()),
         ]));
+        self.output.push(Line::from(""));
         self.scroll_offset = 0;
     }
 
@@ -112,7 +112,6 @@ impl App {
             AgentEvent::ResponseReceived => {}
             AgentEvent::TextDelta(delta) => {
                 if !self.streaming {
-                    self.output.push(Line::from(""));
                     self.streaming = true;
                     self.streaming_buffer.clear();
                     self.streaming_start_idx = Some(self.output.len());
@@ -122,15 +121,16 @@ impl App {
                 let start = self.streaming_start_idx.unwrap();
                 self.output.truncate(start);
                 for line in self.streaming_buffer.split('\n') {
-                    self.output.push(Line::from(format!("  {}", line)));
+                    self.output
+                        .push(Line::from(format!("  {}", line)));
                 }
                 self.scroll_offset = 0;
             }
             AgentEvent::Text(text) => {
                 self.end_streaming();
-                self.output.push(Line::from(""));
                 for line in text.lines() {
-                    self.output.push(Line::from(format!("  {}", line)));
+                    self.output
+                        .push(Line::from(format!("  {}", line)));
                 }
                 self.scroll_offset = 0;
             }
@@ -141,33 +141,78 @@ impl App {
                 is_error,
                 duration_ms,
             } => {
-                let display_input = tool_input_summary(&name, &input);
+                self.end_streaming();
+                let summary = tool_input_summary(&name, &input);
 
-                self.output.push(Line::from(""));
-                self.output.push(Line::from(vec![
-                    Span::styled(format!("  {} ", name), Style::default().bold()),
-                    Span::styled(display_input, Style::default().dim()),
-                ]));
-
-                let (glyph, color) = if is_error {
+                // Tool header: ● ToolName(summary)
+                let (bullet, bullet_color) = if is_error {
                     ("✗", Color::Red)
                 } else {
-                    ("✓", Color::Green)
+                    ("●", Color::Green)
                 };
 
-                let mut spans = vec![
-                    Span::styled(format!("  {} ", glyph), Style::default().fg(color)),
-                    Span::styled(truncate_line(&result, 200), Style::default().dim()),
-                ];
+                self.output.push(Line::from(""));
 
-                if duration_ms > 1000 {
-                    spans.push(Span::styled(
-                        format!(" ({:.1}s)", duration_ms as f64 / 1000.0),
+                let mut header = vec![
+                    Span::styled(
+                        format!("  {} ", bullet),
+                        Style::default().fg(bullet_color),
+                    ),
+                    Span::styled(
+                        capitalize(&name),
+                        Style::default().fg(bullet_color).bold(),
+                    ),
+                ];
+                if !summary.is_empty() {
+                    header.push(Span::styled(
+                        format!("({})", summary),
                         Style::default().dim(),
                     ));
                 }
+                if duration_ms > 1000 {
+                    header.push(Span::styled(
+                        format!(" {:.1}s", duration_ms as f64 / 1000.0),
+                        Style::default().dim(),
+                    ));
+                }
+                self.output.push(Line::from(header));
 
-                self.output.push(Line::from(spans));
+                // Tool result lines with tree indent
+                let result_lines: Vec<&str> = result.lines().collect();
+                let show = result_lines.len().min(MAX_RESULT_LINES);
+                let hidden = result_lines.len().saturating_sub(MAX_RESULT_LINES);
+
+                for (i, line) in result_lines[..show].iter().enumerate() {
+                    let connector = if i == show - 1 && hidden == 0 {
+                        "└ "
+                    } else {
+                        "│ "
+                    };
+                    self.output.push(Line::from(vec![
+                        Span::styled(
+                            format!("    {} ", connector),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(
+                            truncate_line(line, 120),
+                            Style::default().dim(),
+                        ),
+                    ]));
+                }
+
+                if hidden > 0 {
+                    self.output.push(Line::from(vec![
+                        Span::styled(
+                            "    └ ".to_string(),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(
+                            format!("… +{} lines", hidden),
+                            Style::default().dim().italic(),
+                        ),
+                    ]));
+                }
+
                 self.scroll_offset = 0;
             }
             AgentEvent::Done { usage } => {
@@ -179,10 +224,11 @@ impl App {
             }
             AgentEvent::Error(e) => {
                 self.end_streaming();
-                self.output.push(Line::from(Span::styled(
-                    format!("  error: {}", e),
-                    Style::default().fg(Color::Red).bold(),
-                )));
+                self.output.push(Line::from(""));
+                self.output.push(Line::from(vec![
+                    Span::styled("  ✗ ", Style::default().fg(Color::Red)),
+                    Span::styled(e, Style::default().fg(Color::Red)),
+                ]));
                 self.mode = Mode::Input;
                 self.scroll_offset = 0;
             }
@@ -197,10 +243,10 @@ impl App {
                 self.scroll_offset = 0;
             }
             AgentEvent::Warning(msg) => {
-                self.output.push(Line::from(Span::styled(
-                    format!("  {}", msg),
-                    Style::default().fg(Color::Yellow),
-                )));
+                self.output.push(Line::from(vec![
+                    Span::styled("  ! ", Style::default().fg(Color::Yellow)),
+                    Span::styled(msg, Style::default().fg(Color::Yellow)),
+                ]));
                 self.mode = Mode::Input;
                 self.scroll_offset = 0;
             }
@@ -209,9 +255,7 @@ impl App {
 
     // --- Key handling ---
 
-    /// Returns Some(input) if the user submitted a line.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
-        // Ctrl+C / Ctrl+D always quit
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') | KeyCode::Char('d') => {
@@ -222,17 +266,12 @@ impl App {
             }
         }
 
-        // Approval mode: only y/n
         if self.mode == Mode::Approval {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     if let Some(req) = self.pending_approval.take() {
                         let _ = req.responder.send(true);
                     }
-                    self.output.push(Line::from(Span::styled(
-                        "  Approved",
-                        Style::default().fg(Color::Green).dim(),
-                    )));
                     self.mode = Mode::Processing;
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => {
@@ -240,7 +279,7 @@ impl App {
                         let _ = req.responder.send(false);
                     }
                     self.output.push(Line::from(Span::styled(
-                        "  Denied",
+                        "    denied",
                         Style::default().fg(Color::Red).dim(),
                     )));
                     self.mode = Mode::Processing;
@@ -250,7 +289,6 @@ impl App {
             return None;
         }
 
-        // Processing mode: only scroll
         if self.mode == Mode::Processing {
             match key.code {
                 KeyCode::PageUp => self.scroll_up(10),
@@ -260,7 +298,6 @@ impl App {
             return None;
         }
 
-        // Input mode
         match key.code {
             KeyCode::Enter => {
                 let input: String = self.input.drain(..).collect();
@@ -379,15 +416,13 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(1),    // output
-                Constraint::Length(1), // status bar
-                Constraint::Length(1), // input
+                Constraint::Min(1),    // output area
+                Constraint::Length(1), // input / status line
             ])
             .split(frame.area());
 
         self.draw_output(frame, chunks[0]);
-        self.draw_status(frame, chunks[1]);
-        self.draw_input(frame, chunks[2]);
+        self.draw_input(frame, chunks[1]);
     }
 
     fn draw_output(&self, frame: &mut Frame, area: Rect) {
@@ -401,60 +436,22 @@ impl App {
         frame.render_widget(paragraph, area);
     }
 
-    fn draw_status(&mut self, frame: &mut Frame, area: Rect) {
-        let mut parts: Vec<Span> = vec![
-            Span::styled(" neo", Style::default().bold().fg(Color::White)),
-            Span::styled(" · ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                short_model_name(&self.model),
-                Style::default().fg(Color::White),
-            ),
-        ];
-
-        if self.usage.input_tokens > 0 || self.usage.output_tokens > 0 {
-            parts.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
-            parts.push(Span::raw(format!(
-                "{} in · {} out",
-                format_tokens(self.usage.input_tokens),
-                format_tokens(self.usage.output_tokens)
-            )));
-        }
-
-        if self.plan_mode {
-            parts.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
-            parts.push(Span::styled(
-                "PLAN",
-                Style::default().fg(Color::Yellow).bold(),
-            ));
-        }
-
-        if self.mode == Mode::Processing {
-            self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
-            parts.push(Span::raw(" "));
-            parts.push(Span::styled(
-                SPINNER_FRAMES[self.spinner_frame],
-                Style::default().fg(Color::Cyan),
-            ));
-        }
-
-        let bar = Paragraph::new(Line::from(parts))
-            .style(Style::default().bg(Color::Rgb(30, 30, 30)));
-        frame.render_widget(bar, area);
-    }
-
-    fn draw_input(&self, frame: &mut Frame, area: Rect) {
+    fn draw_input(&mut self, frame: &mut Frame, area: Rect) {
         if self.mode == Mode::Approval {
             if let Some(ref req) = self.pending_approval {
                 let line = Line::from(vec![
-                    Span::styled(" ", Style::default()),
-                    Span::styled(&req.tool_name, Style::default().bold().fg(Color::Yellow)),
+                    Span::styled("  ? ", Style::default().fg(Color::Yellow).bold()),
                     Span::styled(
-                        format!(" {} ", req.summary),
-                        Style::default().dim().fg(Color::Yellow),
+                        capitalize(&req.tool_name),
+                        Style::default().fg(Color::Yellow).bold(),
                     ),
                     Span::styled(
-                        "Allow? [y/n]",
-                        Style::default().bold().fg(Color::Yellow),
+                        format!("({}) ", req.summary),
+                        Style::default().fg(Color::Yellow).dim(),
+                    ),
+                    Span::styled(
+                        "[y/n]",
+                        Style::default().fg(Color::Yellow),
                     ),
                 ]);
                 frame.render_widget(Paragraph::new(line), area);
@@ -462,16 +459,72 @@ impl App {
             }
         }
 
-        let line = Line::from(vec![
-            Span::styled(" › ", Style::default().fg(Color::Cyan)),
-            Span::raw(self.input.clone()),
-        ]);
-        frame.render_widget(Paragraph::new(line), area);
-
-        if self.mode == Mode::Input {
-            let display_pos = self.input[..self.cursor].chars().count() as u16;
-            frame.set_cursor_position((area.x + 3 + display_pos, area.y));
+        if self.mode == Mode::Processing {
+            self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
+            let mut parts = vec![
+                Span::styled(
+                    format!("  {} ", SPINNER_FRAMES[self.spinner_frame]),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ];
+            parts.push(Span::styled(
+                short_model_name(&self.model),
+                Style::default().dim(),
+            ));
+            if self.usage.input_tokens > 0 {
+                parts.push(Span::styled(
+                    format!(
+                        " · {}in {}out",
+                        format_tokens(self.usage.input_tokens),
+                        format_tokens(self.usage.output_tokens),
+                    ),
+                    Style::default().dim(),
+                ));
+            }
+            if self.plan_mode {
+                parts.push(Span::styled(" PLAN", Style::default().fg(Color::Yellow).bold()));
+            }
+            frame.render_widget(Paragraph::new(Line::from(parts)), area);
+            return;
         }
+
+        // Input mode — prompt with inline status
+        let mut parts = vec![
+            Span::styled("  > ", Style::default().fg(Color::Cyan)),
+            Span::raw(self.input.clone()),
+        ];
+
+        // Right-align status info after the input
+        let status = self.build_status_string();
+        if !status.is_empty() {
+            let input_width = 4 + self.input.chars().count(); // "  > " + input
+            let area_width = area.width as usize;
+            if input_width + status.len() + 2 < area_width {
+                let padding = area_width - input_width - status.len();
+                parts.push(Span::raw(" ".repeat(padding)));
+                parts.push(Span::styled(status, Style::default().dim()));
+            }
+        }
+
+        frame.render_widget(Paragraph::new(Line::from(parts)), area);
+
+        let display_pos = self.input[..self.cursor].chars().count() as u16;
+        frame.set_cursor_position((area.x + 4 + display_pos, area.y));
+    }
+
+    fn build_status_string(&self) -> String {
+        let mut parts = vec![short_model_name(&self.model)];
+        if self.usage.input_tokens > 0 {
+            parts.push(format!(
+                "{}in {}out",
+                format_tokens(self.usage.input_tokens),
+                format_tokens(self.usage.output_tokens),
+            ));
+        }
+        if self.plan_mode {
+            parts.push("PLAN".into());
+        }
+        parts.join(" · ")
     }
 }
 
@@ -479,18 +532,30 @@ impl App {
 
 pub fn tool_input_summary(name: &str, input_json: &str) -> String {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(input_json) else {
-        return truncate_line(input_json, 80);
+        return truncate_line(input_json, 60);
     };
     match name {
         "bash" => v["command"]
             .as_str()
-            .map(|c| truncate_line(c, 80))
+            .map(|c| truncate_line(c, 60))
             .unwrap_or_default(),
         "read" | "edit" | "write" => v["file_path"]
             .as_str()
             .map(shorten_path)
             .unwrap_or_default(),
-        _ => truncate_line(input_json, 80),
+        "dispatch" => {
+            let count = v["tasks"].as_array().map(|a| a.len()).unwrap_or(0);
+            format!("{} tasks", count)
+        }
+        _ => truncate_line(input_json, 60),
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
     }
 }
 
@@ -524,9 +589,9 @@ fn truncate_line(s: &str, max: usize) -> String {
 
 fn format_tokens(tokens: u32) -> String {
     if tokens >= 1000 {
-        format!("{:.1}k", tokens as f64 / 1000.0)
+        format!("{:.1}k ", tokens as f64 / 1000.0)
     } else {
-        tokens.to_string()
+        format!("{} ", tokens)
     }
 }
 
