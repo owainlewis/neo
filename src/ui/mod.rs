@@ -237,8 +237,18 @@ impl App {
             }
             AgentEvent::Done { usage } => {
                 self.end_streaming();
+                let duration = format!(
+                    "{} in {} out",
+                    format_tokens(usage.input_tokens),
+                    format_tokens(usage.output_tokens),
+                );
                 self.usage = usage;
                 self.mode = Mode::Input;
+                self.push_blank();
+                self.output.push(Line::from(Span::styled(
+                    format!("  ✓ {}", duration),
+                    Style::default().fg(Color::Rgb(80, 80, 90)),
+                )));
                 self.push_blank();
                 self.scroll_offset = 0;
             }
