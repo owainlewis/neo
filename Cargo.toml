@@ -1,14 +1,14 @@
 [workspace]
-members = ["crates/opus-core", "crates/opus-coding"]
+members = ["crates/neo-core", "crates/neo-coding"]
 
 [package]
-name = "opus"
+name = "neo"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-opus-core = { path = "crates/opus-core" }
-opus-coding = { path = "crates/opus-coding" }
+neo-core = { path = "crates/neo-core" }
+neo-coding = { path = "crates/neo-coding" }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 async-trait = "0.1"

@@ -1,10 +1,10 @@
-# Opus Roadmap
+# Neo Roadmap
 
 Build the best Rust coding agent in the world.
 
 ## Done
 
-- [x] **Workspace split** — `opus-core` (pure loop), `opus-coding` (coding bundle), binary (TUI + wiring)
+- [x] **Workspace split** — `neo-core` (pure loop), `neo-coding` (coding bundle), binary (TUI + wiring)
 - [x] **Streaming Provider** — SSE parsing for Anthropic, real-time text deltas to UI, errors as terminal events
 - [x] **Hooks system** — `Hooks` trait with 5 optional methods, `HookChain` for composition. Plan mode and approval are hooks, not baked into the core.
 - [x] **Subagent spawner** — `SubagentSpawner` trait + `DefaultSpawner` + `DispatchTool` for parallel workers
@@ -31,7 +31,7 @@ Build the best Rust coding agent in the world.
 
 ## Phase 3: Prompt & Config
 
-- [ ] **CLAUDE.md / OPUS.md loading** — Load project instructions from `.opus/OPUS.md`, `~/.opus/OPUS.md`, and `.opus/rules/*.md`. Inject into system prompt as dynamic sections.
+- [ ] **CLAUDE.md / NEO.md loading** — Load project instructions from `.neo/NEO.md`, `~/.neo/NEO.md`, and `.neo/rules/*.md`. Inject into system prompt as dynamic sections.
 - [ ] **Dynamic system prompt sections** — Split prompt into static (cacheable) and dynamic (per-turn: cwd, git status, loaded project instructions) sections. Maximizes prompt cache hits.
 - [ ] **Git context injection** — Snapshot `git status`, `git log --oneline -5`, branch name into the prompt at conversation start.
 - [ ] **Steering vs follow-up messages** — Two queues: steering injects between turns of an active run, follow-up fires only when the agent would otherwise stop. Handles "user typed while agent was working."
@@ -51,8 +51,8 @@ Build the best Rust coding agent in the world.
 
 ## Phase 6: Persistence & Memory
 
-- [ ] **Session persistence** — Save transcripts to `~/.opus/sessions/{id}.json`. Support `/resume` to reload.
-- [ ] **Session memory** — On exit or compact, distill key facts into `~/.opus/memory/` for future sessions.
+- [ ] **Session persistence** — Save transcripts to `~/.neo/sessions/{id}.json`. Support `/resume` to reload.
+- [ ] **Session memory** — On exit or compact, distill key facts into `~/.neo/memory/` for future sessions.
 - [ ] **Session tree** — Compaction is branch-aware. Fork/navigate/branch-summarize for long-running sessions.
 
 ## Phase 7: Permissions & Safety

@@ -1,4 +1,4 @@
-use opus_core::{AgentEvent, Usage};
+use neo_core::{AgentEvent, Usage};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -71,8 +71,8 @@ impl App {
         // Banner
         app.output.push(Line::from(""));
         app.output.push(Line::from(vec![
-            Span::styled("  ›_ ", Style::default().bold()),
-            Span::styled("opus", Style::default().bold()),
+            Span::styled("  ⟩_ ", Style::default().bold()),
+            Span::styled("neo", Style::default().bold()),
             Span::raw(" v0.1.0"),
         ]));
         app.output.push(Line::from(""));
@@ -403,7 +403,7 @@ impl App {
 
     fn draw_status(&mut self, frame: &mut Frame, area: Rect) {
         let mut parts: Vec<Span> = vec![
-            Span::styled(" opus", Style::default().bold().fg(Color::White)),
+            Span::styled(" neo", Style::default().bold().fg(Color::White)),
             Span::styled(" · ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 short_model_name(&self.model),

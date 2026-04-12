@@ -1,4 +1,4 @@
-use opus_core::{SubagentSpec, SubagentSpawner, Tool, ToolOutput, Usage};
+use neo_core::{SubagentSpec, SubagentSpawner, Tool, ToolOutput, Usage};
 use serde_json::json;
 use std::sync::Arc;
 

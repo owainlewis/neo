@@ -4,7 +4,7 @@ pub mod edit;
 pub mod read;
 pub mod write;
 
-use opus_core::Tool;
+use neo_core::Tool;
 
 /// The default tool set for the coding bundle: bash, read, edit, write.
 /// Does *not* include dispatch — the binary adds that separately with a

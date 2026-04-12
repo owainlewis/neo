@@ -1,5 +1,5 @@
 use crate::ui::{self, ApprovalRequest};
-use opus_core::{HookDecision, Hooks, ToolUseBlock};
+use neo_core::{HookDecision, Hooks, ToolUseBlock};
 use std::sync::mpsc::Sender;
 
 /// Approval hook: intercepts write tools and asks the user for confirmation

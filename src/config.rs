@@ -21,7 +21,7 @@ impl Config {
         let api_key = resolve("ANTHROPIC_API_KEY", &dotenv, &file_config, None)
             .unwrap_or_else(|| {
                 eprintln!("Error: ANTHROPIC_API_KEY not set.");
-                eprintln!("Set it in ~/.opus/config.toml, .env, or export it.");
+                eprintln!("Set it in ~/.neo/config.toml, .env, or export it.");
                 std::process::exit(1);
             });
 
@@ -49,13 +49,13 @@ fn resolve(
     file_config: &HashMap<String, String>,
     default: Option<&str>,
 ) -> Option<String> {
-    // Env vars use uppercase (e.g. ANTHROPIC_API_KEY, OPUS_MODEL)
+    // Env vars use uppercase (e.g. ANTHROPIC_API_KEY, NEO_MODEL)
     let env_key = if key == "model" {
-        "OPUS_MODEL".to_string()
+        "NEO_MODEL".to_string()
     } else if key.contains('_') && key.chars().all(|c| c.is_uppercase() || c == '_') {
         key.to_string()
     } else {
-        format!("OPUS_{}", key.to_uppercase())
+        format!("NEO_{}", key.to_uppercase())
     };
 
     std::env::var(&env_key)
@@ -67,7 +67,7 @@ fn resolve(
 }
 
 fn config_path() -> PathBuf {
-    dirs_home().join(".opus").join("config.toml")
+    dirs_home().join(".neo").join("config.toml")
 }
 
 fn dirs_home() -> PathBuf {

@@ -1,4 +1,4 @@
-use opus_core::{Tool, ToolOutput};
+use neo_core::{Tool, ToolOutput};
 use serde_json::json;
 
 pub struct EditTool;

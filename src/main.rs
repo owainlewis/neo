@@ -4,8 +4,8 @@ mod ui;
 
 use approval::ApprovalHook;
 use config::Config;
-use opus_coding::{coding_system_prompt, coding_tools, DispatchTool, PlanModeHook};
-use opus_core::{
+use neo_coding::{coding_system_prompt, coding_tools, DispatchTool, PlanModeHook};
+use neo_core::{
     AgentEvent, AgentState, AnthropicProvider, DefaultSpawner, HookChain, Provider, Registry,
 };
 use ui::{App, ApprovalRequest};
@@ -29,8 +29,8 @@ fn parse_args() -> CliArgs {
             }
             "--help" | "-h" => {
                 println!(
-                    "opus — a rust coding agent\n\n\
-                     USAGE:\n    opus [--system-prompt <path>]\n\n\
+                    "neo — a rust coding agent\n\n\
+                     USAGE:\n    neo [--system-prompt <path>]\n\n\
                      OPTIONS:\n    \
                      -p, --system-prompt <path>   Use a custom system prompt (pure agent mode)\n    \
                      -h, --help                   Show this help"
@@ -161,7 +161,7 @@ async fn main() {
             state.add_user_message(trimmed);
 
             let tx = agent_event_tx.clone();
-            opus_core::run_turn(
+            neo_core::run_turn(
                 &mut state,
                 &*agent_provider,
                 &registry,

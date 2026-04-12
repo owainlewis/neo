@@ -1,10 +1,10 @@
 [package]
-name = "opus-coding"
+name = "neo-coding"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-opus-core = { path = "../opus-core" }
+neo-core = { path = "../neo-core" }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 async-trait = "0.1"

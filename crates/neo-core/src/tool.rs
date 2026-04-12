@@ -29,7 +29,7 @@ pub struct Registry {
 
 impl Registry {
     /// Construct a registry from caller-supplied tools. The core never
-    /// hardcodes a tool set — bundles (e.g. `opus-coding`) provide them.
+    /// hardcodes a tool set — bundles (e.g. `neo-coding`) provide them.
     pub fn new(tools: Vec<Box<dyn Tool>>) -> Self {
         Self { tools }
     }

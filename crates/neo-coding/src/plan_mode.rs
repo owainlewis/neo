@@ -1,4 +1,4 @@
-use opus_core::{Hooks, ToolDefinition};
+use neo_core::{Hooks, ToolDefinition};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
