@@ -89,10 +89,13 @@ impl App {
 
     pub fn echo_input(&mut self, text: &str) {
         self.output.push(Line::from(""));
-        self.output.push(Line::from(vec![
-            Span::styled("  > ", Style::default().fg(Color::White).bold()),
-            Span::styled(text.to_string(), Style::default().fg(Color::White).bold()),
-        ]));
+        for (i, line) in text.split('\n').enumerate() {
+            let prefix = if i == 0 { "  > " } else { "  : " };
+            self.output.push(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(Color::White).bold()),
+                Span::styled(line.to_string(), Style::default().fg(Color::White).bold()),
+            ]));
+        }
         self.output.push(Line::from(""));
         self.scroll_offset = 0;
     }
@@ -299,6 +302,12 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                // Shift+Enter inserts a newline for multiline input
+                self.input.insert(self.cursor, '\n');
+                self.cursor += 1;
+                None
+            }
             KeyCode::Enter => {
                 let input: String = self.input.drain(..).collect();
                 self.cursor = 0;
@@ -412,12 +421,18 @@ impl App {
 
     // --- Drawing ---
 
+    fn input_height(&self) -> u16 {
+        let line_count = self.input.chars().filter(|c| *c == '\n').count() + 1;
+        (line_count as u16).max(1)
+    }
+
     pub fn draw(&mut self, frame: &mut Frame) {
+        let input_h = self.input_height();
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(1),    // output area
-                Constraint::Length(1), // input / status line
+                Constraint::Min(1),              // output area
+                Constraint::Length(input_h),      // input grows with content
             ])
             .split(frame.area());
 
@@ -488,28 +503,42 @@ impl App {
             return;
         }
 
-        // Input mode — prompt with inline status
-        let mut parts = vec![
-            Span::styled("  > ", Style::default().fg(Color::Cyan)),
-            Span::raw(self.input.clone()),
-        ];
+        // Input mode — render multiline input
+        let input_lines: Vec<&str> = self.input.split('\n').collect();
+        let mut lines: Vec<Line> = Vec::new();
 
-        // Right-align status info after the input
-        let status = self.build_status_string();
-        if !status.is_empty() {
-            let input_width = 4 + self.input.chars().count(); // "  > " + input
-            let area_width = area.width as usize;
-            if input_width + status.len() + 2 < area_width {
-                let padding = area_width - input_width - status.len();
-                parts.push(Span::raw(" ".repeat(padding)));
-                parts.push(Span::styled(status, Style::default().dim()));
+        for (i, text) in input_lines.iter().enumerate() {
+            let prefix = if i == 0 { "  > " } else { "  : " };
+            let mut spans = vec![
+                Span::styled(prefix, Style::default().fg(Color::Cyan)),
+                Span::raw(text.to_string()),
+            ];
+            // Right-align status on the first line when single-line
+            if i == 0 && input_lines.len() == 1 {
+                let status = self.build_status_string();
+                if !status.is_empty() {
+                    let used = 4 + text.chars().count();
+                    let width = area.width as usize;
+                    if used + status.len() + 2 < width {
+                        spans.push(Span::raw(" ".repeat(width - used - status.len())));
+                        spans.push(Span::styled(status, Style::default().dim()));
+                    }
+                }
             }
+            lines.push(Line::from(spans));
         }
 
-        frame.render_widget(Paragraph::new(Line::from(parts)), area);
+        frame.render_widget(Paragraph::new(lines), area);
 
-        let display_pos = self.input[..self.cursor].chars().count() as u16;
-        frame.set_cursor_position((area.x + 4 + display_pos, area.y));
+        // Position cursor in multiline input
+        let text_before_cursor = &self.input[..self.cursor];
+        let cursor_line = text_before_cursor.chars().filter(|c| *c == '\n').count() as u16;
+        let last_newline = text_before_cursor.rfind('\n');
+        let col = match last_newline {
+            Some(pos) => text_before_cursor[pos + 1..].chars().count() as u16,
+            None => text_before_cursor.chars().count() as u16,
+        };
+        frame.set_cursor_position((area.x + 4 + col, area.y + cursor_line));
     }
 
     fn build_status_string(&self) -> String {
