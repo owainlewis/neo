@@ -115,6 +115,21 @@ impl App {
     }
 
     pub fn set_approval(&mut self, req: ApprovalRequest) {
+        // Show the approval prompt inline in the output area
+        self.push_blank();
+        self.output.push(Line::from(vec![
+            Span::styled("  ? ", Style::default().fg(Color::Yellow).bold()),
+            Span::styled(
+                capitalize(&req.tool_name),
+                Style::default().fg(Color::Yellow).bold(),
+            ),
+            Span::styled(
+                format!("({}) ", req.summary),
+                Style::default().fg(Color::Yellow).dim(),
+            ),
+            Span::styled("[y/n] ", Style::default().fg(Color::Yellow)),
+        ]));
+        self.scroll_offset = 0;
         self.pending_approval = Some(req);
         self.mode = Mode::Approval;
     }
@@ -355,16 +370,25 @@ impl App {
                     if let Some(req) = self.pending_approval.take() {
                         let _ = req.responder.send(true);
                     }
+                    // Update the prompt line to show approval
+                    if let Some(last) = self.output.last_mut() {
+                        *last = Line::from(Span::styled(
+                            format!("  ✓ Approved"),
+                            Style::default().fg(Color::Green).dim(),
+                        ));
+                    }
                     self.mode = Mode::Processing;
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => {
                     if let Some(req) = self.pending_approval.take() {
                         let _ = req.responder.send(false);
                     }
-                    self.output.push(Line::from(Span::styled(
-                        "    denied",
-                        Style::default().fg(Color::Red).dim(),
-                    )));
+                    if let Some(last) = self.output.last_mut() {
+                        *last = Line::from(Span::styled(
+                            format!("  ✗ Denied"),
+                            Style::default().fg(Color::Red).dim(),
+                        ));
+                    }
                     self.mode = Mode::Processing;
                 }
                 _ => {}
@@ -533,14 +557,67 @@ impl App {
         self.draw_input(frame, chunks[2]);
     }
 
+    /// Pre-wrap a line to fit within the given width, preserving style.
+    /// Returns one or more lines.
+    fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
+        if width == 0 {
+            return vec![line.clone()];
+        }
+        // Compute total character width
+        let total_chars: usize = line.spans.iter().map(|s| s.content.chars().count()).count();
+        let total_len: usize = line.spans.iter().map(|s| s.content.len()).sum();
+        if total_len == 0 || total_chars <= width {
+            return vec![line.clone()];
+        }
+
+        // Flatten into (char, style) pairs then chunk by width
+        let mut chars_and_styles: Vec<(char, Style)> = Vec::new();
+        for span in &line.spans {
+            for c in span.content.chars() {
+                chars_and_styles.push((c, span.style));
+            }
+        }
+
+        let mut result = Vec::new();
+        for chunk in chars_and_styles.chunks(width) {
+            // Group consecutive same-style chars back into Spans
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            let mut current_style = chunk[0].1;
+            let mut current_text = String::new();
+            for &(c, style) in chunk {
+                if style == current_style {
+                    current_text.push(c);
+                } else {
+                    spans.push(Span::styled(current_text, current_style));
+                    current_style = style;
+                    current_text = String::from(c);
+                }
+            }
+            if !current_text.is_empty() {
+                spans.push(Span::styled(current_text, current_style));
+            }
+            result.push(Line::from(spans));
+        }
+        result
+    }
+
     fn draw_output(&self, frame: &mut Frame, area: Rect) {
+        let w = area.width as usize;
         let h = area.height as usize;
-        let total = self.output.len();
+
+        // Pre-wrap all output lines so scroll math is accurate
+        let wrapped: Vec<Line> = self
+            .output
+            .iter()
+            .flat_map(|line| Self::wrap_line(line, w))
+            .collect();
+
+        let total = wrapped.len();
         let end = total.saturating_sub(self.scroll_offset);
         let start = end.saturating_sub(h);
 
-        let visible: Vec<Line> = self.output[start..end].to_vec();
-        let paragraph = Paragraph::new(visible).wrap(Wrap { trim: false });
+        let visible: Vec<Line> = wrapped[start..end].to_vec();
+        let paragraph = Paragraph::new(visible);
         frame.render_widget(paragraph, area);
     }
 
@@ -591,29 +668,7 @@ impl App {
             height: area.height.saturating_sub(2),
         };
 
-        if self.mode == Mode::Approval {
-            if let Some(ref req) = self.pending_approval {
-                let line = Line::from(vec![
-                    Span::styled("  ? ", Style::default().fg(Color::Yellow).bold()),
-                    Span::styled(
-                        capitalize(&req.tool_name),
-                        Style::default().fg(Color::Yellow).bold(),
-                    ),
-                    Span::styled(
-                        format!("({}) ", req.summary),
-                        Style::default().fg(Color::Yellow).dim(),
-                    ),
-                    Span::styled("[y/n]", Style::default().fg(Color::Yellow)),
-                ]);
-                frame.render_widget(
-                    Paragraph::new(line).style(Style::default().bg(input_bg)),
-                    content_area,
-                );
-                return;
-            }
-        }
-
-        if self.mode == Mode::Processing {
+        if self.mode == Mode::Approval || self.mode == Mode::Processing {
             self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
             let mut parts = vec![Span::styled(
                 format!("  {} ", SPINNER_FRAMES[self.spinner_frame]),
