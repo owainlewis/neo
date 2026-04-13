@@ -16,32 +16,31 @@ use std::time::Duration;
 
 struct CliArgs {
     system_prompt_path: Option<String>,
-    no_guard: bool,
+    yolo: bool,
 }
 
 fn parse_args() -> CliArgs {
     let mut args = std::env::args().skip(1);
     let mut system_prompt_path = None;
-    let mut no_guard = false;
+    let mut yolo = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--system-prompt" | "-p" => {
                 system_prompt_path = args.next();
             }
-            "--no-guard" | "--yolo" => {
-                no_guard = true;
+            "--yolo" => {
+                yolo = true;
             }
             "--help" | "-h" => {
                 println!(
-                    "neo — a rust coding agent\n\n\
+                    "neo — a general-purpose AI agent\n\n\
                      USAGE:\n    neo [OPTIONS]\n\n\
                      OPTIONS:\n    \
                      -p, --system-prompt <path>   Use a custom system prompt\n    \
-                     --no-guard, --yolo           Disable danger guard (run in container!)\n    \
+                     --yolo                       Disable danger guard\n    \
                      -h, --help                   Show this help\n\n\
-                     GUARD CONFIG:\n    \
-                     ~/.neo/guard.toml            Global blocked/allowed patterns\n    \
-                     .neo/guard.toml              Project-local overrides"
+                     CONFIG:\n    \
+                     ~/.neo/config.toml           Model, tokens, guard patterns"
                 );
                 std::process::exit(0);
             }
@@ -50,7 +49,7 @@ fn parse_args() -> CliArgs {
     }
     CliArgs {
         system_prompt_path,
-        no_guard,
+        yolo,
     }
 }
 
@@ -101,7 +100,7 @@ async fn main() {
     // Hook chain: plan mode + danger guard (no approval popups)
     let plan_mode_hook = Arc::new(PlanModeHook::new());
     let plan_enabled = plan_mode_hook.enabled();
-    let guard = if cli.no_guard {
+    let guard = if cli.yolo {
         DangerGuard::disabled()
     } else {
         DangerGuard::load()

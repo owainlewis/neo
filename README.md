@@ -40,7 +40,7 @@ export ANTHROPIC_API_KEY="your_key"
 ```bash
 neo                                  # coding agent (default)
 neo -p ./custom-prompt.md            # any agent you want
-neo --yolo                           # disable danger guard (containers)
+neo --yolo                           # disable danger guard
 neo --help                           # show options
 ```
 

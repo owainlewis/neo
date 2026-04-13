@@ -1,59 +1,57 @@
 use neo_core::{HookDecision, Hooks, ToolUseBlock};
 use std::path::PathBuf;
 
-/// Danger guard: blocks bash commands matching a pattern list.
-/// Everything else runs without asking.
-///
-/// Patterns are **substring matches** — `"kubectl delete"` blocks any
-/// command containing that string (e.g. `kubectl delete namespace prod`).
+/// Danger guard: blocks bash commands that could destroy your OS.
+/// Everything else runs freely — git mistakes are recoverable, `rm -rf /` is not.
 ///
 /// Configure in `~/.neo/config.toml`:
 ///
 /// ```toml
 /// [guard]
-/// block = [
-///     "drop database",
-///     "kubectl delete",     # blocks kubectl delete anything
-/// ]
-/// allow = [
-///     "reset --hard",       # remove a built-in you don't want
-/// ]
+/// enabled = false            # same as --yolo
+/// block = ["kubectl delete"] # add your own patterns
+/// allow = ["dd if="]         # remove a built-in
 /// ```
 pub struct DangerGuard {
     patterns: Vec<String>,
 }
 
+/// Only things that could brick your machine or nuke your filesystem.
+/// Git force-pushes, hard resets, etc. are recoverable — not blocked by default.
 const BUILTINS: &[&str] = &[
     "rm -rf /",
-    "rm -rf ~",
-    "rm -rf $HOME",
     "rm -rf /*",
+    "rm -rf ~",
     "rm -rf ~/*",
+    "rm -rf $HOME",
     "mkfs",
     "dd if=",
-    "push --force origin main",
-    "push --force origin master",
-    "push -f origin main",
-    "push -f origin master",
-    "reset --hard",
     ":(){ :|:&",
     "chmod -R 777 /",
     "chmod -R 777 ~",
 ];
 
 impl DangerGuard {
+    /// Load from built-in defaults + `~/.neo/config.toml` [guard] section.
     pub fn load() -> Self {
         let mut patterns: Vec<String> = BUILTINS.iter().map(|s| s.to_string()).collect();
+        let mut enabled = true;
 
-        // Read [guard] section from ~/.neo/config.toml
         let config_path = std::env::var("HOME")
             .map(|h| PathBuf::from(h).join(".neo").join("config.toml"))
             .unwrap_or_default();
 
         if let Ok(content) = std::fs::read_to_string(&config_path) {
-            let (block, allow) = parse_guard_section(&content);
+            let (block, allow, cfg_enabled) = parse_guard_section(&content);
+            if let Some(e) = cfg_enabled {
+                enabled = e;
+            }
             patterns.extend(block);
             patterns.retain(|p| !allow.contains(p));
+        }
+
+        if !enabled {
+            return Self::disabled();
         }
 
         patterns.sort();
@@ -71,7 +69,7 @@ impl DangerGuard {
 #[async_trait::async_trait]
 impl Hooks for DangerGuard {
     async fn before_tool_call(&self, call: &ToolUseBlock) -> HookDecision {
-        if call.name != "bash" {
+        if call.name != "bash" || self.patterns.is_empty() {
             return HookDecision::Allow;
         }
 
@@ -81,8 +79,7 @@ impl Hooks for DangerGuard {
             if command.contains(pattern.as_str()) {
                 return HookDecision::Block {
                     reason: format!(
-                        "Blocked by danger guard: matches '{}'. \
-                         Ask the user to run this manually.",
+                        "Blocked: matches '{}'. Ask the user to run this manually.",
                         pattern
                     ),
                 };
@@ -93,10 +90,11 @@ impl Hooks for DangerGuard {
     }
 }
 
-/// Parse [guard] block/allow arrays from a TOML config file.
-fn parse_guard_section(content: &str) -> (Vec<String>, Vec<String>) {
+/// Parse [guard] section from config.toml.
+fn parse_guard_section(content: &str) -> (Vec<String>, Vec<String>, Option<bool>) {
     let mut block = Vec::new();
     let mut allow = Vec::new();
+    let mut enabled = None;
     let mut in_guard = false;
     let mut in_block = false;
     let mut in_allow = false;
@@ -115,6 +113,13 @@ fn parse_guard_section(content: &str) -> (Vec<String>, Vec<String>) {
             continue;
         }
         if !in_guard {
+            continue;
+        }
+
+        // enabled = true/false
+        if let Some(val) = line.strip_prefix("enabled") {
+            let val = val.trim().trim_start_matches('=').trim();
+            enabled = Some(val == "true");
             continue;
         }
 
@@ -143,7 +148,7 @@ fn parse_guard_section(content: &str) -> (Vec<String>, Vec<String>) {
         }
     }
 
-    (block, allow)
+    (block, allow, enabled)
 }
 
 fn extract_quoted(line: &str) -> Option<String> {
@@ -162,9 +167,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtins_block_rm_rf() {
+    fn builtins_are_minimal() {
         let guard = DangerGuard::load();
         assert!(guard.patterns.contains(&"rm -rf /".to_string()));
+        assert!(guard.patterns.contains(&"mkfs".to_string()));
+        // Git operations should NOT be in defaults
+        assert!(!guard.patterns.iter().any(|p| p.contains("push --force")));
+        assert!(!guard.patterns.iter().any(|p| p.contains("reset --hard")));
     }
 
     #[test]
@@ -174,65 +183,68 @@ mod tests {
     }
 
     #[test]
-    fn parse_guard_section_extracts_block_and_allow() {
-        let toml = r#"
-model = "claude-opus-4-6"
-
-[guard]
-block = [
-    "drop database",
-    "kubectl delete namespace",
-]
-allow = [
-    "reset --hard",
-]
-"#;
-        let (block, allow) = parse_guard_section(toml);
-        assert_eq!(block, vec!["drop database", "kubectl delete namespace"]);
-        assert_eq!(allow, vec!["reset --hard"]);
+    fn parse_guard_enabled_false() {
+        let toml = "[guard]\nenabled = false\n";
+        let (_, _, enabled) = parse_guard_section(toml);
+        assert_eq!(enabled, Some(false));
     }
 
     #[test]
-    fn parse_guard_section_empty_config() {
-        let (block, allow) = parse_guard_section("model = \"test\"\n");
-        assert!(block.is_empty());
-        assert!(allow.is_empty());
+    fn parse_guard_block_and_allow() {
+        let toml = r#"
+[guard]
+block = [
+    "drop database",
+]
+allow = [
+    "dd if=",
+]
+"#;
+        let (block, allow, _) = parse_guard_section(toml);
+        assert_eq!(block, vec!["drop database"]);
+        assert_eq!(allow, vec!["dd if="]);
     }
 
     #[tokio::test]
-    async fn blocks_dangerous_command() {
+    async fn blocks_rm_rf() {
         let guard = DangerGuard::load();
         let call = ToolUseBlock {
             id: "t1".into(),
             name: "bash".into(),
             input: serde_json::json!({"command": "rm -rf /"}),
         };
-        let decision = guard.before_tool_call(&call).await;
-        assert!(matches!(decision, HookDecision::Block { .. }));
+        assert!(matches!(
+            guard.before_tool_call(&call).await,
+            HookDecision::Block { .. }
+        ));
     }
 
     #[tokio::test]
-    async fn allows_safe_command() {
+    async fn allows_git_force_push() {
         let guard = DangerGuard::load();
         let call = ToolUseBlock {
             id: "t1".into(),
             name: "bash".into(),
-            input: serde_json::json!({"command": "ls -la"}),
+            input: serde_json::json!({"command": "git push --force origin main"}),
         };
-        let decision = guard.before_tool_call(&call).await;
-        assert!(matches!(decision, HookDecision::Allow));
+        assert!(matches!(
+            guard.before_tool_call(&call).await,
+            HookDecision::Allow
+        ));
     }
 
     #[tokio::test]
-    async fn allows_non_bash_tools() {
+    async fn allows_normal_commands() {
         let guard = DangerGuard::load();
         let call = ToolUseBlock {
             id: "t1".into(),
-            name: "read".into(),
-            input: serde_json::json!({"file_path": "/etc/passwd"}),
+            name: "bash".into(),
+            input: serde_json::json!({"command": "cargo test --workspace"}),
         };
-        let decision = guard.before_tool_call(&call).await;
-        assert!(matches!(decision, HookDecision::Allow));
+        assert!(matches!(
+            guard.before_tool_call(&call).await,
+            HookDecision::Allow
+        ));
     }
 
     #[tokio::test]
@@ -243,7 +255,9 @@ allow = [
             name: "bash".into(),
             input: serde_json::json!({"command": "rm -rf /"}),
         };
-        let decision = guard.before_tool_call(&call).await;
-        assert!(matches!(decision, HookDecision::Allow));
+        assert!(matches!(
+            guard.before_tool_call(&call).await,
+            HookDecision::Allow
+        ));
     }
 }
