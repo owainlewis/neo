@@ -16,30 +16,42 @@ use std::time::Duration;
 
 struct CliArgs {
     system_prompt_path: Option<String>,
+    no_guard: bool,
 }
 
 fn parse_args() -> CliArgs {
     let mut args = std::env::args().skip(1);
     let mut system_prompt_path = None;
+    let mut no_guard = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--system-prompt" | "-p" => {
                 system_prompt_path = args.next();
             }
+            "--no-guard" | "--yolo" => {
+                no_guard = true;
+            }
             "--help" | "-h" => {
                 println!(
                     "neo — a rust coding agent\n\n\
-                     USAGE:\n    neo [--system-prompt <path>]\n\n\
+                     USAGE:\n    neo [OPTIONS]\n\n\
                      OPTIONS:\n    \
-                     -p, --system-prompt <path>   Use a custom system prompt (pure agent mode)\n    \
-                     -h, --help                   Show this help"
+                     -p, --system-prompt <path>   Use a custom system prompt\n    \
+                     --no-guard, --yolo           Disable danger guard (run in container!)\n    \
+                     -h, --help                   Show this help\n\n\
+                     GUARD CONFIG:\n    \
+                     ~/.neo/guard.toml            Global blocked/allowed patterns\n    \
+                     .neo/guard.toml              Project-local overrides"
                 );
                 std::process::exit(0);
             }
             _ => {}
         }
     }
-    CliArgs { system_prompt_path }
+    CliArgs {
+        system_prompt_path,
+        no_guard,
+    }
 }
 
 fn load_system_prompt(cli: &CliArgs, cwd: &str) -> String {
@@ -89,9 +101,14 @@ async fn main() {
     // Hook chain: plan mode + danger guard (no approval popups)
     let plan_mode_hook = Arc::new(PlanModeHook::new());
     let plan_enabled = plan_mode_hook.enabled();
+    let guard = if cli.no_guard {
+        DangerGuard::disabled()
+    } else {
+        DangerGuard::load()
+    };
     let hooks = HookChain::new()
         .add(plan_mode_hook.clone())
-        .add(Arc::new(DangerGuard));
+        .add(Arc::new(guard));
 
     // Spawn agent task
     let agent_event_tx = event_tx.clone();
