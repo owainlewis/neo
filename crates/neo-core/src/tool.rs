@@ -20,9 +20,6 @@ pub trait Tool: Send + Sync {
     }
 }
 
-/// Deprecated alias retained for older call sites. New code should use `Hooks`.
-pub type ApprovalFn = Box<dyn Fn(&str, &str, &serde_json::Value) -> bool + Send + Sync>;
-
 pub struct Registry {
     tools: Vec<Box<dyn Tool>>,
 }

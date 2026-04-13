@@ -11,7 +11,7 @@ pub use anthropic::AnthropicProvider;
 pub use hooks::{HookChain, HookDecision, Hooks, NoHooks};
 pub use provider::Provider;
 pub use subagent::{DefaultSpawner, SubagentHandle, SubagentResult, SubagentSpec, SubagentSpawner};
-pub use tool::{ApprovalFn, Registry, Tool};
+pub use tool::{Registry, Tool};
 pub use types::{
     ContentBlock, Message, ProviderEvent, StopReason, StreamRequest, ToolDefinition, ToolOutput,
     ToolResult, ToolUseBlock, Usage,

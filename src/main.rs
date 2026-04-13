@@ -1,17 +1,16 @@
-mod approval;
 mod config;
+mod guard;
 mod ui;
 
-use approval::ApprovalHook;
 use config::Config;
+use guard::DangerGuard;
 use neo_coding::{coding_system_prompt, coding_tools, DispatchTool, PlanModeHook};
 use neo_core::{
     AgentEvent, AgentState, AnthropicProvider, DefaultSpawner, HookChain, Provider, Registry,
 };
-use ui::{App, ApprovalRequest};
+use ui::App;
 
 use crossterm::event::{self, Event};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -63,7 +62,6 @@ async fn main() {
     // Channels
     let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
-    let (approval_tx, approval_rx) = std::sync::mpsc::channel::<ApprovalRequest>();
 
     // System prompt
     let cwd = std::env::current_dir()
@@ -75,8 +73,7 @@ async fn main() {
     let provider: Arc<dyn Provider> =
         Arc::new(AnthropicProvider::new(config.api_key, config.model, config.max_tokens));
 
-    // Subagent spawner: children get basic tools (no dispatch — prevents
-    // recursive spawning). They run with NoHooks (no approval prompts).
+    // Subagent spawner
     let subagent_registry = Arc::new(Registry::new(coding_tools()));
     let spawner = Arc::new(DefaultSpawner::new(
         provider.clone(),
@@ -84,22 +81,17 @@ async fn main() {
         system_prompt.clone(),
     ));
 
-    // Parent agent: coding tools + dispatch for parallel workers
+    // Parent agent: coding tools + dispatch
     let mut parent_tools = coding_tools();
     parent_tools.push(Box::new(DispatchTool::new(spawner)));
     let registry = Registry::new(parent_tools);
-    let write_tool_names = registry.write_tool_names();
 
-    // Hook chain
+    // Hook chain: plan mode + danger guard (no approval popups)
     let plan_mode_hook = Arc::new(PlanModeHook::new());
     let plan_enabled = plan_mode_hook.enabled();
-    let approval_hook = Arc::new(ApprovalHook {
-        approval_tx,
-        write_tool_names,
-    });
     let hooks = HookChain::new()
         .add(plan_mode_hook.clone())
-        .add(approval_hook);
+        .add(Arc::new(DangerGuard));
 
     // Spawn agent task
     let agent_event_tx = event_tx.clone();
@@ -118,14 +110,14 @@ async fn main() {
                     continue;
                 }
                 "/plan" => {
-                    agent_plan_enabled.store(true, Ordering::Relaxed);
+                    agent_plan_enabled.store(true, std::sync::atomic::Ordering::Relaxed);
                     let _ = agent_event_tx.send(AgentEvent::Info(
                         "Plan mode — read-only tools only. Use /execute to switch back.".into(),
                     ));
                     continue;
                 }
                 "/execute" => {
-                    agent_plan_enabled.store(false, Ordering::Relaxed);
+                    agent_plan_enabled.store(false, std::sync::atomic::Ordering::Relaxed);
                     let _ =
                         agent_event_tx.send(AgentEvent::Info("Execute mode — all tools.".into()));
                     continue;
@@ -139,12 +131,13 @@ async fn main() {
                 }
                 "/help" => {
                     let _ = agent_event_tx.send(AgentEvent::Info(
-                        "/clear     Clear conversation\n\
-                         /model     Show current model\n\
-                         /plan      Plan mode (read-only)\n\
-                         /execute   Execute mode (all tools)\n\
-                         /help      Show this help\n\
-                         /exit      Quit"
+                        "/clear       Clear conversation\n\
+                         /model       Show current model\n\
+                         /plan        Plan mode (read-only)\n\
+                         /execute     Execute mode (all tools)\n\
+                         /help        Show this help\n\
+                         /exit        Quit\n\
+                         shift+tab    Toggle plan/execute"
                             .into(),
                     ));
                     continue;
@@ -183,10 +176,6 @@ async fn main() {
     // Main event loop
     loop {
         let _ = terminal.draw(|f| app.draw(f));
-
-        if let Ok(req) = approval_rx.try_recv() {
-            app.set_approval(req);
-        }
 
         while let Ok(ev) = event_rx.try_recv() {
             app.handle_agent_event(ev);

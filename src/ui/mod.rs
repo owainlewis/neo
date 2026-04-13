@@ -8,21 +8,12 @@ use std::sync::Arc;
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_RESULT_LINES: usize = 8;
 
-// --- Approval channel types ---
-
-pub struct ApprovalRequest {
-    pub tool_name: String,
-    pub summary: String,
-    pub responder: tokio::sync::oneshot::Sender<bool>,
-}
-
 // --- App state ---
 
 #[derive(PartialEq)]
 enum Mode {
     Input,
     Processing,
-    Approval,
 }
 
 pub struct App {
@@ -35,7 +26,6 @@ pub struct App {
     history_idx: Option<usize>,
 
     mode: Mode,
-    pending_approval: Option<ApprovalRequest>,
     spinner_frame: usize,
 
     streaming: bool,
@@ -59,7 +49,6 @@ impl App {
             history: Vec::new(),
             history_idx: None,
             mode: Mode::Input,
-            pending_approval: None,
             spinner_frame: 0,
             streaming: false,
             streaming_buffer: String::new(),
@@ -112,26 +101,6 @@ impl App {
 
     pub fn set_processing(&mut self) {
         self.mode = Mode::Processing;
-    }
-
-    pub fn set_approval(&mut self, req: ApprovalRequest) {
-        // Show the approval prompt inline in the output area
-        self.push_blank();
-        self.output.push(Line::from(vec![
-            Span::styled("  ? ", Style::default().fg(Color::Yellow).bold()),
-            Span::styled(
-                capitalize(&req.tool_name),
-                Style::default().fg(Color::Yellow).bold(),
-            ),
-            Span::styled(
-                format!("({}) ", req.summary),
-                Style::default().fg(Color::Yellow).dim(),
-            ),
-            Span::styled("[y/n] ", Style::default().fg(Color::Yellow)),
-        ]));
-        self.scroll_offset = 0;
-        self.pending_approval = Some(req);
-        self.mode = Mode::Approval;
     }
 
     /// Push a blank line only if the last line isn't already blank.
@@ -364,40 +333,8 @@ impl App {
             }
         }
 
-        if self.mode == Mode::Approval {
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    if let Some(req) = self.pending_approval.take() {
-                        let _ = req.responder.send(true);
-                    }
-                    // Update the prompt line to show approval
-                    if let Some(last) = self.output.last_mut() {
-                        *last = Line::from(Span::styled(
-                            format!("  ✓ Approved"),
-                            Style::default().fg(Color::Green).dim(),
-                        ));
-                    }
-                    self.mode = Mode::Processing;
-                }
-                KeyCode::Char('n') | KeyCode::Char('N') => {
-                    if let Some(req) = self.pending_approval.take() {
-                        let _ = req.responder.send(false);
-                    }
-                    if let Some(last) = self.output.last_mut() {
-                        *last = Line::from(Span::styled(
-                            format!("  ✗ Denied"),
-                            Style::default().fg(Color::Red).dim(),
-                        ));
-                    }
-                    self.mode = Mode::Processing;
-                }
-                _ => {}
-            }
-            return None;
-        }
-
-        // Shift+Tab toggles plan/execute mode (works in any non-approval mode)
-        if key.code == KeyCode::BackTab && self.mode != Mode::Approval {
+        // Shift+Tab toggles plan/execute mode
+        if key.code == KeyCode::BackTab {
             self.toggle_plan_mode();
             return None;
         }
@@ -668,7 +605,7 @@ impl App {
             height: area.height.saturating_sub(2),
         };
 
-        if self.mode == Mode::Approval || self.mode == Mode::Processing {
+        if self.mode == Mode::Processing {
             self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
             let mut parts = vec![Span::styled(
                 format!("  {} ", SPINNER_FRAMES[self.spinner_frame]),
@@ -793,35 +730,6 @@ fn tool_header(name: &str, input_json: &str) -> String {
         _ => {
             format!("{} {}", name, truncate_line(input_json, 60))
         }
-    }
-}
-
-pub fn tool_input_summary(name: &str, input_json: &str) -> String {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(input_json) else {
-        return truncate_line(input_json, 60);
-    };
-    match name {
-        "bash" => v["command"]
-            .as_str()
-            .map(|c| truncate_line(c, 60))
-            .unwrap_or_default(),
-        "read" | "edit" | "write" => v["file_path"]
-            .as_str()
-            .map(shorten_path)
-            .unwrap_or_default(),
-        "dispatch" => {
-            let count = v["tasks"].as_array().map(|a| a.len()).unwrap_or(0);
-            format!("{} tasks", count)
-        }
-        _ => truncate_line(input_json, 60),
-    }
-}
-
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
     }
 }
 
