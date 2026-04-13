@@ -4,10 +4,8 @@ mod ui;
 
 use config::Config;
 use guard::DangerGuard;
-use neo_coding::{coding_system_prompt, coding_tools, DispatchTool, PlanModeHook};
-use neo_core::{
-    AgentEvent, AgentState, AnthropicProvider, DefaultSpawner, HookChain, Provider, Registry,
-};
+use neo_coding::{coding_system_prompt, coding_tools, CompactionHook, PlanModeHook};
+use neo_core::{AgentEvent, AgentState, AnthropicProvider, HookChain, Provider, Registry};
 use ui::App;
 
 use crossterm::event::{self, Event};
@@ -80,26 +78,18 @@ async fn main() {
         .unwrap_or_else(|_| ".".to_string());
     let system_prompt = load_system_prompt(&cli, &cwd);
 
-    // Provider (shared between parent agent and subagent spawner)
+    // Provider
     let provider: Arc<dyn Provider> =
         Arc::new(AnthropicProvider::new(config.api_key, config.model, config.max_tokens));
 
-    // Subagent spawner
-    let subagent_registry = Arc::new(Registry::new(coding_tools()));
-    let spawner = Arc::new(DefaultSpawner::new(
-        provider.clone(),
-        subagent_registry,
-        system_prompt.clone(),
-    ));
+    // Tool registry
+    let registry = Registry::new(coding_tools());
 
-    // Parent agent: coding tools + dispatch
-    let mut parent_tools = coding_tools();
-    parent_tools.push(Box::new(DispatchTool::new(spawner)));
-    let registry = Registry::new(parent_tools);
-
-    // Hook chain: plan mode + danger guard (no approval popups)
+    // Hook chain: plan mode + compaction + danger guard
     let plan_mode_hook = Arc::new(PlanModeHook::new());
     let plan_enabled = plan_mode_hook.enabled();
+    let compaction_hook = Arc::new(CompactionHook::new(200_000)); // ~200k context window
+    let compaction_for_events = compaction_hook.clone();
     let guard = if cli.yolo {
         DangerGuard::disabled()
     } else {
@@ -107,6 +97,7 @@ async fn main() {
     };
     let hooks = HookChain::new()
         .add(plan_mode_hook.clone())
+        .add(compaction_hook)
         .add(Arc::new(guard));
 
     // Spawn agent task
@@ -171,12 +162,17 @@ async fn main() {
             state.add_user_message(trimmed);
 
             let tx = agent_event_tx.clone();
+            let compaction = compaction_for_events.clone();
             neo_core::run_turn(
                 &mut state,
                 &*agent_provider,
                 &registry,
                 &hooks,
                 &mut |ev| {
+                    // Feed usage to compaction hook so it knows when to trigger
+                    if let AgentEvent::Done { usage } = ev {
+                        compaction.update_usage(usage);
+                    }
                     let _ = tx.send(ev.clone());
                 },
             )

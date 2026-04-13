@@ -12,7 +12,44 @@ pub fn coding_system_prompt(cwd: &str) -> String {
     sections.push(output_style());
     sections.push(environment(cwd));
 
+    // Load project instructions from NEO.md files
+    let project_instructions = load_neo_md(cwd);
+    if !project_instructions.is_empty() {
+        sections.push(format!("# Project instructions\n\n{}", project_instructions));
+    }
+
     sections.join("\n\n")
+}
+
+/// Load NEO.md project instructions. Checks (in order):
+/// 1. `~/.neo/NEO.md` — global user instructions
+/// 2. `.neo/NEO.md` in the working directory — project-specific instructions
+///
+/// Both are included if present (global first, then project-specific).
+fn load_neo_md(cwd: &str) -> String {
+    let mut parts = Vec::new();
+
+    // Global instructions
+    if let Ok(home) = std::env::var("HOME") {
+        let global = Path::new(&home).join(".neo").join("NEO.md");
+        if let Ok(content) = std::fs::read_to_string(&global) {
+            let content = content.trim();
+            if !content.is_empty() {
+                parts.push(content.to_string());
+            }
+        }
+    }
+
+    // Project-local instructions
+    let local = Path::new(cwd).join(".neo").join("NEO.md");
+    if let Ok(content) = std::fs::read_to_string(&local) {
+        let content = content.trim();
+        if !content.is_empty() {
+            parts.push(content.to_string());
+        }
+    }
+
+    parts.join("\n\n")
 }
 
 fn intro() -> String {

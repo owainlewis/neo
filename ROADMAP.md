@@ -12,20 +12,23 @@ Build the best Rust coding agent in the world.
 - [x] **Eager tool result clearing** — Replaces old tool result content with `[cleared]` before each API call
 - [x] **Plan mode** — Read-only exploration mode via `PlanModeHook`
 - [x] **Write tool + permission system** — Approval prompts for non-read-only tools
+- [x] **Danger guard** — Pattern-based guard hook for dangerous commands
+- [x] **PI-style TUI** — Ratatui-based terminal UI with streaming output
+- [x] **52 tests** — Unit + integration tests across the workspace
 
 - [x] **Critical fixes** — Async approval (oneshot), subagent usage propagation (`ToolOutput`), subagent timeout, mid-loop tool result preservation
 
 ## Phase 1: Core Robustness
 
+- [ ] **Grep tool** — Ripgrep-powered content search with context lines. The most-used tool in any coding agent.
+- [ ] **Glob tool** — Fast file pattern matching (`**/*.rs`). Avoids burning tokens on `bash find`.
 - [ ] **Real context compaction** — Replace `[cleared]` hack with token-accurate compaction. Use `usage.total_tokens` from the last assistant message, estimate only the tail, find valid cut points (never mid-tool-result), and summarize into a structured checkpoint (Goal / Done / InProgress / Blocked / Next Steps).
-- [ ] **API retry with backoff** — Exponential backoff + jitter for transient 429/500 errors. Add `max_retry_delay` cap: if Retry-After exceeds the cap, fail fast so higher-level handling can surface it.
+- [x] **API retry with backoff** — Exponential backoff + jitter for transient 429/500 errors. Respects Retry-After header (capped at 30s), max 3 attempts.
 - [ ] **Cancellation support** — `CancellationToken` threaded through tool execution and the agent loop. Ctrl+C during processing should cancel the current turn gracefully, not kill the process.
 - [ ] **Token estimation** — Rough pre-flight estimate (chars/4) to trigger compaction proactively. Trust provider `usage.total_tokens` from the last response, only estimate the tail.
 
 ## Phase 2: Tools
 
-- [ ] **Glob tool** — Fast file pattern matching (`**/*.rs`). Avoids burning tokens on `bash find`.
-- [ ] **Grep tool** — Ripgrep-powered content search with context lines. The most-used tool in any coding agent.
 - [ ] **File mutation queue** — Serialize concurrent writes/edits behind a lightweight lock. Unlocks safe parallel tool execution without the current "reads concurrent, writes serial" partition.
 - [ ] **Tool factories with injectable operations** — Each tool takes `(cwd, Operations)` where `Operations` is a small trait (e.g. `BashOperations::exec`). Enables SSH/sandbox/test backends without touching tool logic.
 
@@ -48,24 +51,6 @@ Build the best Rust coding agent in the world.
 - [ ] **Subagent cancellation** — Cancel individual or all subagents via `CancellationToken`. Wire into Ctrl+C handling.
 - [ ] **Custom tool sets per subagent** — `SubagentSpec` accepts optional tool overrides. An explore-only subagent gets `[read, glob, grep]` instead of the full set.
 - [ ] **Prompt cache sharing** — Subagents inherit the parent's system prompt verbatim so they hit the API prompt cache.
-
-## Phase 6: Persistence & Memory
-
-- [ ] **Session persistence** — Save transcripts to `~/.neo/sessions/{id}.json`. Support `/resume` to reload.
-- [ ] **Session memory** — On exit or compact, distill key facts into `~/.neo/memory/` for future sessions.
-- [ ] **Session tree** — Compaction is branch-aware. Fork/navigate/branch-summarize for long-running sessions.
-
-## Phase 7: Permissions & Safety
-
-- [ ] **Pattern-based permissions** — Allow/deny/ask rules per tool, with glob patterns on arguments (e.g. allow `bash(git *)`, ask for `bash(rm *)`).
-- [ ] **Denial tracking** — After N denials of the same tool pattern, offer permanent allow/deny for the session.
-- [ ] **Container / sandbox mode** — Run subagents in isolated environments. The trust boundary is the dispatch call.
-
-## Phase 8: Extension System
-
-- [ ] **Extension loader** — Load TypeScript or WASM extension modules at runtime. Extensions can register tools, hooks, commands, and UI widgets.
-- [ ] **Custom commands** — `/foo` dispatches to a registered extension. Extensions declare commands with name + description + handler.
-- [ ] **`on_payload` hook** — Intercept/rewrite the raw provider payload before HTTP send. Escape hatch for provider quirks without forking.
 
 ## Design Principles
 

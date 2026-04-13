@@ -723,6 +723,15 @@ fn tool_header(name: &str, input_json: &str) -> String {
             let path = v["file_path"].as_str().map(shorten_path).unwrap_or_default();
             format!("write {}", path)
         }
+        "grep" => {
+            let pattern = v["pattern"].as_str().unwrap_or("...");
+            let path = v["path"].as_str().unwrap_or(".");
+            format!("grep {} {}", truncate_line(pattern, 40), shorten_path(path))
+        }
+        "glob" => {
+            let pattern = v["pattern"].as_str().unwrap_or("...");
+            format!("glob {}", pattern)
+        }
         "dispatch" => {
             let count = v["tasks"].as_array().map(|a| a.len()).unwrap_or(0);
             format!("dispatch {} tasks", count)

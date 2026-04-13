@@ -59,37 +59,66 @@ impl Provider for AnthropicProvider {
                 stream: true,
             };
 
-            let resp = match client
-                .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("content-type", "application/json")
-                .json(&api_request)
-                .send()
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = tx
-                        .send(ProviderEvent::Error(format!("Request failed: {}", e)))
-                        .await;
-                    return;
-                }
-            };
+            const MAX_ATTEMPTS: u32 = 3;
+            let base_delays = [1000u64, 2000, 4000]; // ms
 
-            if !resp.status().is_success() {
+            let mut last_error = String::new();
+
+            for attempt in 0..MAX_ATTEMPTS {
+                let resp = match client
+                    .post("https://api.anthropic.com/v1/messages")
+                    .header("x-api-key", &api_key)
+                    .header("anthropic-version", "2023-06-01")
+                    .header("content-type", "application/json")
+                    .json(&api_request)
+                    .send()
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        last_error = format!("Request failed: {}", e);
+                        if attempt + 1 < MAX_ATTEMPTS {
+                            let delay = backoff_delay(base_delays[attempt as usize], None);
+                            tokio::time::sleep(delay).await;
+                            continue;
+                        }
+                        break;
+                    }
+                };
+
                 let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                let _ = tx
-                    .send(ProviderEvent::Error(format!(
-                        "API error {}: {}",
-                        status, body
-                    )))
-                    .await;
+                let is_retryable =
+                    status.as_u16() == 429 || status.is_server_error();
+
+                if !status.is_success() {
+                    let retry_after = resp
+                        .headers()
+                        .get("retry-after")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .map(|s| s.min(30));
+
+                    let body = resp.text().await.unwrap_or_default();
+                    last_error = format!("API error {}: {}", status, body);
+
+                    if is_retryable && attempt + 1 < MAX_ATTEMPTS {
+                        let delay = backoff_delay(
+                            base_delays[attempt as usize],
+                            retry_after.map(|s| s * 1000),
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    break;
+                }
+
+                // Success — consume the SSE stream and return
+                consume_sse(resp, &tx).await;
                 return;
             }
 
-            consume_sse(resp, &tx).await;
+            // All attempts exhausted
+            let _ = tx.send(ProviderEvent::Error(last_error)).await;
         });
 
         // Convert the receiver into a BoxStream without a tokio-stream dep
@@ -98,6 +127,24 @@ impl Provider for AnthropicProvider {
         })
         .boxed()
     }
+}
+
+/// Compute retry delay: use `retry_after_ms` if provided, otherwise `base_ms` + jitter.
+fn backoff_delay(base_ms: u64, retry_after_ms: Option<u64>) -> std::time::Duration {
+    let ms = match retry_after_ms {
+        Some(ra) => ra,
+        None => {
+            // Add up to 25% jitter
+            let jitter = (base_ms / 4).max(1);
+            let offset = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos() as u64
+                % jitter;
+            base_ms + offset
+        }
+    };
+    std::time::Duration::from_millis(ms)
 }
 
 // --- SSE parser ---

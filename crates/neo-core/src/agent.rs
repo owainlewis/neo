@@ -67,10 +67,6 @@ pub async fn run_turn(
     event_handler: &mut (dyn FnMut(&AgentEvent) + Send),
 ) {
     let mut turn_count = 0;
-    // Only clear tool results from messages that existed *before* this
-    // run_turn invocation. Tool results generated within this run (multi-turn
-    // tool loops) are preserved so the model retains context mid-loop.
-    let preserve_from = state.messages.len();
 
     loop {
         turn_count += 1;
@@ -79,7 +75,7 @@ pub async fn run_turn(
             break;
         }
 
-        clear_stale_tool_results(&mut state.messages, preserve_from);
+        // Hooks handle context management (compaction, steering, etc.)
         hooks.transform_context(&mut state.messages).await;
 
         let system = hooks
@@ -217,23 +213,6 @@ pub async fn run_turn(
     }
 }
 
-/// Clear tool result content from messages that predate the current run_turn
-/// invocation. Messages from `preserve_from` onward are left intact so the
-/// model retains context across multi-turn tool loops within a single run.
-fn clear_stale_tool_results(messages: &mut [Message], preserve_from: usize) {
-    for message in messages[..preserve_from].iter_mut() {
-        if let Message::User { content } = message {
-            for block in content.iter_mut() {
-                if let ContentBlock::ToolResult { content, .. } = block {
-                    if *content != "[cleared]" {
-                        *content = "[cleared]".to_string();
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -250,103 +229,6 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
-    fn tool_result_msg(id: &str, content: &str) -> Message {
-        Message::User {
-            content: vec![ContentBlock::ToolResult {
-                tool_use_id: id.to_string(),
-                content: content.to_string(),
-                is_error: None,
-            }],
-        }
-    }
-
-    fn text_msg(text: &str) -> Message {
-        Message::User {
-            content: vec![ContentBlock::Text {
-                text: text.to_string(),
-            }],
-        }
-    }
-
-    fn assistant_msg(text: &str) -> Message {
-        Message::Assistant {
-            content: vec![ContentBlock::Text {
-                text: text.to_string(),
-            }],
-        }
-    }
-
-    fn get_tool_result_content(msg: &Message) -> Option<&str> {
-        if let Message::User { content } = msg {
-            for block in content {
-                if let ContentBlock::ToolResult { content, .. } = block {
-                    return Some(content);
-                }
-            }
-        }
-        None
-    }
-
-    #[test]
-    fn clears_results_before_preserve_from() {
-        let mut msgs = vec![
-            text_msg("hello"),
-            assistant_msg("response"),
-            tool_result_msg("t1", "file contents here"),
-            assistant_msg("thanks"),
-            text_msg("next question"),
-        ];
-
-        clear_stale_tool_results(&mut msgs, 5);
-        assert_eq!(get_tool_result_content(&msgs[2]), Some("[cleared]"));
-    }
-
-    #[test]
-    fn preserves_results_after_preserve_from() {
-        let mut msgs = vec![
-            text_msg("old question"),
-            assistant_msg("old response"),
-            tool_result_msg("t1", "old result"),
-            // --- preserve_from = 3 ---
-            assistant_msg("new response"),
-            tool_result_msg("t2", "new result"),
-        ];
-
-        clear_stale_tool_results(&mut msgs, 3);
-        assert_eq!(get_tool_result_content(&msgs[2]), Some("[cleared]"));
-        assert_eq!(get_tool_result_content(&msgs[4]), Some("new result"));
-    }
-
-    #[test]
-    fn preserve_from_zero_clears_nothing() {
-        let mut msgs = vec![
-            tool_result_msg("t1", "keep me"),
-            tool_result_msg("t2", "keep me too"),
-        ];
-
-        clear_stale_tool_results(&mut msgs, 0);
-        assert_eq!(get_tool_result_content(&msgs[0]), Some("keep me"));
-        assert_eq!(get_tool_result_content(&msgs[1]), Some("keep me too"));
-    }
-
-    #[test]
-    fn already_cleared_not_double_cleared() {
-        let mut msgs = vec![tool_result_msg("t1", "[cleared]")];
-        clear_stale_tool_results(&mut msgs, 1);
-        assert_eq!(get_tool_result_content(&msgs[0]), Some("[cleared]"));
-    }
-
-    #[test]
-    fn assistant_messages_untouched() {
-        let mut msgs = vec![assistant_msg("hello")];
-        clear_stale_tool_results(&mut msgs, 1);
-        if let Message::Assistant { content } = &msgs[0] {
-            if let ContentBlock::Text { text } = &content[0] {
-                assert_eq!(text, "hello");
-            }
-        }
-    }
-
     #[test]
     fn truncate_short_string() {
         assert_eq!(truncate("hello", 10), "hello");
@@ -361,9 +243,7 @@ mod tests {
 
     #[test]
     fn truncate_unicode_boundary() {
-        // 'é' is 2 bytes in UTF-8
         let result = truncate("café latte", 4);
-        // Should not panic, and should truncate at a valid boundary
-        assert!(result.len() > 0);
+        assert!(!result.is_empty());
     }
 }
