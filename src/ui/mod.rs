@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const MAX_RESULT_LINES: usize = 4;
+const MAX_RESULT_LINES: usize = 8;
 
 // --- Approval channel types ---
 
@@ -194,76 +194,44 @@ impl App {
                 duration_ms,
             } => {
                 self.end_streaming();
-                let summary = tool_input_summary(&name, &input);
-
-                // Tool header: ● ToolName(summary)
-                let (bullet, bullet_color) = if is_error {
-                    ("✗", Color::Red)
-                } else {
-                    ("●", Color::Green)
-                };
-
                 self.push_blank();
 
-                let mut header = vec![
-                    Span::styled(
-                        format!("  {} ", bullet),
-                        Style::default().fg(bullet_color),
-                    ),
-                    Span::styled(
-                        capitalize(&name),
-                        Style::default().fg(bullet_color).bold(),
-                    ),
-                ];
-                if !summary.is_empty() {
-                    header.push(Span::styled(
-                        format!("({})", summary),
-                        Style::default().dim(),
-                    ));
-                }
-                if duration_ms > 1000 {
-                    header.push(Span::styled(
-                        format!(" {:.1}s", duration_ms as f64 / 1000.0),
-                        Style::default().dim(),
-                    ));
-                }
-                self.output.push(Line::from(header));
+                let result_color = Color::Rgb(150, 150, 165);
 
-                // Tool result lines with tree indent
+                // Tool header — PI style: "$ command" for bash, "read path" for read, etc.
+                let header = tool_header(&name, &input);
+                let header_color = if is_error { Color::Red } else { Color::Rgb(180, 180, 190) };
+                self.output.push(Line::from(Span::styled(
+                    format!("  {}", header),
+                    Style::default().fg(header_color),
+                )));
+
+                // Result lines — show last N lines, truncate from top
                 let result_lines: Vec<&str> = result.lines().collect();
-                let show = result_lines.len().min(MAX_RESULT_LINES);
-                let hidden = result_lines.len().saturating_sub(MAX_RESULT_LINES);
-
-                for (i, line) in result_lines[..show].iter().enumerate() {
-                    let connector = if i == show - 1 && hidden == 0 {
-                        "└ "
-                    } else {
-                        "│ "
-                    };
-                    self.output.push(Line::from(vec![
-                        Span::styled(
-                            format!("    {} ", connector),
-                            Style::default().fg(Color::Rgb(60, 60, 70)),
-                        ),
-                        Span::styled(
-                            truncate_line(line, 120),
-                            Style::default().fg(Color::Rgb(150, 150, 165)),
-                        ),
-                    ]));
-                }
+                let total = result_lines.len();
+                let hidden = total.saturating_sub(MAX_RESULT_LINES);
+                let visible_start = hidden;
 
                 if hidden > 0 {
-                    self.output.push(Line::from(vec![
-                        Span::styled(
-                            "    └ ".to_string(),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                        Span::styled(
-                            format!("… +{} lines", hidden),
-                            Style::default().dim().italic(),
-                        ),
-                    ]));
+                    self.output.push(Line::from(Span::styled(
+                        format!("  ... ({} earlier lines)", hidden),
+                        Style::default().fg(Color::Rgb(80, 80, 90)).italic(),
+                    )));
                 }
+
+                for line in &result_lines[visible_start..] {
+                    self.output.push(Line::from(Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(result_color),
+                    )));
+                }
+
+                // Timing on its own line
+                let secs = duration_ms as f64 / 1000.0;
+                self.output.push(Line::from(Span::styled(
+                    format!("  Took {:.1}s", secs),
+                    Style::default().fg(Color::Rgb(80, 80, 90)),
+                )));
 
                 self.scroll_offset = 0;
             }
@@ -739,6 +707,39 @@ impl App {
 }
 
 // --- Helper functions ---
+
+/// Format tool call as a clean header line (PI style).
+/// bash → "$ ls -la", read → "read src/main.rs", edit → "edit src/main.rs"
+fn tool_header(name: &str, input_json: &str) -> String {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(input_json) else {
+        return format!("{} {}", name, truncate_line(input_json, 60));
+    };
+    match name {
+        "bash" => {
+            let cmd = v["command"].as_str().unwrap_or("...");
+            format!("$ {}", truncate_line(cmd, 80))
+        }
+        "read" => {
+            let path = v["file_path"].as_str().map(shorten_path).unwrap_or_default();
+            format!("read {}", path)
+        }
+        "edit" => {
+            let path = v["file_path"].as_str().map(shorten_path).unwrap_or_default();
+            format!("edit {}", path)
+        }
+        "write" => {
+            let path = v["file_path"].as_str().map(shorten_path).unwrap_or_default();
+            format!("write {}", path)
+        }
+        "dispatch" => {
+            let count = v["tasks"].as_array().map(|a| a.len()).unwrap_or(0);
+            format!("dispatch {} tasks", count)
+        }
+        _ => {
+            format!("{} {}", name, truncate_line(input_json, 60))
+        }
+    }
+}
 
 pub fn tool_input_summary(name: &str, input_json: &str) -> String {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(input_json) else {
