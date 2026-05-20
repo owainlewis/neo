@@ -1,2 +1,5 @@
-/target
 .env
+/bin/
+/dist/
+/.agent/
+/neo
