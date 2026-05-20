@@ -1,27 +1,24 @@
+// Package flow is a backwards-compatibility shim around internal/workflow.
+//
+// New code should use internal/workflow directly. This package preserves the
+// existing line-printer-shaped API (StatusUpdate / OnStatus / OnEvent) so the
+// `neo flow` CLI keeps working unchanged while the rest of the codebase
+// migrates. See GH #22.
 package flow
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/artifact"
 	"github.com/owainlewis/neo/internal/phase"
+	"github.com/owainlewis/neo/internal/workflow"
 )
 
-type Definition struct {
-	Name      string   `yaml:"name"`
-	Phases    []string `yaml:"phases"`
-	RetryFrom string   `yaml:"retry_from"`
-	MaxRounds int      `yaml:"max_rounds"`
-}
+// Definition mirrors workflow.Definition; alias rather than rewrap.
+type Definition = workflow.Definition
 
+// Status enumerates the legacy line-printer status codes.
 type Status string
 
 const (
@@ -32,15 +29,22 @@ const (
 	StatusRetrying   Status = "retrying"
 )
 
+// StatusUpdate is the message shape the line printer (internal/ui) consumes.
 type StatusUpdate struct {
-	Phase     string
-	Index     int
-	Total     int
-	Round     int
-	Status    Status
-	Message   string
+	Phase   string
+	Index   int
+	Total   int
+	Round   int
+	Status  Status
+	Message string
 }
 
+// LoadDefinition reads a workflow YAML file.
+func LoadDefinition(path string) (*Definition, error) {
+	return workflow.LoadDefinition(path)
+}
+
+// Runner is the legacy facade. New code should use workflow.Engine directly.
 type Runner struct {
 	PhasesDir string
 	Runner    *phase.Runner
@@ -49,122 +53,73 @@ type Runner struct {
 	OnEvent   func(string, agent.Event)
 }
 
-func LoadDefinition(path string) (*Definition, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var d Definition
-	if err := yaml.Unmarshal(b, &d); err != nil {
-		return nil, err
-	}
-	if d.MaxRounds == 0 {
-		d.MaxRounds = 3
-	}
-	return &d, nil
-}
-
-func (r *Runner) loadPhase(name string) (phase.Definition, error) {
-	path := filepath.Join(r.PhasesDir, name+".yaml")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		mdPath := filepath.Join(r.PhasesDir, name+".md")
-		if _, err2 := os.Stat(mdPath); err2 == nil {
-			return phase.Definition{Name: name, PromptPath: mdPath}, nil
-		}
-		return phase.Definition{}, err
-	}
-	var d phase.Definition
-	if err := yaml.Unmarshal(b, &d); err != nil {
-		return d, err
-	}
-	if d.Name == "" {
-		d.Name = name
-	}
-	if d.PromptPath == "" {
-		d.PromptPath = filepath.Join(r.PhasesDir, name+".md")
-	} else if !filepath.IsAbs(d.PromptPath) {
-		d.PromptPath = filepath.Join(r.PhasesDir, d.PromptPath)
-	}
-	return d, nil
-}
-
-func (r *Runner) status(u StatusUpdate) {
-	if r.OnStatus != nil {
-		r.OnStatus(u)
-	}
-}
-
+// Run executes the workflow via the new engine, translating events back into
+// the legacy StatusUpdate shape.
 func (r *Runner) Run(ctx context.Context, def Definition, task string) error {
-	runID := fmt.Sprintf("%s-%d", def.Name, time.Now().Unix())
-	if err := r.Store.InitRun(runID); err != nil {
-		return err
+	sink := &legacySink{
+		onStatus: r.OnStatus,
+		onEvent:  r.OnEvent,
 	}
-
-	artifacts := map[string]string{}
-	total := len(def.Phases)
-	retryStart := 0
-	if def.RetryFrom != "" {
-		for i, p := range def.Phases {
-			if p == def.RetryFrom {
-				retryStart = i
-				break
-			}
-		}
+	eng := &workflow.Engine{
+		PhasesDir: r.PhasesDir,
+		Runner:    r.Runner,
+		Store:     r.Store,
+		Sink:      sink,
 	}
-
-	for round := 1; round <= def.MaxRounds; round++ {
-		start := 0
-		if round > 1 {
-			start = retryStart
-		}
-
-		failed := false
-		for i := start; i < total; i++ {
-			name := def.Phases[i]
-			r.status(StatusUpdate{Phase: name, Index: i + 1, Total: total, Round: round, Status: StatusInProgress})
-
-			pdef, err := r.loadPhase(name)
-			if err != nil {
-				r.status(StatusUpdate{Phase: name, Index: i + 1, Total: total, Round: round, Status: StatusFailed, Message: err.Error()})
-				return err
-			}
-
-			result, err := r.Runner.Run(ctx, pdef, phase.Input{Task: task, Artifacts: artifacts})
-			if err != nil {
-				r.status(StatusUpdate{Phase: name, Index: i + 1, Total: total, Round: round, Status: StatusFailed, Message: err.Error()})
-				return err
-			}
-
-			artifacts[name] = result.Output
-			_ = r.Store.WritePhase(runID, name, round, result.Output)
-
-			if failsHeuristic(result.Output) {
-				failed = true
-				r.status(StatusUpdate{Phase: name, Index: i + 1, Total: total, Round: round, Status: StatusFailed, Message: "phase reports failure"})
-				if def.RetryFrom != "" && round < def.MaxRounds {
-					r.status(StatusUpdate{Phase: name, Index: i + 1, Total: total, Round: round, Status: StatusRetrying})
-					break
-				}
-				return fmt.Errorf("phase %s failed (round %d)", name, round)
-			}
-
-			r.status(StatusUpdate{Phase: name, Index: i + 1, Total: total, Round: round, Status: StatusCompleted})
-		}
-
-		if !failed {
-			return nil
-		}
-	}
-	return fmt.Errorf("max rounds (%d) reached", def.MaxRounds)
+	return eng.Run(ctx, def, task)
 }
 
-func failsHeuristic(output string) bool {
-	lower := strings.ToLower(output)
-	for _, marker := range []string{"verdict: fail", "status: fail", "result: fail", "❌", "blocking issues:", "tests failed"} {
-		if strings.Contains(lower, strings.ToLower(marker)) {
-			return true
+// legacySink converts workflow events into the legacy StatusUpdate / OnEvent
+// callbacks that the line printer expects.
+type legacySink struct {
+	onStatus func(StatusUpdate)
+	onEvent  func(string, agent.Event)
+
+	// lastFailedPhase remembers which phase emitted PhaseFailed so we can
+	// re-issue it as StatusRetrying when a RoundRetrying event follows.
+	lastFailedPhase string
+	lastFailedIndex int
+	lastFailedRound int
+	lastFailedTotal int
+}
+
+func (s *legacySink) OnWorkflow(e workflow.Event) {
+	if s.onStatus == nil {
+		return
+	}
+	switch e.Kind {
+	case workflow.PhaseStarted:
+		s.onStatus(StatusUpdate{
+			Phase: e.Phase, Index: e.Index, Total: e.Total,
+			Round: e.Round, Status: StatusInProgress,
+		})
+	case workflow.PhaseCompleted:
+		s.onStatus(StatusUpdate{
+			Phase: e.Phase, Index: e.Index, Total: e.Total,
+			Round: e.Round, Status: StatusCompleted,
+		})
+	case workflow.PhaseFailed:
+		s.onStatus(StatusUpdate{
+			Phase: e.Phase, Index: e.Index, Total: e.Total,
+			Round: e.Round, Status: StatusFailed, Message: e.Message,
+		})
+		s.lastFailedPhase = e.Phase
+		s.lastFailedIndex = e.Index
+		s.lastFailedRound = e.Round
+		s.lastFailedTotal = e.Total
+	case workflow.RoundRetrying:
+		if s.lastFailedPhase != "" {
+			s.onStatus(StatusUpdate{
+				Phase: s.lastFailedPhase, Index: s.lastFailedIndex, Total: s.lastFailedTotal,
+				Round: s.lastFailedRound, Status: StatusRetrying, Message: e.Message,
+			})
+			s.lastFailedPhase = ""
 		}
 	}
-	return false
+}
+
+func (s *legacySink) OnAgent(phase string, ev agent.Event) {
+	if s.onEvent != nil {
+		s.onEvent(phase, ev)
+	}
 }
