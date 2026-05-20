@@ -1,143 +1,136 @@
 # Neo
 
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The best AI agent in the world. Minimal. Extensible. Not just for coding.
+Neo is a fast, minimalist coding agent with first-class workflow support.
 
-Neo is a general-purpose AI agent with a pure, policy-free core. Swap the system prompt and tools to build anything — a coding assistant, a research agent, a trading bot, a content writer. The core doesn't know what it's being used for. That's the point.
+It is being rewritten in Go around a small core loop, a practical terminal UI,
+and explicit multi-phase flows for building, reviewing, evaluating, and landing
+code changes. The goal is simple: keep the agent easy to understand, easy to
+run, and strong at the real shape of software work.
 
-## Philosophy
+## What Neo Does
 
-- **No permission popups.** Tools run freely. A danger guard blacklist catches genuinely destructive commands. Run in a container if you want full isolation.
-- **No baked-in behavior.** Plan mode, safety policies, context compaction — everything is a composable hook, not hardcoded in the loop.
-- **Parallel by default.** Fan out 10 research workers with `dispatch`. Read-only tools run concurrently. The agent doesn't wait when it doesn't have to.
-- **One prompt away from a different agent.** `neo -p ./trader.md` is a trading agent. `neo -p ./writer.md` is a content agent. Same core, same tools, different brain.
-- **Minimal, not incomplete.** Small codebase (~2500 lines of Rust), zero unnecessary abstractions, but nothing is missing. Streaming, hooks, subagents, TUI — it's all there.
+- **Interactive coding.** Use `neo chat` for a focused terminal coding agent
+  that can inspect files, run commands, and make edits.
+- **Workflow automation.** Use `neo flow` to run repeatable phase-based
+  workflows such as build -> review -> eval -> finalize.
+- **Single-phase runs.** Use `neo phase` when you want one role prompt to act on
+  a task without running a full workflow.
+- **Plain files as workflow.** Phases live in `phases/*.md`; flows live in
+  `flows/*.yaml`. You can edit the process without changing code.
+- **Small tool surface.** Neo starts with bash, read, write, and exact-match edit
+  tools. The shape is intentionally boring and inspectable.
 
-## Architecture
+## Status
 
-```
-neo-core       Pure agent loop, streaming Provider, Hooks, SubagentSpawner
-neo-coding     Coding bundle: bash/read/edit/write tools, default prompt
-binary         TUI, DangerGuard, CLI args
-```
+Neo is in an active Go rewrite. The old Rust implementation has been moved to
+`legacy/` while the new Go implementation lives under `cmd/neo` and `internal/`.
 
-The core knows nothing about coding, files, or approval policy. Everything is injected.
-
-## Quick start
+## Quick Start
 
 ```bash
 git clone https://github.com/owainlewis/neo.git
 cd neo
-cargo build --release
+go build ./cmd/neo
 export ANTHROPIC_API_KEY="your_key"
-./target/release/neo
+./neo chat
+```
+
+Or install it onto your `GOBIN` path:
+
+```bash
+go install ./cmd/neo
+neo chat
 ```
 
 ## Usage
 
 ```bash
-neo                                  # coding agent (default)
-neo -p ./custom-prompt.md            # any agent you want
-neo --yolo                           # disable danger guard
-neo --help                           # show options
+neo chat
+neo flow implementation "Add request cancellation"
+neo flow full "Refactor the config loader"
+neo phase review "Check the current diff for blocking issues"
+neo help
 ```
 
-### Keyboard shortcuts
+### Commands
 
-| Key | Action |
-|-----|--------|
-| Enter | Submit |
-| Alt+Enter | New line (multiline input) |
-| Shift+Tab | Toggle plan/execute mode |
-| Ctrl+W | Delete word backward |
-| Ctrl+U | Kill to start of line |
-| Ctrl+K | Kill to end of line |
-| Ctrl+C | Quit |
+| Command | Description |
+|---------|-------------|
+| `neo chat` | Start the interactive terminal coding agent |
+| `neo flow <name> "<task>"` | Run a named workflow from `flows/<name>.yaml` |
+| `neo phase <name> "<task>"` | Run a single phase prompt from `phases/<name>.md` |
+| `neo help` | Show CLI help |
 
-### Slash commands
+## Workflows
 
+A flow is a YAML file that names the phases to run and where to retry from if a
+later phase fails.
+
+```yaml
+name: implementation
+retry_from: build
+max_rounds: 3
+phases:
+  - build
+  - eval
+  - finalize
 ```
-/plan        Plan mode (read-only tools)
-/execute     Execute mode (all tools)
-/model       Show current model
-/clear       Clear conversation
-/help        Show help
-/exit        Quit
-```
+
+The default flows are:
+
+| Flow | Phases |
+|------|--------|
+| `implementation` | `build`, `eval`, `finalize` |
+| `full` | `build`, `review`, `eval`, `finalize` |
+
+Phase prompts are Markdown files. A phase gets the original task plus artifacts
+from earlier phases, then writes its result into `.agent/runs/`.
 
 ## Configuration
 
-Single config file: `~/.neo/config.toml`
-
-```toml
-model = "claude-opus-4-6"
-max_tokens = 16384
-
-[guard]
-block = [
-    "kubectl delete",
-    "terraform destroy",
-]
-allow = [
-    "reset --hard",
-]
-```
-
-Or environment variables:
+Neo is configured with environment variables.
 
 ```bash
 export ANTHROPIC_API_KEY="your_key"
-export NEO_MODEL="claude-sonnet-4-20250514"
+export NEO_MODEL="claude-sonnet-4-6"
+export NEO_PHASES_DIR="./phases"
+export NEO_FLOWS_DIR="./flows"
 ```
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Required API key for the Anthropic provider |
+| `NEO_MODEL` | Model name. Defaults to `claude-sonnet-4-6` |
+| `NEO_PHASES_DIR` | Directory for phase prompts. Defaults to `./phases` or `~/.neo/phases` |
+| `NEO_FLOWS_DIR` | Directory for flow definitions. Defaults to `./flows` or `~/.neo/flows` |
+
+Artifacts are written to `.agent/runs` by default.
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `bash` | Execute shell commands |
-| `read` | Read files with line numbers |
-| `edit` | Replace exact string matches |
-| `write` | Create or overwrite files |
-| `dispatch` | Fan out parallel subagent workers |
+| `bash` | Run shell commands with a timeout |
+| `read_file` | Read a file from disk |
+| `write_file` | Create or overwrite a file |
+| `edit_file` | Replace one exact string match in a file |
 
-### Adding your own
+## Project Layout
 
-```rust
-use neo_core::{Tool, ToolOutput};
-
-pub struct MyTool;
-
-#[async_trait::async_trait]
-impl Tool for MyTool {
-    fn name(&self) -> &str { "my_tool" }
-    fn description(&self) -> &str { "Does something useful" }
-    fn input_schema(&self) -> serde_json::Value { todo!() }
-    fn is_read_only(&self) -> bool { true }
-
-    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, String> {
-        Ok(ToolOutput::text("result".into()))
-    }
-}
+```text
+cmd/neo/                 CLI entry point
+internal/agent/          Agent loop and event model
+internal/flow/           Multi-phase workflow runner
+internal/phase/          Single phase runner
+internal/tools/          Built-in tool implementations
+internal/tui/            Bubble Tea terminal UI
+flows/                   Workflow definitions
+phases/                  Phase prompts
+legacy/                  Previous Rust implementation
 ```
-
-## Hooks
-
-Everything pluggable:
-
-```rust
-#[async_trait]
-impl Hooks for MyHook {
-    async fn augment_system_prompt(&self, prompt: String) -> String { ... }
-    async fn filter_tools(&self, tools: Vec<ToolDefinition>) -> Vec<ToolDefinition> { ... }
-    async fn before_tool_call(&self, call: &ToolUseBlock) -> HookDecision { ... }
-    async fn after_tool_call(&self, call: &ToolUseBlock, result: ToolResult) -> ToolResult { ... }
-    async fn transform_context(&self, messages: &mut Vec<Message>) { ... }
-}
-```
-
-Compose with `HookChain::new().add(hook_a).add(hook_b)`.
 
 ## License
 
