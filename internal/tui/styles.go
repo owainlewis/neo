@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 var (
 	colMuted   = lipgloss.Color("244")
@@ -9,6 +9,11 @@ var (
 	colTool    = lipgloss.Color("14")
 	colOK      = lipgloss.Color("10")
 	colErr     = lipgloss.Color("9")
+	// Status-dot palette. The dot is always present in the status line; its
+	// color encodes what the agent is doing.
+	colDotReady    = lipgloss.Color("42")  // green  — idle, awaiting input
+	colDotThinking = lipgloss.Color("208") // orange — model is thinking
+	colDotTool     = lipgloss.Color("14")  // cyan   — a tool is in flight
 	colCardBg  = lipgloss.Color("236")
 	colToolBg  = lipgloss.Color("235")
 	colInputBg = lipgloss.Color("234")
