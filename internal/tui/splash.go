@@ -7,11 +7,11 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// splashBlock renders the welcome banner shown once at the top of every
-// chat session: a small letter-spaced wordmark inside a thin rounded box,
-// metadata on one inline row, and a slash-command hint.
-//
-// Lives in scrollback so it stays available when the user scrolls back.
+// splashBlock renders the welcome shown once at the top of every chat
+// session. Visual model: a left-edge gradient bar carries the brand colour;
+// the wordmark, tagline and metadata sit beside it like a magazine
+// pull-quote. No borders, no ASCII art — the gradient is the graphical
+// element.
 type splashBlock struct {
 	version string
 	model   string
@@ -19,53 +19,62 @@ type splashBlock struct {
 	branch  string
 }
 
-func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
-	mark := lipgloss.NewStyle().
-		Foreground(colBanner).
-		Bold(true).
-		Render("n e o")
-	boxed := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colBanner).
-		Padding(0, 2).
-		Render(mark)
-
-	parts := []string{b.version, b.model}
-	if b.branch != "" && b.branch != "no-git" {
-		parts = append(parts, b.branch)
-	}
-	parts = append(parts, b.cwd)
-
-	sep := styDim.Render(" · ")
-	rendered := make([]string, len(parts))
-	for i, p := range parts {
-		rendered[i] = styMuted.Render(p)
-	}
-	metaLine := strings.Join(rendered, sep)
-
-	hint := styDim.Render("type ") + styTool.Render("/help") +
-		styDim.Render(" for slash commands")
-
-	var sb strings.Builder
-	// Breathing room above the banner.
-	sb.WriteString("\n\n")
-	sb.WriteString("  " + indent(boxed, "  "))
-	sb.WriteString("\n\n  ")
-	sb.WriteString(metaLine)
-	sb.WriteString("\n\n  ")
-	sb.WriteString(hint)
-	return sb.String()
+// gradient is the vertical color ramp for the left accent bar — Tailwind
+// sky-400 → sky-800. Top is lightest, bottom is deepest. Truecolor; on
+// terminals without 24-bit support lipgloss downconverts to the nearest
+// 256-color palette automatically.
+var gradient = []string{
+	"#38bdf8", // sky-400
+	"#0ea5e9", // sky-500
+	"#0284c7", // sky-600
+	"#0369a1", // sky-700
+	"#075985", // sky-800
 }
 
-// indent prepends a prefix to every line after the first; the first line is
-// expected to already carry its own leading padding from the caller.
-func indent(s, prefix string) string {
-	if !strings.Contains(s, "\n") {
-		return s
+const tagline = "a coding agent"
+
+func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
+	// Wordmark: bold true-white so it pops against the muted metadata while
+	// the gradient bar carries the colour.
+	wordmark := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("231")).
+		Bold(true).
+		Render("NEO")
+
+	sep := styDim.Render("  ·  ")
+	pieces := []string{styMuted.Render(b.version), styMuted.Render(b.model)}
+	if b.branch != "" && b.branch != "no-git" {
+		pieces = append(pieces, styMuted.Render(b.branch))
 	}
-	lines := strings.Split(s, "\n")
-	for i := 1; i < len(lines); i++ {
-		lines[i] = prefix + lines[i]
+	metaLine := strings.Join(pieces, sep)
+	cwdLine := styMuted.Render(b.cwd)
+
+	// Five content lines aligned to the five-stop gradient bar. The empty
+	// middle line creates a visual break between mark and metadata without
+	// needing a separator rule.
+	content := []string{
+		wordmark,
+		styMuted.Render(tagline),
+		"",
+		metaLine,
+		cwdLine,
 	}
-	return strings.Join(lines, "\n")
+
+	var sb strings.Builder
+	sb.WriteString("\n\n")
+	for i, line := range content {
+		bar := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(gradient[i])).
+			Render("█")
+		sb.WriteString("   ")
+		sb.WriteString(bar)
+		sb.WriteString("   ")
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n   ")
+	sb.WriteString(styDim.Render("type "))
+	sb.WriteString(styTool.Render("/help"))
+	sb.WriteString(styDim.Render(" for slash commands"))
+	return sb.String()
 }

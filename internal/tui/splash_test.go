@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSplashBlock_RendersWordmarkAndMetadata(t *testing.T) {
+func TestSplashBlock_RendersWordmarkTaglineAndMetadata(t *testing.T) {
 	b := splashBlock{
 		version: "v0.2.0",
 		model:   "claude-sonnet-4-6",
@@ -14,31 +14,37 @@ func TestSplashBlock_RendersWordmarkAndMetadata(t *testing.T) {
 	}
 	out := plain(b.render(80, nil))
 
-	// Wordmark "n e o" appears inside the rounded box.
-	if !strings.Contains(out, "n e o") {
-		t.Fatalf("expected wordmark 'n e o' in splash, got:\n%s", out)
-	}
-	// Rounded border corner — sanity check the box is present.
-	if !strings.Contains(out, "╭") || !strings.Contains(out, "╯") {
-		t.Fatalf("expected rounded box corners in splash, got:\n%s", out)
-	}
-	// All metadata + the /help hint are present.
-	for _, want := range []string{"v0.2.0", "claude-sonnet-4-6", "~/Code/neo", "main", "/help"} {
+	for _, want := range []string{
+		"NEO", "a coding agent",
+		"v0.2.0", "claude-sonnet-4-6", "main", "~/Code/neo",
+		"/help",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("splash missing %q:\n%s", want, out)
 		}
 	}
 	// Inline `·` separator between metadata values.
 	if !strings.Contains(out, "·") {
-		t.Errorf("expected inline `·` separator in metadata row, got:\n%s", out)
+		t.Errorf("expected `·` separator in metadata row, got:\n%s", out)
+	}
+}
+
+func TestSplashBlock_RendersGradientBar(t *testing.T) {
+	b := splashBlock{version: "dev", model: "m", cwd: "/tmp"}
+	out := plain(b.render(80, nil))
+	// Five lines of █ — one per gradient stop. Count occurrences of the
+	// block character (the bar) to confirm the lockup is the expected shape.
+	got := strings.Count(out, "█")
+	if got != len(gradient) {
+		t.Fatalf("expected %d gradient bar chars, got %d in:\n%s", len(gradient), got, out)
 	}
 }
 
 func TestSplashBlock_OmitsBranchWhenAbsent(t *testing.T) {
 	b := splashBlock{version: "dev", model: "m", cwd: "/tmp"}
 	out := plain(b.render(80, nil))
-	// Branch shouldn't appear when it wasn't supplied.
-	if strings.Contains(out, "main") || strings.Contains(out, "no-git") {
+	// "main" shouldn't appear when no branch was supplied.
+	if strings.Contains(out, "main") {
 		t.Fatalf("expected no branch token in output, got:\n%s", out)
 	}
 }
