@@ -117,6 +117,30 @@ func TestSlashCommand_UnknownEmitsError(t *testing.T) {
 	}
 }
 
+// Regression: /run must not start a workflow while a chat turn is still
+// running. The chat agent and the workflow's phase.Runner share the same
+// Runner.OnEvent surface; the engine would overwrite it mid-turn.
+func TestSlashCommand_RunRejectsWhileChatBusy(t *testing.T) {
+	m := makeTestModel(t)
+	m.busy = true
+
+	m.handleSlashCommand("/run code something")
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(m.blocks))
+	}
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "chat turn") {
+		t.Fatalf("error should mention chat busy state, got %v", eb.err)
+	}
+	if m.activeWorkflow != nil {
+		t.Fatal("activeWorkflow should remain nil after rejection")
+	}
+}
+
 // Regression: /run must not start a second workflow while one is already
 // active. Doing so would let the previous goroutine's events mutate the
 // new block and clear the new run when the old one finished.

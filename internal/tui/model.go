@@ -359,6 +359,14 @@ func (m *model) startWorkflowCmd(name, task string) {
 		m.appendBlock(errorBlock{err: fmt.Errorf("a workflow is already running — /cancel it first")})
 		return
 	}
+	// Also reject when a chat turn is in flight. The chat agent and the
+	// workflow's phase.Runner share the same Provider/Tools instance; the
+	// engine would also try to take over Runner.OnEvent, which is being
+	// driven by the chat turn and would race with it.
+	if m.busy {
+		m.appendBlock(errorBlock{err: fmt.Errorf("a chat turn is in flight — wait or Esc to cancel before /run")})
+		return
+	}
 	def, err := m.wf.definitionFor(name)
 	if err != nil {
 		m.appendBlock(errorBlock{err: err})
