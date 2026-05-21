@@ -1,0 +1,10 @@
+# neo default configuration.
+# Override by creating ./neo.yaml in a project, or ~/.neo/config.yaml globally.
+
+model: claude-sonnet-4-6
+
+flows:
+  code:
+    steps: [write, review]
+    retry_from: write
+    max_rounds: 2

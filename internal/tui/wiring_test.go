@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -26,7 +27,7 @@ func (r *recordingSend) send(m tea.Msg) {
 func TestTuiSink_ForwardsWorkflowEvents(t *testing.T) {
 	rec := &recordingSend{}
 	s := &tuiSink{send: rec.send}
-	want := workflow.Event{Kind: workflow.PhaseStarted, Phase: "build", Round: 1, Index: 1, Total: 2}
+	want := workflow.Event{Kind: workflow.StepStarted, Step: "build", Round: 1, Index: 1, Total: 2}
 	s.OnWorkflow(want)
 
 	if len(rec.msgs) != 1 {
@@ -50,8 +51,8 @@ func TestTuiSink_ForwardsAgentEventsWithPhase(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected workflowAgentEventMsg, got %T", rec.msgs[0])
 	}
-	if got.phase != "build" {
-		t.Fatalf("phase: got %q want build", got.phase)
+	if got.step != "build" {
+		t.Fatalf("step: got %q want build", got.step)
 	}
 	if got.ev.Name != "bash" {
 		t.Fatalf("agent event not preserved: %+v", got.ev)
@@ -157,9 +158,13 @@ func TestSlashCommand_CancelWorksWhileWorkflowActive(t *testing.T) {
 }
 
 func TestSlashCommand_RunMissingFlowEmitsError(t *testing.T) {
-	// /run names a flow that doesn't exist; loadDefinition returns an error.
+	// /run names a flow that doesn't exist in the config.
 	m := makeTestModel(t)
-	m.wf = WorkflowConfig{FlowsDir: t.TempDir()}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	m.wf = WorkflowConfig{Config: cfg}
 	m.handleSlashCommand("/run nonexistent some task")
 
 	if len(m.blocks) != 1 {
@@ -169,7 +174,7 @@ func TestSlashCommand_RunMissingFlowEmitsError(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
 	}
-	if !strings.Contains(eb.err.Error(), "load flow") {
-		t.Fatalf("error should reference load failure, got %v", eb.err)
+	if !strings.Contains(eb.err.Error(), "no flow") {
+		t.Fatalf("error should reference missing flow, got %v", eb.err)
 	}
 }

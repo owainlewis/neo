@@ -1,8 +1,0 @@
-name: full
-retry_from: build
-max_rounds: 3
-phases:
-  - build
-  - review
-  - eval
-  - finalize

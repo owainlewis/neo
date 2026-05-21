@@ -227,7 +227,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workflowAgentEventMsg:
 		if m.activeWorkflow != nil {
-			m.activeWorkflow.ApplyAgent(msg.phase, msg.ev)
+			m.activeWorkflow.ApplyAgent(msg.step, msg.ev)
 			m.refreshViewport()
 		}
 
@@ -355,12 +355,12 @@ func (m *model) startWorkflowCmd(name, task string) {
 		m.appendBlock(errorBlock{err: fmt.Errorf("a workflow is already running — /cancel it first")})
 		return
 	}
-	def, err := m.wf.loadDefinition(name)
+	def, err := m.wf.definitionFor(name)
 	if err != nil {
-		m.appendBlock(errorBlock{err: fmt.Errorf("load flow %q: %w", name, err)})
+		m.appendBlock(errorBlock{err: err})
 		return
 	}
-	block := newWorkflowBlock(def.Name, task, def.Phases, def.MaxRounds)
+	block := newWorkflowBlock(def.Name, task, def.Steps, def.MaxRounds)
 	m.activeWorkflow = block
 	m.appendBlock(block)
 	m.input.Placeholder = workflowPlaceholder
@@ -408,12 +408,12 @@ func (m *model) statusLine() string {
 	return line
 }
 
-// workflowStatusBody describes the current workflow phase for the status line.
+// workflowStatusBody describes the current workflow step for the status line.
 func (m *model) workflowStatusBody() string {
 	w := m.activeWorkflow
-	if w.active >= 0 && w.active < len(w.phases) {
-		phase := w.phases[w.active].name
-		s := fmt.Sprintf("workflow: %s · %d/%d", phase, w.active+1, len(w.phases))
+	if w.active >= 0 && w.active < len(w.steps) {
+		step := w.steps[w.active].name
+		s := fmt.Sprintf("workflow: %s · %d/%d", step, w.active+1, len(w.steps))
 		if w.detail != "" {
 			s += " · " + w.detail
 		}
