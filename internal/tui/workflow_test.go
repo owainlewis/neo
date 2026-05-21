@@ -45,7 +45,7 @@ func TestWorkflowBlock_InitialRenderShowsAllPending(t *testing.T) {
 
 func TestWorkflowBlock_PhaseStartedMarksActive(t *testing.T) {
 	b := newTestBlock(t, "build", "eval")
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build", Round: 1, Index: 1, Total: 2})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build", Round: 1, Index: 1, Total: 2})
 
 	out := plain(b.render(80, nil))
 	if !strings.Contains(out, "▶ build") {
@@ -58,10 +58,10 @@ func TestWorkflowBlock_PhaseStartedMarksActive(t *testing.T) {
 
 func TestWorkflowBlock_PhaseCompletedShowsDuration(t *testing.T) {
 	b := newTestBlock(t, "build")
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
 	// Simulate elapsed time by rewriting the start timestamp.
-	b.phases[0].started = time.Now().Add(-1500 * time.Millisecond)
-	b.Apply(workflow.Event{Kind: workflow.PhaseCompleted, Phase: "build"})
+	b.steps[0].started = time.Now().Add(-1500 * time.Millisecond)
+	b.Apply(workflow.Event{Kind: workflow.StepCompleted, Step: "build"})
 
 	out := plain(b.render(80, nil))
 	if !strings.Contains(out, "✓ build") {
@@ -75,8 +75,8 @@ func TestWorkflowBlock_PhaseCompletedShowsDuration(t *testing.T) {
 
 func TestWorkflowBlock_PhaseFailedShowsMessage(t *testing.T) {
 	b := newTestBlock(t, "build")
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build"})
-	b.Apply(workflow.Event{Kind: workflow.PhaseFailed, Phase: "build", Message: "tests failed"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
+	b.Apply(workflow.Event{Kind: workflow.StepFailed, Step: "build", Message: "tests failed"})
 
 	out := plain(b.render(80, nil))
 	if !strings.Contains(out, "✗ build") {
@@ -89,19 +89,19 @@ func TestWorkflowBlock_PhaseFailedShowsMessage(t *testing.T) {
 
 func TestWorkflowBlock_RoundRetryingResetsFailedPhases(t *testing.T) {
 	b := newTestBlock(t, "build", "eval")
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build"})
-	b.Apply(workflow.Event{Kind: workflow.PhaseFailed, Phase: "build", Message: "broke"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
+	b.Apply(workflow.Event{Kind: workflow.StepFailed, Step: "build", Message: "broke"})
 	// No Phase on the event → fall back to "only reset failed".
 	b.Apply(workflow.Event{Kind: workflow.RoundRetrying, Round: 2})
 
 	if b.round != 2 {
 		t.Fatalf("round = %d, want 2", b.round)
 	}
-	if b.phases[0].status != phasePending {
-		t.Fatalf("failed phase not reset to pending: %+v", b.phases[0])
+	if b.steps[0].status != stepPending {
+		t.Fatalf("failed phase not reset to pending: %+v", b.steps[0])
 	}
-	if b.phases[0].message != "" {
-		t.Fatalf("failed phase message not cleared: %q", b.phases[0].message)
+	if b.steps[0].message != "" {
+		t.Fatalf("failed phase message not cleared: %q", b.steps[0].message)
 	}
 
 	out := plain(b.render(80, nil))
@@ -120,18 +120,18 @@ func TestWorkflowBlock_RoundRetryingResetsFailedPhases(t *testing.T) {
 func TestWorkflowBlock_RoundRetryingResetsAllPhasesFromRetryFrom(t *testing.T) {
 	b := newTestBlock(t, "build", "eval", "finalize")
 	// Round 1: build and eval complete; finalize fails.
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build"})
-	b.Apply(workflow.Event{Kind: workflow.PhaseCompleted, Phase: "build"})
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "eval"})
-	b.Apply(workflow.Event{Kind: workflow.PhaseCompleted, Phase: "eval"})
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "finalize"})
-	b.Apply(workflow.Event{Kind: workflow.PhaseFailed, Phase: "finalize", Message: "broke"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
+	b.Apply(workflow.Event{Kind: workflow.StepCompleted, Step: "build"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "eval"})
+	b.Apply(workflow.Event{Kind: workflow.StepCompleted, Step: "eval"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "finalize"})
+	b.Apply(workflow.Event{Kind: workflow.StepFailed, Step: "finalize", Message: "broke"})
 
 	// Engine retries from "build" — every phase will run again.
-	b.Apply(workflow.Event{Kind: workflow.RoundRetrying, Phase: "build", Round: 2})
+	b.Apply(workflow.Event{Kind: workflow.RoundRetrying, Step: "build", Round: 2})
 
-	for i, p := range b.phases {
-		if p.status != phasePending {
+	for i, p := range b.steps {
+		if p.status != stepPending {
 			t.Errorf("phase[%d] %q not reset (status=%v) — should be pending after retry-from build", i, p.name, p.status)
 		}
 	}
@@ -167,7 +167,7 @@ func TestWorkflowBlock_WorkflowFailedShowsReason(t *testing.T) {
 
 func TestWorkflowBlock_AgentEventsUpdateActivePhaseDetail(t *testing.T) {
 	b := newTestBlock(t, "build")
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
 
 	// Tool call appears in the active row's detail column.
 	b.ApplyAgent("build", agent.Event{
@@ -190,7 +190,7 @@ func TestWorkflowBlock_AgentEventsUpdateActivePhaseDetail(t *testing.T) {
 
 func TestWorkflowBlock_AgentEventsForInactivePhaseIgnored(t *testing.T) {
 	b := newTestBlock(t, "build", "eval")
-	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
 
 	// Event tagged for a non-active phase must not change the detail.
 	b.ApplyAgent("eval", agent.Event{
@@ -210,9 +210,9 @@ func TestWorkflowBlock_FullRunSequence(t *testing.T) {
 
 	b.Apply(workflow.Event{Kind: workflow.WorkflowStarted, Round: 1, Total: 3})
 	for i, name := range []string{"build", "eval", "finalize"} {
-		b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: name, Round: 1, Index: i + 1, Total: 3})
-		b.phases[i].started = time.Now().Add(-time.Second)
-		b.Apply(workflow.Event{Kind: workflow.PhaseCompleted, Phase: name, Round: 1, Index: i + 1, Total: 3})
+		b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: name, Round: 1, Index: i + 1, Total: 3})
+		b.steps[i].started = time.Now().Add(-time.Second)
+		b.Apply(workflow.Event{Kind: workflow.StepCompleted, Step: name, Round: 1, Index: i + 1, Total: 3})
 	}
 	b.Apply(workflow.Event{Kind: workflow.WorkflowCompleted})
 

@@ -3,7 +3,6 @@ package phase
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/owainlewis/neo/internal/agent"
@@ -12,10 +11,11 @@ import (
 )
 
 type Definition struct {
-	Name       string   `yaml:"name"`
-	PromptPath string   `yaml:"prompt"`
-	Tools      []string `yaml:"tools"`
-	Model      string   `yaml:"model"`
+	Name   string
+	Prompt string   // system prompt content (was previously loaded from PromptPath)
+	Tools  []string // optional whitelist; empty means inherit registry
+	Model  string   // optional override
+	Source string   // descriptive origin for error messages (e.g. file path or "embedded:foo.md")
 }
 
 type Input struct {
@@ -37,9 +37,8 @@ type Runner struct {
 }
 
 func (r *Runner) Run(ctx context.Context, def Definition, in Input) (*Result, error) {
-	prompt, err := os.ReadFile(def.PromptPath)
-	if err != nil {
-		return nil, fmt.Errorf("read phase prompt %s: %w", def.PromptPath, err)
+	if def.Prompt == "" {
+		return nil, fmt.Errorf("phase %s: empty prompt (source: %s)", def.Name, def.Source)
 	}
 	model := def.Model
 	if model == "" {
@@ -59,7 +58,7 @@ func (r *Runner) Run(ctx context.Context, def Definition, in Input) (*Result, er
 
 	ag := agent.New(agent.Config{
 		Model:    model,
-		System:   string(prompt),
+		System:   def.Prompt,
 		Provider: r.Provider,
 		Tools:    r.Tools.Filter(def.Tools),
 		OnEvent: func(e agent.Event) {

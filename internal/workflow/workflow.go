@@ -1,45 +1,34 @@
-// Package workflow runs an ordered sequence of phases (a "definition") and
+// Package workflow runs an ordered sequence of steps (a "definition") and
 // emits structured events about its progress. It knows nothing about how the
-// events are rendered — callers supply a Sink.
+// events are rendered or where step prompts live — callers supply a Sink for
+// observation and a StepResolver for prompt lookup.
 package workflow
 
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/artifact"
 	"github.com/owainlewis/neo/internal/phase"
 )
 
-// Definition is the on-disk shape of a workflow. The fields match what
-// internal/flow used to expose; the tag names are kept for YAML compatibility.
+// Definition is what the engine executes: a named, ordered sequence of step
+// names plus retry policy. Constructed by the caller (typically from a
+// loaded neo.yaml config), not parsed from disk by this package any more.
 type Definition struct {
-	Name      string   `yaml:"name"`
-	Phases    []string `yaml:"phases"`
-	RetryFrom string   `yaml:"retry_from"`
-	MaxRounds int      `yaml:"max_rounds"`
+	Name      string
+	Steps     []string
+	RetryFrom string
+	MaxRounds int
 }
 
-// LoadDefinition reads and parses a workflow YAML file.
-func LoadDefinition(path string) (*Definition, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var d Definition
-	if err := yaml.Unmarshal(b, &d); err != nil {
-		return nil, err
-	}
-	if d.MaxRounds == 0 {
-		d.MaxRounds = 3
-	}
-	return &d, nil
+// StepResolver returns the prompt + per-step settings for a named step.
+// Implemented by internal/config; the engine itself never touches the
+// filesystem to find steps.
+type StepResolver interface {
+	ResolveStep(name string) (phase.Definition, error)
 }
 
 // EventKind enumerates the kinds of events the engine emits.
@@ -47,44 +36,44 @@ type EventKind string
 
 const (
 	WorkflowStarted   EventKind = "workflow_started"
-	PhaseStarted      EventKind = "phase_started"
-	PhaseCompleted    EventKind = "phase_completed"
-	PhaseFailed       EventKind = "phase_failed"
+	StepStarted       EventKind = "step_started"
+	StepCompleted     EventKind = "step_completed"
+	StepFailed        EventKind = "step_failed"
 	RoundRetrying     EventKind = "round_retrying"
 	WorkflowCompleted EventKind = "workflow_completed"
 	WorkflowFailed    EventKind = "workflow_failed"
 )
 
-// Event describes a workflow-level state change.
+// Event describes a workflow-level state change. Step carries the step name
+// for per-step events; on RoundRetrying it carries the retry-from step so
+// sinks can reset every downstream row before the new round runs.
 type Event struct {
 	Kind    EventKind
-	Phase   string // empty for workflow-level events
+	Step    string // empty for workflow-level events
 	Round   int    // 1-based
-	Index   int    // 1-based phase index
-	Total   int    // total phases
+	Index   int    // 1-based step index
+	Total   int    // total steps in the flow
 	Message string // failure reason, retry note, etc.
-	Output  string // phase output, only set on PhaseCompleted / PhaseFailed
+	Output  string // step output, only set on StepCompleted / StepFailed
 }
 
-// Sink receives engine events. The two channels are kept separate so a sink
-// can render workflow structure differently from per-phase agent activity.
+// Sink receives engine events. OnWorkflow handles structural transitions;
+// OnAgent surfaces fine-grained agent activity inside the running step so
+// the UI can populate a detail line (e.g. "running go test ./...").
 type Sink interface {
-	// OnWorkflow is called for workflow-level state changes.
 	OnWorkflow(Event)
-	// OnAgent is called for every agent event inside a running phase, tagged
-	// with the phase name. Lets the UI surface fine-grained activity like
-	// "running go test ./..." inside the active phase row.
-	OnAgent(phase string, e agent.Event)
+	OnAgent(step string, e agent.Event)
 }
 
 // Engine executes a workflow definition.
 type Engine struct {
-	// PhasesDir is the directory where phase YAML / prompt files live.
-	PhasesDir string
-	// Runner runs an individual phase. The engine takes exclusive ownership
-	// of Runner.OnEvent for the duration of Run.
+	// Resolver loads step prompts by name. Typically a *config.Config.
+	Resolver StepResolver
+	// Runner runs an individual step's agent. The engine takes exclusive
+	// ownership of Runner.OnEvent for the duration of Run, restoring it
+	// on exit.
 	Runner *phase.Runner
-	// Store receives per-phase artifacts.
+	// Store receives per-step artifacts.
 	Store *artifact.Store
 	// Sink, if non-nil, receives workflow and agent events.
 	Sink Sink
@@ -105,11 +94,11 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 		return err
 	}
 
-	total := len(def.Phases)
+	total := len(def.Steps)
 	retryStart := 0
 	if def.RetryFrom != "" {
-		for i, p := range def.Phases {
-			if p == def.RetryFrom {
+		for i, s := range def.Steps {
+			if s == def.RetryFrom {
 				retryStart = i
 				break
 			}
@@ -121,13 +110,13 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 		maxRounds = 1
 	}
 
-	// Take exclusive control of the phase runner's event handler for the
-	// duration of this run, restoring the original on exit. Agent events from
-	// the active phase are routed through Sink.OnAgent.
+	// Take exclusive control of the step runner's event handler for the
+	// duration of this run, restoring the original on exit. Agent events
+	// from the active step are routed through Sink.OnAgent.
 	prevOnEvent := e.Runner.OnEvent
-	e.Runner.OnEvent = func(phaseName string, ev agent.Event) {
+	e.Runner.OnEvent = func(stepName string, ev agent.Event) {
 		if e.Sink != nil {
-			e.Sink.OnAgent(phaseName, ev)
+			e.Sink.OnAgent(stepName, ev)
 		}
 	}
 	defer func() { e.Runner.OnEvent = prevOnEvent }()
@@ -143,13 +132,13 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 
 		failed := false
 		for i := start; i < total; i++ {
-			name := def.Phases[i]
-			e.emit(Event{Kind: PhaseStarted, Phase: name, Round: round, Index: i + 1, Total: total})
+			name := def.Steps[i]
+			e.emit(Event{Kind: StepStarted, Step: name, Round: round, Index: i + 1, Total: total})
 
-			pdef, err := e.loadPhase(name)
+			pdef, err := e.Resolver.ResolveStep(name)
 			if err != nil {
 				msg := err.Error()
-				e.emit(Event{Kind: PhaseFailed, Phase: name, Round: round, Index: i + 1, Total: total, Message: msg})
+				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: msg})
 				e.emit(Event{Kind: WorkflowFailed, Message: msg})
 				return err
 			}
@@ -157,7 +146,7 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 			result, err := e.Runner.Run(ctx, pdef, phase.Input{Task: task, Artifacts: artifacts})
 			if err != nil {
 				msg := err.Error()
-				e.emit(Event{Kind: PhaseFailed, Phase: name, Round: round, Index: i + 1, Total: total, Message: msg})
+				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: msg})
 				e.emit(Event{Kind: WorkflowFailed, Message: msg})
 				return err
 			}
@@ -167,20 +156,20 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 
 			if failsHeuristic(result.Output) {
 				failed = true
-				e.emit(Event{Kind: PhaseFailed, Phase: name, Round: round, Index: i + 1, Total: total, Message: "phase reports failure", Output: result.Output})
+				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: "step reports failure", Output: result.Output})
 				if def.RetryFrom != "" && round < maxRounds {
-					// Phase carries the retry-from phase name so a sink can
-					// reset all phases from that index onward for the next
-					// round, not just the one that failed.
-					e.emit(Event{Kind: RoundRetrying, Phase: def.RetryFrom, Round: round + 1, Total: total, Message: "retrying from " + def.RetryFrom})
+					// Step carries the retry-from name so a sink can reset
+					// all rows from that index onward for the next round,
+					// not just the one that failed.
+					e.emit(Event{Kind: RoundRetrying, Step: def.RetryFrom, Round: round + 1, Total: total, Message: "retrying from " + def.RetryFrom})
 					break
 				}
-				msg := fmt.Sprintf("phase %s failed (round %d)", name, round)
+				msg := fmt.Sprintf("step %s failed (round %d)", name, round)
 				e.emit(Event{Kind: WorkflowFailed, Message: msg})
 				return fmt.Errorf("%s", msg)
 			}
 
-			e.emit(Event{Kind: PhaseCompleted, Phase: name, Round: round, Index: i + 1, Total: total, Output: result.Output})
+			e.emit(Event{Kind: StepCompleted, Step: name, Round: round, Index: i + 1, Total: total, Output: result.Output})
 		}
 
 		if !failed {
@@ -192,31 +181,4 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 	msg := fmt.Sprintf("max rounds (%d) reached", maxRounds)
 	e.emit(Event{Kind: WorkflowFailed, Message: msg})
 	return fmt.Errorf("%s", msg)
-}
-
-// loadPhase resolves a phase by name from PhasesDir. Looks for <name>.yaml
-// first, then falls back to <name>.md (a bare prompt with no overrides).
-func (e *Engine) loadPhase(name string) (phase.Definition, error) {
-	yamlPath := filepath.Join(e.PhasesDir, name+".yaml")
-	b, err := os.ReadFile(yamlPath)
-	if err != nil {
-		mdPath := filepath.Join(e.PhasesDir, name+".md")
-		if _, err2 := os.Stat(mdPath); err2 == nil {
-			return phase.Definition{Name: name, PromptPath: mdPath}, nil
-		}
-		return phase.Definition{}, err
-	}
-	var d phase.Definition
-	if err := yaml.Unmarshal(b, &d); err != nil {
-		return d, err
-	}
-	if d.Name == "" {
-		d.Name = name
-	}
-	if d.PromptPath == "" {
-		d.PromptPath = filepath.Join(e.PhasesDir, name+".md")
-	} else if !filepath.IsAbs(d.PromptPath) {
-		d.PromptPath = filepath.Join(e.PhasesDir, d.PromptPath)
-	}
-	return d, nil
 }

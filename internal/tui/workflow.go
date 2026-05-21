@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"image/color"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/artifact"
+	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/workflow"
 )
@@ -21,14 +21,13 @@ import (
 // WorkflowConfig carries everything the TUI needs to construct and run a
 // workflow.Engine in response to a /run slash command.
 type WorkflowConfig struct {
-	FlowsDir  string
-	PhasesDir string
-	Runner    *phase.Runner
-	Store     *artifact.Store
+	Config *config.Config
+	Runner *phase.Runner
+	Store  *artifact.Store
 }
 
-// teaSendFn matches the signature of tea.Program.Send. Extracted as an
-// interface alias so tests don't need a real program to drive the sink.
+// teaSendFn matches the signature of tea.Program.Send. Extracted so tests can
+// pass a simple capture function without instantiating a real program.
 type teaSendFn func(tea.Msg)
 
 // tuiSink converts workflow.Engine events into Bubble Tea messages so they
@@ -41,39 +40,48 @@ func (s *tuiSink) OnWorkflow(e workflow.Event) {
 	s.send(workflowEventMsg{ev: e})
 }
 
-func (s *tuiSink) OnAgent(phaseName string, ev agent.Event) {
-	s.send(workflowAgentEventMsg{phase: phaseName, ev: ev})
+func (s *tuiSink) OnAgent(stepName string, ev agent.Event) {
+	s.send(workflowAgentEventMsg{step: stepName, ev: ev})
 }
 
 // Messages routed between the workflow goroutine and the Bubble Tea program.
 type workflowEventMsg struct{ ev workflow.Event }
 type workflowAgentEventMsg struct {
-	phase string
-	ev    agent.Event
+	step string
+	ev   agent.Event
 }
 type workflowDoneMsg struct{ err error }
 
-// loadWorkflow reads a flow definition by name from the configured FlowsDir.
-func (c WorkflowConfig) loadDefinition(name string) (workflow.Definition, error) {
-	def, err := workflow.LoadDefinition(filepath.Join(c.FlowsDir, name+".yaml"))
-	if err != nil {
-		return workflow.Definition{}, err
+// definitionFor returns the workflow.Definition for a flow by name from the
+// loaded config, or an error if the flow doesn't exist.
+func (c WorkflowConfig) definitionFor(name string) (workflow.Definition, error) {
+	if c.Config == nil {
+		return workflow.Definition{}, fmt.Errorf("no config loaded")
 	}
-	return *def, nil
+	fc, ok := c.Config.Flows[name]
+	if !ok {
+		return workflow.Definition{}, fmt.Errorf("no flow %q in config (%s)", name, c.Config.Source())
+	}
+	return workflow.Definition{
+		Name:      name,
+		Steps:     fc.Steps,
+		RetryFrom: fc.RetryFrom,
+		MaxRounds: fc.MaxRounds,
+	}, nil
 }
 
 // launchWorkflow constructs an engine for the given def and runs it in a
-// goroutine. The returned cancel function aborts the run; the engine's events
+// goroutine. The returned cancel function aborts the run; engine events
 // flow back to the program via the sink. When Run returns, a workflowDoneMsg
 // is sent so the model can clear its active state.
 func (c WorkflowConfig) launchWorkflow(ctx context.Context, send teaSendFn, def workflow.Definition, task string) context.CancelFunc {
 	runCtx, cancel := context.WithCancel(ctx)
 	sink := &tuiSink{send: send}
 	eng := &workflow.Engine{
-		PhasesDir: c.PhasesDir,
-		Runner:    c.Runner,
-		Store:     c.Store,
-		Sink:      sink,
+		Resolver: c.Config,
+		Runner:   c.Runner,
+		Store:    c.Store,
+		Sink:     sink,
 	}
 	go func() {
 		err := eng.Run(runCtx, def, task)
@@ -94,9 +102,9 @@ type workflowBlock struct {
 	task      string
 	round     int
 	maxRounds int
-	phases    []workflowPhase
-	active    int    // index into phases, -1 if none active
-	detail    string // current agent activity for the active phase
+	steps     []workflowStep
+	active    int    // index into steps, -1 if none active
+	detail    string // current agent activity for the active step
 
 	startedAt   time.Time
 	finishedAt  time.Time
@@ -104,27 +112,27 @@ type workflowBlock struct {
 	failMessage string
 }
 
-type phaseStatus int
+type stepStatus int
 
 const (
-	phasePending phaseStatus = iota
-	phaseActive
-	phaseCompleted
-	phaseFailed
+	stepPending stepStatus = iota
+	stepActive
+	stepCompleted
+	stepFailed
 )
 
-type workflowPhase struct {
+type workflowStep struct {
 	name     string
-	status   phaseStatus
+	status   stepStatus
 	started  time.Time
 	finished time.Time
 	message  string
 }
 
-func newWorkflowBlock(name, task string, phaseNames []string, maxRounds int) *workflowBlock {
-	phases := make([]workflowPhase, len(phaseNames))
-	for i, n := range phaseNames {
-		phases[i] = workflowPhase{name: n, status: phasePending}
+func newWorkflowBlock(name, task string, stepNames []string, maxRounds int) *workflowBlock {
+	steps := make([]workflowStep, len(stepNames))
+	for i, n := range stepNames {
+		steps[i] = workflowStep{name: n, status: stepPending}
 	}
 	if maxRounds < 1 {
 		maxRounds = 1
@@ -134,7 +142,7 @@ func newWorkflowBlock(name, task string, phaseNames []string, maxRounds int) *wo
 		task:      task,
 		round:     1,
 		maxRounds: maxRounds,
-		phases:    phases,
+		steps:     steps,
 		active:    -1,
 		startedAt: time.Now(),
 	}
@@ -147,37 +155,37 @@ func (b *workflowBlock) Apply(e workflow.Event) {
 		if e.Round > 0 {
 			b.round = e.Round
 		}
-	case workflow.PhaseStarted:
-		idx := b.phaseIndex(e.Phase)
+	case workflow.StepStarted:
+		idx := b.stepIndex(e.Step)
 		if idx < 0 {
 			return
 		}
-		b.phases[idx].status = phaseActive
-		b.phases[idx].started = time.Now()
-		b.phases[idx].message = ""
+		b.steps[idx].status = stepActive
+		b.steps[idx].started = time.Now()
+		b.steps[idx].message = ""
 		b.active = idx
 		if e.Round > 0 {
 			b.round = e.Round
 		}
 		b.detail = ""
-	case workflow.PhaseCompleted:
-		idx := b.phaseIndex(e.Phase)
+	case workflow.StepCompleted:
+		idx := b.stepIndex(e.Step)
 		if idx < 0 {
 			return
 		}
-		b.phases[idx].status = phaseCompleted
-		b.phases[idx].finished = time.Now()
+		b.steps[idx].status = stepCompleted
+		b.steps[idx].finished = time.Now()
 		if b.active == idx {
 			b.active = -1
 		}
-	case workflow.PhaseFailed:
-		idx := b.phaseIndex(e.Phase)
+	case workflow.StepFailed:
+		idx := b.stepIndex(e.Step)
 		if idx < 0 {
 			return
 		}
-		b.phases[idx].status = phaseFailed
-		b.phases[idx].finished = time.Now()
-		b.phases[idx].message = e.Message
+		b.steps[idx].status = stepFailed
+		b.steps[idx].finished = time.Now()
+		b.steps[idx].message = e.Message
 		if b.active == idx {
 			b.active = -1
 		}
@@ -185,20 +193,20 @@ func (b *workflowBlock) Apply(e workflow.Event) {
 		if e.Round > 0 {
 			b.round = e.Round
 		}
-		// Every phase from RetryFrom onward will re-execute on the next
-		// round, so reset them all — not just the one that failed. Phases
+		// Every step from RetryFrom onward will re-execute on the next
+		// round, so reset them all — not just the one that failed. Steps
 		// before RetryFrom keep their state since the engine won't revisit
-		// them. If the event lacks a phase name we fall back to the older
-		// behaviour and only reset rows marked phaseFailed.
-		resetFrom := len(b.phases) // sentinel: only reset failed phases
-		if e.Phase != "" {
-			if idx := b.phaseIndex(e.Phase); idx >= 0 {
+		// them. If the event lacks a step name we fall back to resetting
+		// only rows marked stepFailed.
+		resetFrom := len(b.steps) // sentinel: only reset failed
+		if e.Step != "" {
+			if idx := b.stepIndex(e.Step); idx >= 0 {
 				resetFrom = idx
 			}
 		}
-		for i := range b.phases {
-			if i >= resetFrom || b.phases[i].status == phaseFailed {
-				b.phases[i] = workflowPhase{name: b.phases[i].name, status: phasePending}
+		for i := range b.steps {
+			if i >= resetFrom || b.steps[i].status == stepFailed {
+				b.steps[i] = workflowStep{name: b.steps[i].name, status: stepPending}
 			}
 		}
 	case workflow.WorkflowCompleted:
@@ -214,23 +222,23 @@ func (b *workflowBlock) Apply(e workflow.Event) {
 	}
 }
 
-// ApplyAgent updates the detail line based on what the active phase's agent
-// is doing. Events for other phases are ignored.
-func (b *workflowBlock) ApplyAgent(phaseName string, ev agent.Event) {
-	if b.active < 0 || b.phases[b.active].name != phaseName {
+// ApplyAgent updates the detail line based on what the active step's agent
+// is doing. Events for other steps are ignored.
+func (b *workflowBlock) ApplyAgent(stepName string, ev agent.Event) {
+	if b.active < 0 || b.steps[b.active].name != stepName {
 		return
 	}
 	switch ev.Kind {
 	case agent.EventToolCall:
 		b.detail = toolVerb(ev.Name, ev.Args)
 	case agent.EventToolResult:
-		b.detail = "" // returns to "thinking"
+		b.detail = "" // back to thinking
 	}
 }
 
-func (b *workflowBlock) phaseIndex(name string) int {
-	for i, p := range b.phases {
-		if p.name == name {
+func (b *workflowBlock) stepIndex(name string) int {
+	for i, s := range b.steps {
+		if s.name == name {
 			return i
 		}
 	}
@@ -255,20 +263,20 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	}
 	sb.WriteString("\n")
 
-	// Phase rows. Pad names to a common column width for alignment.
+	// Step rows. Pad names to a common column width for alignment.
 	nameW := 0
-	for _, p := range b.phases {
-		if len(p.name) > nameW {
-			nameW = len(p.name)
+	for _, s := range b.steps {
+		if len(s.name) > nameW {
+			nameW = len(s.name)
 		}
 	}
-	total := len(b.phases)
-	for i, p := range b.phases {
-		sb.WriteString("  " + renderPhaseRow(p, i+1, total, nameW, b.detail))
+	total := len(b.steps)
+	for i, s := range b.steps {
+		sb.WriteString("  " + renderStepRow(s, i+1, total, nameW, b.detail))
 		sb.WriteString("\n")
 	}
 
-	// Terminal summary line.
+	// Terminal summary.
 	switch b.terminal {
 	case workflow.WorkflowCompleted:
 		d := b.finishedAt.Sub(b.startedAt).Round(time.Second)
@@ -283,32 +291,32 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func renderPhaseRow(p workflowPhase, index, total, nameW int, activeDetail string) string {
-	glyph, glyphCol := phaseGlyph(p.status)
+func renderStepRow(s workflowStep, index, total, nameW int, activeDetail string) string {
+	glyph, glyphCol := stepGlyph(s.status)
 	glyphStr := lipgloss.NewStyle().Foreground(glyphCol).Render(glyph)
 
-	name := padRight(p.name, nameW+2)
-	switch p.status {
-	case phasePending:
+	name := padRight(s.name, nameW+2)
+	switch s.status {
+	case stepPending:
 		name = styDim.Render(name)
-	case phaseActive:
+	case stepActive:
 		name = lipgloss.NewStyle().Foreground(glyphCol).Render(name)
 	}
 
 	counter := styDim.Render(fmt.Sprintf("%d/%d", index, total))
 
 	detail := ""
-	switch p.status {
-	case phaseCompleted:
-		d := p.finished.Sub(p.started)
+	switch s.status {
+	case stepCompleted:
+		d := s.finished.Sub(s.started)
 		if d > 0 {
 			detail = "  " + styMuted.Render(fmtElapsed(d.Round(100*time.Millisecond)))
 		}
-	case phaseFailed:
-		if p.message != "" {
-			detail = "  " + styErr.Render(truncate(oneLine(p.message), 60))
+	case stepFailed:
+		if s.message != "" {
+			detail = "  " + styErr.Render(truncate(oneLine(s.message), 60))
 		}
-	case phaseActive:
+	case stepActive:
 		if activeDetail != "" {
 			detail = "  " + styMuted.Render(truncate(oneLine(activeDetail), 60))
 		}
@@ -317,13 +325,13 @@ func renderPhaseRow(p workflowPhase, index, total, nameW int, activeDetail strin
 	return fmt.Sprintf("%s %s %s%s", glyphStr, name, counter, detail)
 }
 
-func phaseGlyph(s phaseStatus) (string, color.Color) {
+func stepGlyph(s stepStatus) (string, color.Color) {
 	switch s {
-	case phaseActive:
+	case stepActive:
 		return "▶", colDotThinking
-	case phaseCompleted:
+	case stepCompleted:
 		return "✓", colOK
-	case phaseFailed:
+	case stepFailed:
 		return "✗", colErr
 	default:
 		return "○", colDim

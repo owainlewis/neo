@@ -1,7 +1,0 @@
-name: implementation
-retry_from: build
-max_rounds: 3
-phases:
-  - build
-  - eval
-  - finalize
