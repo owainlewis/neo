@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/glamour/v2"
@@ -8,10 +9,9 @@ import (
 )
 
 // splashBlock renders the welcome shown once at the top of every chat
-// session. Visual model: a left-edge gradient bar carries the brand colour;
-// the wordmark, tagline and metadata sit beside it like a magazine
-// pull-quote. No borders, no ASCII art — the gradient is the graphical
-// element.
+// session. Visual model: a left-edge gradient bar carries the brand
+// colour; the wordmark, tagline and a stacked metadata list sit beside
+// it like a magazine pull-quote.
 type splashBlock struct {
 	version string
 	model   string
@@ -19,46 +19,58 @@ type splashBlock struct {
 	branch  string
 }
 
-// gradient is the vertical color ramp for the left accent bar — Tailwind
-// sky-400 → sky-800. Top is lightest, bottom is deepest. Truecolor; on
-// terminals without 24-bit support lipgloss downconverts to the nearest
-// 256-color palette automatically.
-var gradient = []string{
+// skyPalette is the Tailwind sky color ramp (light → dark) used by the
+// left accent bar. gradientFor picks N equally-spaced stops from this so
+// the bar can stretch to match a variable number of content lines.
+var skyPalette = []string{
+	"#bae6fd", // sky-200
+	"#7dd3fc", // sky-300
 	"#38bdf8", // sky-400
 	"#0ea5e9", // sky-500
 	"#0284c7", // sky-600
 	"#0369a1", // sky-700
 	"#075985", // sky-800
+	"#0c4a6e", // sky-900
 }
 
 const tagline = "a coding agent"
 
 func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
-	// Wordmark: bold true-white so it pops against the muted metadata while
-	// the gradient bar carries the colour.
 	wordmark := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("231")).
 		Bold(true).
 		Render("NEO")
 
-	sep := styDim.Render("  ·  ")
-	pieces := []string{styMuted.Render(b.version), styMuted.Render(b.model)}
+	// Metadata rendered as a stacked list with aligned labels. Branch row
+	// is suppressed when there's no git context.
+	rows := [][2]string{
+		{"version", b.version},
+		{"model", b.model},
+	}
 	if b.branch != "" && b.branch != "no-git" {
-		pieces = append(pieces, styMuted.Render(b.branch))
+		rows = append(rows, [2]string{"branch", b.branch})
 	}
-	metaLine := strings.Join(pieces, sep)
-	cwdLine := styMuted.Render(b.cwd)
+	rows = append(rows, [2]string{"cwd", b.cwd})
 
-	// Five content lines aligned to the five-stop gradient bar. The empty
-	// middle line creates a visual break between mark and metadata without
-	// needing a separator rule.
-	content := []string{
-		wordmark,
-		styMuted.Render(tagline),
-		"",
-		metaLine,
-		cwdLine,
+	labelW := 0
+	for _, r := range rows {
+		if len(r[0]) > labelW {
+			labelW = len(r[0])
+		}
 	}
+	metaLines := make([]string, 0, len(rows))
+	for _, r := range rows {
+		metaLines = append(metaLines, fmt.Sprintf("%s  %s",
+			styDim.Render(padRight(r[0], labelW)),
+			styMuted.Render(r[1])))
+	}
+
+	// Compose the full content column: wordmark, tagline, breathing
+	// space, then the metadata list.
+	content := []string{wordmark, styMuted.Render(tagline), ""}
+	content = append(content, metaLines...)
+
+	gradient := gradientFor(len(content))
 
 	var sb strings.Builder
 	sb.WriteString("\n\n")
@@ -77,4 +89,18 @@ func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
 	sb.WriteString(styTool.Render("/help"))
 	sb.WriteString(styDim.Render(" for slash commands"))
 	return sb.String()
+}
+
+// gradientFor returns n hex colors picked across skyPalette (light → dark),
+// so the bar can scale with the content height without losing the ramp.
+func gradientFor(n int) []string {
+	if n <= 1 {
+		return []string{skyPalette[0]}
+	}
+	last := len(skyPalette) - 1
+	out := make([]string, n)
+	for i := 0; i < n; i++ {
+		out[i] = skyPalette[i*last/(n-1)]
+	}
+	return out
 }
