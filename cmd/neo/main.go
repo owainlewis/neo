@@ -19,6 +19,10 @@ import (
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
+// Version is overridable at build time via -ldflags "-X main.Version=...".
+// Default "dev" makes local builds obvious in the splash screen.
+var Version = "dev"
+
 const chatSystemPrompt = `You are neo, a focused coding agent.
 
 Operate in the user's current working directory. Use the available tools to read files,
@@ -116,7 +120,7 @@ func runChat(ctx context.Context) {
 		Store: artifact.NewStore(cfg.ArtifactsDir),
 	}
 
-	if err := tui.Run(ctx, ag, cfg.Model, wf); err != nil {
+	if err := tui.Run(ctx, ag, cfg.Model, Version, wf); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

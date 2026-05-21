@@ -21,8 +21,8 @@ import (
 )
 
 // Run starts the Bubble Tea chat TUI. It returns when the user quits.
-func Run(ctx context.Context, ag *agent.Agent, model string, wf WorkflowConfig) error {
-	m, err := newModel(ctx, ag, model, wf)
+func Run(ctx context.Context, ag *agent.Agent, model, version string, wf WorkflowConfig) error {
+	m, err := newModel(ctx, ag, model, version, wf)
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ type model struct {
 	workflowCancel context.CancelFunc
 }
 
-func newModel(ctx context.Context, ag *agent.Agent, modelTag string, wf WorkflowConfig) (*model, error) {
+func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, wf WorkflowConfig) (*model, error) {
 	// Detect dark/light once, here, before Bubble Tea puts stdin in raw mode.
 	// Glamour's WithAutoStyle issues an OSC 11 query each time; doing that
 	// from inside Update (e.g. on resize) leaks the terminal's reply into the
@@ -117,20 +117,32 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag string, wf Workflow
 		}
 	}
 
-	return &model{
+	branch := gitBranch()
+	if version == "" {
+		version = "dev"
+	}
+	m := &model{
 		ctx:         ctx,
 		ag:          ag,
 		modelTag:    modelTag,
 		mdStyleName: styleName,
 		cwd:         cwd,
-		branch:      gitBranch(),
+		branch:      branch,
 		viewport:    vp,
 		input:       ta,
 		spin:        sp,
 		caption:     randomCaption(),
 		md:          md,
 		wf:          wf,
-	}, nil
+	}
+	// Welcome banner shown once at the top of scrollback.
+	m.blocks = append(m.blocks, splashBlock{
+		version: version,
+		model:   modelTag,
+		cwd:     cwd,
+		branch:  branch,
+	})
+	return m, nil
 }
 
 func (m *model) Init() tea.Cmd {
