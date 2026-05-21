@@ -26,13 +26,14 @@ inspect code with bash, and make edits. Prefer small, verified changes. Run test
 you change code. When you finish a task, briefly summarize what changed.`
 
 func main() {
-	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(2)
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// `neo` with no subcommand defaults to chat — the common case.
+	if len(os.Args) < 2 {
+		runChat(ctx)
+		return
+	}
 
 	switch os.Args[1] {
 	case "chat":
@@ -54,7 +55,8 @@ func printUsage() {
 	fmt.Println(`neo — a Go coding agent with chat-owned flows
 
 USAGE:
-  neo chat                          Interactive chat mode
+  neo                               Interactive chat mode (default)
+  neo chat                          Interactive chat mode (explicit)
   neo flow <flow-name> "<task>"     Run a named flow against a task (headless)
   neo step <step-name> "<task>"     Run a single step (headless)
   neo help                          Show this help
