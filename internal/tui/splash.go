@@ -34,6 +34,9 @@ type splashBlock struct {
 func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
 	bannerStyle := lipgloss.NewStyle().Foreground(colDotThinking).Bold(true)
 	var sb strings.Builder
+	// A little breathing room above the banner so it doesn't sit flush
+	// against the top of the viewport.
+	sb.WriteString("\n\n")
 	for _, line := range neoBanner {
 		sb.WriteString(bannerStyle.Render(line))
 		sb.WriteString("\n")
