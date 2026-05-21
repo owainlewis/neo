@@ -190,6 +190,66 @@ Do the thing.`)
 	})
 }
 
+// Regression: a step file whose closing `---` sits at EOF without a
+// trailing newline used to compute body = rest[end+5:] which panicked
+// with slice-out-of-bounds. Should produce a clean error instead.
+func TestResolveStep_FrontmatterClosingFenceAtEOFNoNewline(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		flowsDir := filepath.Join(dir, "flows")
+		os.MkdirAll(flowsDir, 0o755)
+		writeFile(t, filepath.Join(flowsDir, "fenced.md"),
+			"---\ntools: [bash]\n---") // no trailing newline
+
+		cfg, _ := Load()
+		_, err := cfg.ResolveStep("fenced")
+		if err == nil {
+			t.Fatal("expected error for frontmatter-only file (no body)")
+		}
+		if !strings.Contains(err.Error(), "empty prompt") {
+			t.Fatalf("expected empty-prompt error, got %v", err)
+		}
+	})
+}
+
+func TestResolveStep_FrontmatterClosingFenceAtEOFTrailingNewline(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		flowsDir := filepath.Join(dir, "flows")
+		os.MkdirAll(flowsDir, 0o755)
+		writeFile(t, filepath.Join(flowsDir, "fenced.md"),
+			"---\ntools: [bash]\n---\n") // trailing newline, still no body
+
+		cfg, _ := Load()
+		_, err := cfg.ResolveStep("fenced")
+		if err == nil {
+			t.Fatal("expected error for frontmatter-only file (no body)")
+		}
+	})
+}
+
+// Regression for the same EOF-frontmatter path: a file that DOES have a
+// body after the closing fence at EOF (newline-terminated body) should
+// parse without panicking and return the body as the prompt.
+func TestResolveStep_FrontmatterFollowedByBodyAtEOF(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		flowsDir := filepath.Join(dir, "flows")
+		os.MkdirAll(flowsDir, 0o755)
+		writeFile(t, filepath.Join(flowsDir, "ok.md"),
+			"---\ntools: [bash]\n---\nYou are the OK step.")
+
+		cfg, _ := Load()
+		def, err := cfg.ResolveStep("ok")
+		if err != nil {
+			t.Fatalf("unexpected: %v", err)
+		}
+		if !strings.Contains(def.Prompt, "OK step") {
+			t.Fatalf("body not extracted: %q", def.Prompt)
+		}
+	})
+}
+
 func TestResolveStep_UnterminatedFrontmatterErrors(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)

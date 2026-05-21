@@ -254,17 +254,27 @@ func parseStep(name string, content []byte, source string) (phase.Definition, er
 	const marker = "---\n"
 	if bytes.HasPrefix(content, []byte(marker)) {
 		rest := content[len(marker):]
-		end := bytes.Index(rest, []byte("\n---\n"))
-		if end < 0 {
-			// Tolerate trailing "---" without newline at EOF.
-			if idx := bytes.LastIndex(rest, []byte("\n---")); idx >= 0 && idx+4 >= len(rest)-1 {
-				end = idx
-			} else {
+
+		var fm []byte
+		switch {
+		case bytes.Contains(rest, []byte("\n---\n")):
+			// Standard case: closing fence has its own line.
+			end := bytes.Index(rest, []byte("\n---\n"))
+			fm = rest[:end]
+			body = rest[end+len("\n---\n"):]
+		default:
+			// EOF case: trailing "---" with no following newline. Trim
+			// any final newlines then check for the closing fence.
+			// Previously this branch computed body = rest[end+5:] which
+			// panicked when the file ended right after "\n---".
+			trimmed := bytes.TrimRight(rest, "\n")
+			closing := []byte("\n---")
+			if !bytes.HasSuffix(trimmed, closing) {
 				return phase.Definition{}, fmt.Errorf("%s: unterminated frontmatter (missing closing ---)", source)
 			}
+			fm = trimmed[:len(trimmed)-len(closing)]
+			body = nil
 		}
-		fm := rest[:end]
-		body = rest[end+len("\n---\n"):]
 
 		var meta struct {
 			Tools []string `yaml:"tools"`
