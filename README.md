@@ -3,55 +3,60 @@
 [![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Neo is a fast, minimalist coding agent with first-class workflow support.
+Neo is a fast, minimalist coding agent with first-class workflow support, written in Go.
 
-It is being rewritten in Go around a small core loop, a practical terminal UI,
-and explicit multi-phase flows for building, reviewing, evaluating, and landing
-code changes. The goal is simple: keep the agent easy to understand, easy to
-run, and strong at the real shape of software work.
+An interactive terminal UI lets you chat with the agent directly. A headless
+CLI lets you run repeatable multi-step flows in CI or from scripts — each step
+is a plain Markdown prompt file that you can read and edit without touching
+any code.
 
-## What Neo Does
+## Features
 
-- **Interactive coding.** Use `neo chat` for a focused terminal coding agent
-  that can inspect files, run commands, and make edits.
-- **Workflow automation.** Use `neo flow` to run repeatable phase-based
-  workflows such as build -> review -> eval -> finalize.
-- **Single-phase runs.** Use `neo phase` when you want one role prompt to act on
-  a task without running a full workflow.
-- **Plain files as workflow.** Phases live in `phases/*.md`; flows live in
-  `flows/*.yaml`. You can edit the process without changing code.
-- **Small tool surface.** Neo starts with bash, read, write, and exact-match edit
-  tools. The shape is intentionally boring and inspectable.
-
-## Status
-
-Neo is in an active Go rewrite. The old Rust implementation has been moved to
-`legacy/` while the new Go implementation lives under `cmd/neo` and `internal/`.
+- **Interactive chat.** `neo chat` opens a Bubble Tea terminal UI. Type a task,
+  watch the agent read files, run commands, and make edits in real time.
+- **Multi-step flows.** `neo flow <name> "<task>"` runs a named sequence of
+  agent steps. Each step receives the outputs of all prior steps as context.
+- **Single-step runs.** `neo step <name> "<task>"` runs one step prompt
+  against a task — useful for iterating on a prompt without a full flow.
+- **Plain-text prompts.** Step prompts are Markdown files (`flows/*.md`).
+  Customize them by adding a `flows/` directory to your project or `~/.neo/flows/`.
+- **Per-step overrides.** A step's Markdown file can carry optional YAML
+  frontmatter to restrict its tool set or pin a specific model.
+- **Small tool surface.** bash, read\_file, write\_file, edit\_file — inspectable
+  and easy to reason about.
 
 ## Quick Start
+
+**Prerequisites:** Go 1.25+, an [Anthropic API key](https://console.anthropic.com/).
 
 ```bash
 git clone https://github.com/owainlewis/neo.git
 cd neo
-go build ./cmd/neo
-export ANTHROPIC_API_KEY="your_key"
+go build -o neo ./cmd/neo
+export ANTHROPIC_API_KEY="sk-ant-..."
 ./neo chat
 ```
 
-Or install it onto your `GOBIN` path:
+Install onto your `$GOBIN` path:
 
 ```bash
-go install ./cmd/neo
+go install github.com/owainlewis/neo/cmd/neo@latest
 neo chat
 ```
 
 ## Usage
 
 ```bash
+# Interactive terminal chat
 neo chat
-neo flow implementation "Add request cancellation"
-neo flow full "Refactor the config loader"
-neo phase review "Check the current diff for blocking issues"
+
+# Run the built-in "code" flow (write → review) against a task
+neo flow code "Add request-cancellation support to the HTTP client"
+
+# Run a single step headlessly
+neo step write "Refactor the config loader"
+neo step review "Check the current diff for blocking issues"
+
 neo help
 ```
 
@@ -59,61 +64,110 @@ neo help
 
 | Command | Description |
 |---------|-------------|
-| `neo chat` | Start the interactive terminal coding agent |
-| `neo flow <name> "<task>"` | Run a named workflow from `flows/<name>.yaml` |
-| `neo phase <name> "<task>"` | Run a single phase prompt from `phases/<name>.md` |
+| `neo chat` | Open the interactive terminal coding agent |
+| `neo flow <name> "<task>"` | Run a named flow from `neo.yaml` |
+| `neo step <name> "<task>"` | Run a single step prompt from `flows/<name>.md` |
 | `neo help` | Show CLI help |
 
-## Workflows
+## Flows
 
-A flow is a YAML file that names the phases to run and where to retry from if a
-later phase fails.
+A flow is a named sequence of steps defined in `neo.yaml`. The engine runs
+each step in order, passing prior step outputs as context. If a step reports
+failure and `retry_from` is set, the engine rewinds to that step and tries
+again (up to `max_rounds` times).
+
+### Built-in flow: `code`
 
 ```yaml
-name: implementation
-retry_from: build
-max_rounds: 3
-phases:
-  - build
-  - eval
-  - finalize
+flows:
+  code:
+    steps: [write, review]
+    retry_from: write
+    max_rounds: 2
 ```
 
-The default flows are:
+| Flow | Steps | Behaviour |
+|------|-------|-----------|
+| `code` | `write` → `review` | Writes the change, then reviews it. Retries `write` if review fails. |
 
-| Flow | Phases |
-|------|--------|
-| `implementation` | `build`, `eval`, `finalize` |
-| `full` | `build`, `review`, `eval`, `finalize` |
+### Defining your own flows
 
-Phase prompts are Markdown files. A phase gets the original task plus artifacts
-from earlier phases, then writes its result into `.agent/runs/`.
+Add a `neo.yaml` to your project (or `~/.neo/config.yaml` globally):
+
+```yaml
+model: claude-sonnet-4-6
+
+flows:
+  ship:
+    steps: [write, test, review]
+    retry_from: write
+    max_rounds: 3
+```
+
+Then add the corresponding step prompts in `flows/write.md`, `flows/test.md`,
+and `flows/review.md`. Any step not found locally falls back to the embedded
+defaults.
+
+## Step Prompts
+
+A step prompt is a Markdown file. It may include optional YAML frontmatter to
+restrict the tool set or override the model for that step:
+
+```markdown
+---
+tools: [bash, read_file]
+model: claude-haiku-4-5
+---
+
+You are the REVIEW step of a coding flow.
+…
+```
+
+**Prompt resolution order** (first match wins):
+
+1. `./flows/<name>.md` — project-local override
+2. `~/.neo/flows/<name>.md` — user-global override
+3. Embedded defaults (shipped with the binary)
 
 ## Configuration
 
-Neo is configured with environment variables.
+Neo looks for a config file in this order:
+
+1. `./neo.yaml` — project config
+2. `~/.neo/config.yaml` — user config
+3. Embedded defaults — no file required to get started
+
+The only required environment variable is `ANTHROPIC_API_KEY`.
 
 ```bash
-export ANTHROPIC_API_KEY="your_key"
-export NEO_MODEL="claude-sonnet-4-6"
-export NEO_PHASES_DIR="./phases"
-export NEO_FLOWS_DIR="./flows"
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-| Variable | Description |
-|----------|-------------|
-| `ANTHROPIC_API_KEY` | Required API key for the Anthropic provider |
-| `NEO_MODEL` | Model name. Defaults to `claude-sonnet-4-6` |
-| `NEO_PHASES_DIR` | Directory for phase prompts. Defaults to `./phases` or `~/.neo/phases` |
-| `NEO_FLOWS_DIR` | Directory for flow definitions. Defaults to `./flows` or `~/.neo/flows` |
+**`neo.yaml` reference:**
 
-Artifacts are written to `.agent/runs` by default.
+```yaml
+# Model used for all steps unless overridden in frontmatter.
+# Default: claude-sonnet-4-6
+model: claude-sonnet-4-6
+
+# Directory where step artifacts are written.
+# Default: .agent/runs
+artifacts_dir: .agent/runs
+
+flows:
+  code:
+    steps: [write, review]
+    retry_from: write   # rewind to this step on failure
+    max_rounds: 2       # maximum retry rounds (0 or omitted = 1)
+```
 
 ## Tools
 
+The agent has four built-in tools:
+
 | Tool | Description |
 |------|-------------|
-| `bash` | Run shell commands with a timeout |
+| `bash` | Run a shell command (2-minute timeout) |
 | `read_file` | Read a file from disk |
 | `write_file` | Create or overwrite a file |
 | `edit_file` | Replace one exact string match in a file |
@@ -121,17 +175,33 @@ Artifacts are written to `.agent/runs` by default.
 ## Project Layout
 
 ```text
-cmd/neo/                 CLI entry point
-internal/agent/          Agent loop and event model
-internal/flow/           Multi-phase workflow runner
-internal/phase/          Single phase runner
-internal/tools/          Built-in tool implementations
-internal/tui/            Bubble Tea terminal UI
-flows/                   Workflow definitions
-phases/                  Phase prompts
-legacy/                  Previous Rust implementation
+cmd/neo/                CLI entry point and command dispatch
+internal/agent/         Core agent loop and event model
+internal/config/        Config loading, flow definitions, step resolution
+internal/config/defaults/   Embedded neo.yaml and built-in step prompts
+internal/artifact/      Per-run artifact storage (.agent/runs/)
+internal/flow/          (reserved)
+internal/phase/         Single-step runner
+internal/tools/         bash, read_file, write_file, edit_file implementations
+internal/tui/           Bubble Tea terminal UI
+internal/workflow/      Multi-step workflow engine
+```
+
+## Development
+
+[`just`](https://github.com/casey/just) is used as a task runner. All targets
+also work as plain `go` commands.
+
+```bash
+just build        # go build -o neo ./cmd/neo
+just test         # go test ./...
+just test-verbose # go test -v ./...
+just install      # go install ./cmd/neo
+just fmt          # gofmt -w .
+just lint         # go vet ./...
+just clean        # remove the ./neo binary
 ```
 
 ## License
 
-MIT
+[MIT](LICENSE) © Neo Contributors

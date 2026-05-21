@@ -165,26 +165,75 @@ func TestWorkflowBlock_WorkflowFailedShowsReason(t *testing.T) {
 	}
 }
 
-func TestWorkflowBlock_AgentEventsUpdateActivePhaseDetail(t *testing.T) {
+func TestWorkflowBlock_AgentEventsPopulateActivityLog(t *testing.T) {
 	b := newTestBlock(t, "build")
 	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
 
-	// Tool call appears in the active row's detail column.
 	b.ApplyAgent("build", agent.Event{
 		Kind: agent.EventToolCall,
 		Name: "bash",
 		Args: map[string]any{"command": "go test ./..."},
 	})
-
 	out := plain(b.render(80, nil))
-	if !strings.Contains(out, "running go test") {
-		t.Fatalf("expected 'running go test' in active row, got:\n%s", out)
+	if !strings.Contains(out, "▶") || !strings.Contains(out, "running go test") {
+		t.Fatalf("expected running entry in activity log, got:\n%s", out)
 	}
 
-	// Tool result clears the detail back to (implicit) thinking.
+	// Tool result marks the activity finished — detail stays so the
+	// status bar can keep showing the last action.
 	b.ApplyAgent("build", agent.Event{Kind: agent.EventToolResult, Name: "bash"})
-	if b.detail != "" {
-		t.Fatalf("expected detail to clear after tool result, got %q", b.detail)
+	if b.detail == "" {
+		t.Fatal("expected detail to persist after tool result (no flicker)")
+	}
+	out = plain(b.render(80, nil))
+	if !strings.Contains(out, "✓") || !strings.Contains(out, "running go test") {
+		t.Fatalf("expected ✓ entry after result, got:\n%s", out)
+	}
+}
+
+func TestWorkflowBlock_ActivityLogCapsAtMostRecent(t *testing.T) {
+	b := newTestBlock(t, "build")
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
+
+	// Five tool calls; activity log keeps at most activityCap most-recent.
+	for _, p := range []string{"a.go", "b.go", "c.go", "d.go", "e.go"} {
+		b.ApplyAgent("build", agent.Event{
+			Kind: agent.EventToolCall, Name: "read_file",
+			Args: map[string]any{"path": p},
+		})
+		b.ApplyAgent("build", agent.Event{Kind: agent.EventToolResult, Name: "read_file"})
+	}
+	s := b.steps[0]
+	if len(s.activity) != activityCap {
+		t.Fatalf("activity len = %d, want %d", len(s.activity), activityCap)
+	}
+	// Head should be the most recent path.
+	if !strings.Contains(s.activity[0].desc, "e.go") {
+		t.Fatalf("expected newest entry at head, got %q", s.activity[0].desc)
+	}
+	// Older entries (a.go, b.go) must have been dropped.
+	out := plain(b.render(80, nil))
+	if strings.Contains(out, "a.go") || strings.Contains(out, "b.go") {
+		t.Fatalf("oldest entries should have been evicted, got:\n%s", out)
+	}
+}
+
+func TestWorkflowBlock_ActivityResetsBetweenSteps(t *testing.T) {
+	b := newTestBlock(t, "build", "review")
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
+	b.ApplyAgent("build", agent.Event{Kind: agent.EventToolCall, Name: "bash",
+		Args: map[string]any{"command": "echo hi"}})
+	b.Apply(workflow.Event{Kind: workflow.StepCompleted, Step: "build"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "review"})
+
+	if len(b.steps[1].activity) != 0 {
+		t.Fatalf("review step should start with empty activity, got %+v", b.steps[1].activity)
+	}
+	// Build's activity is preserved on its (now completed) step but not
+	// rendered (only active steps show the log).
+	out := plain(b.render(80, nil))
+	if strings.Contains(out, "running echo") {
+		t.Fatalf("completed step should not render activity log, got:\n%s", out)
 	}
 }
 
