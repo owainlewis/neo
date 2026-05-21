@@ -546,6 +546,7 @@ func (m *model) handleEvent(e agent.Event) {
 		m.appendBlock(toolResultBlock{
 			name:    e.Name,
 			text:    e.Text,
+			isError: e.IsError,
 			elapsed: elapsed,
 		})
 		m.currentTool = nil

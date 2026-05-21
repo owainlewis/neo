@@ -29,7 +29,30 @@ any code.
 
 ## Quick Start
 
-**Prerequisites:** Go 1.25+, an [Anthropic API key](https://console.anthropic.com/).
+**Prerequisites:** An [Anthropic API key](https://console.anthropic.com/).
+
+### One-line install (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash
+```
+
+The script auto-detects your OS and architecture, downloads the matching
+pre-built binary from GitHub Releases, and installs it to `~/.local/bin`.
+If no pre-built binary is available for your platform it falls back to
+`go install` (requires Go 1.25+).
+
+Options:
+
+```bash
+# Pin a specific version
+curl -fsSL .../install.sh | bash -s -- --version v1.2.3
+
+# Install to a custom directory
+curl -fsSL .../install.sh | bash -s -- --bin-dir /usr/local/bin
+```
+
+### Manual install
 
 ```bash
 git clone https://github.com/owainlewis/neo.git

@@ -20,11 +20,12 @@ const (
 )
 
 type Event struct {
-	Kind EventKind
-	Text string
-	Name string
-	Args map[string]any
-	Err  error
+	Kind    EventKind
+	Text    string
+	Name    string
+	Args    map[string]any
+	IsError bool // set on EventToolResult when the tool returned an error
+	Err     error
 }
 
 type Config struct {
@@ -101,7 +102,7 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			case "tool_use":
 				a.emit(Event{Kind: EventToolCall, Name: block.Name, Args: block.Input})
 				out, isErr := a.runTool(ctx, block.Name, block.Input)
-				a.emit(Event{Kind: EventToolResult, Name: block.Name, Text: out})
+				a.emit(Event{Kind: EventToolResult, Name: block.Name, Text: out, IsError: isErr})
 				toolResults = append(toolResults, llm.ContentBlock{
 					Type:      "tool_result",
 					ToolUseID: block.ID,
