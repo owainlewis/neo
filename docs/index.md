@@ -1,9 +1,8 @@
 # Neo Documentation
 
 Neo is a fast, minimalist coding agent with first-class workflow support. It is
-being rewritten in Go around a small agent loop, a practical terminal UI, and
-plain-file workflows for building, reviewing, evaluating, and landing code
-changes.
+built in Go around a small agent loop, a practical terminal UI, and plain-file
+workflows for building, reviewing, evaluating, and landing code changes.
 
 These docs are intended for Neo itself as much as for humans. When a task asks
 about Neo internals, tools, workflows, prompts, configuration, or modifying Neo,
