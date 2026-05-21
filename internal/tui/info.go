@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -43,10 +44,16 @@ type flowsBlock struct {
 }
 
 type flowEntry struct {
-	name      string
-	steps     []string
-	round     int // max_rounds
-	missing   []string // step names that don't resolve
+	name    string
+	steps   []string
+	round   int // max_rounds
+	missing []string // step names that don't resolve because the file isn't found anywhere
+	broken  []brokenStep // step names whose file exists but failed to parse / read
+}
+
+type brokenStep struct {
+	name string
+	err  string // short error description (e.g. "frontmatter: ...")
 }
 
 func buildFlowsBlock(cfg *config.Config) flowsBlock {
@@ -64,7 +71,17 @@ func buildFlowsBlock(cfg *config.Config) flowsBlock {
 		entry := flowEntry{name: n, steps: f.Steps, round: f.MaxRounds}
 		for _, step := range f.Steps {
 			if _, err := cfg.ResolveStep(step); err != nil {
-				entry.missing = append(entry.missing, step)
+				// Distinguish "file doesn't exist anywhere" (missing) from
+				// "file exists but failed to parse / read" (broken). The
+				// two have different fixes and sending a user toward "add
+				// the file" when the file is actually present + malformed
+				// is the wrong path.
+				var notFound *config.StepNotFoundError
+				if errors.As(err, &notFound) {
+					entry.missing = append(entry.missing, step)
+				} else {
+					entry.broken = append(entry.broken, brokenStep{name: step, err: err.Error()})
+				}
 			}
 		}
 		out.entries = append(out.entries, entry)
@@ -91,13 +108,11 @@ func (b flowsBlock) render(width int, _ *glamour.TermRenderer) string {
 	}
 
 	for _, e := range b.entries {
-		var glyph, name string
-		if len(e.missing) == 0 {
+		var glyph string
+		if len(e.missing) == 0 && len(e.broken) == 0 {
 			glyph = styOK.Render("✓")
-			name = e.name
 		} else {
 			glyph = styErr.Render("✗")
-			name = e.name
 		}
 		stepsLine := strings.Join(e.steps, " → ")
 		round := ""
@@ -106,12 +121,16 @@ func (b flowsBlock) render(width int, _ *glamour.TermRenderer) string {
 		}
 		sb.WriteString(fmt.Sprintf("  %s %s  %s%s\n",
 			glyph,
-			padRight(name, nameW+2),
+			padRight(e.name, nameW+2),
 			styMuted.Render(stepsLine),
 			round))
 		if len(e.missing) > 0 {
 			sb.WriteString(fmt.Sprintf("      %s\n",
 				styErr.Render("missing step(s): "+strings.Join(e.missing, ", "))))
+		}
+		for _, b := range e.broken {
+			sb.WriteString(fmt.Sprintf("      %s\n",
+				styErr.Render(fmt.Sprintf("broken step %q: %s", b.name, b.err))))
 		}
 	}
 	sb.WriteString("\n" + styDim.Render("  run with: /run <name> [task]"))

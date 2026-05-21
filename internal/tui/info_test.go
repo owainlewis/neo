@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -57,6 +59,51 @@ func TestFlowsBlock_MarksBrokenFlowWithMissingSteps(t *testing.T) {
 	}
 	if !strings.Contains(out, "missing step") {
 		t.Fatalf("expected 'missing step' diagnostic, got:\n%s", out)
+	}
+}
+
+// Regression for the #32 P2 feedback: a step file that exists but fails
+// to parse (e.g. malformed frontmatter) used to be reported as "missing",
+// sending the user toward the wrong fix. Should now be labelled "broken".
+func TestFlowsBlock_DistinguishesBrokenFromMissing(t *testing.T) {
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+
+	flowsDir := filepath.Join(dir, "flows")
+	if err := os.MkdirAll(flowsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// "broken-step" exists but has bad frontmatter.
+	if err := os.WriteFile(filepath.Join(flowsDir, "broken-step.md"),
+		[]byte("---\nbad yaml: [unclosed\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Build a config with two failure modes: broken-step (parse error) and
+	// missing-step (not found anywhere).
+	if err := os.WriteFile(filepath.Join(dir, "neo.yaml"),
+		[]byte("flows:\n  scratch:\n    steps: [broken-step, missing-step]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := plain(buildFlowsBlock(cfg).render(80, nil))
+
+	if !strings.Contains(out, "missing step(s): missing-step") {
+		t.Fatalf("expected 'missing step(s)' diagnostic for absent file, got:\n%s", out)
+	}
+	if !strings.Contains(out, `broken step "broken-step"`) {
+		t.Fatalf("expected 'broken step' diagnostic for parse-error file, got:\n%s", out)
+	}
+	if strings.Contains(out, "missing step(s): broken-step") {
+		t.Fatalf("broken file should not be labelled missing, got:\n%s", out)
 	}
 }
 
