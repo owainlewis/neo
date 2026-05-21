@@ -127,6 +127,18 @@ type workflowStep struct {
 	started  time.Time
 	finished time.Time
 	message  string
+	// activity holds the most recent tool calls for this step, head=newest.
+	// Used to render a persistent log under the active row so fast tool
+	// calls don't flash past unreadably.
+	activity []activityEntry
+}
+
+const activityCap = 3
+
+type activityEntry struct {
+	desc       string
+	startedAt  time.Time
+	finishedAt time.Time // zero if still running
 }
 
 func newWorkflowBlock(name, task string, stepNames []string, maxRounds int) *workflowBlock {
@@ -222,17 +234,33 @@ func (b *workflowBlock) Apply(e workflow.Event) {
 	}
 }
 
-// ApplyAgent updates the detail line based on what the active step's agent
-// is doing. Events for other steps are ignored.
+// ApplyAgent updates the active step's activity log + the cached detail
+// string used by the status bar. EventToolCall prepends a "running" entry;
+// EventToolResult marks the most recent unfinished entry as completed (with
+// a duration) but does not clear the detail — that's the persistence trick
+// that stops short-lived tool calls from flashing past too quickly to read.
 func (b *workflowBlock) ApplyAgent(stepName string, ev agent.Event) {
 	if b.active < 0 || b.steps[b.active].name != stepName {
 		return
 	}
+	s := &b.steps[b.active]
 	switch ev.Kind {
 	case agent.EventToolCall:
-		b.detail = toolVerb(ev.Name, ev.Args)
+		desc := toolVerb(ev.Name, ev.Args)
+		s.activity = append([]activityEntry{{desc: desc, startedAt: time.Now()}}, s.activity...)
+		if len(s.activity) > activityCap {
+			s.activity = s.activity[:activityCap]
+		}
+		b.detail = desc
 	case agent.EventToolResult:
-		b.detail = "" // back to thinking
+		for i := range s.activity {
+			if s.activity[i].finishedAt.IsZero() {
+				s.activity[i].finishedAt = time.Now()
+				break
+			}
+		}
+		// Intentionally do NOT clear b.detail — keep the last action
+		// visible in the status bar until the next tool call replaces it.
 	}
 }
 
@@ -272,8 +300,20 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	}
 	total := len(b.steps)
 	for i, s := range b.steps {
-		sb.WriteString("  " + renderStepRow(s, i+1, total, nameW, b.detail))
+		// When an active step has an activity log we suppress the row's
+		// detail column so the running tool isn't shown twice (once in
+		// the row, once at the top of the log).
+		rowDetail := b.detail
+		if s.status == stepActive && len(s.activity) > 0 {
+			rowDetail = ""
+		}
+		sb.WriteString("  " + renderStepRow(s, i+1, total, nameW, rowDetail))
 		sb.WriteString("\n")
+		if s.status == stepActive && len(s.activity) > 0 {
+			for _, a := range s.activity {
+				sb.WriteString("      " + renderActivityEntry(a) + "\n")
+			}
+		}
 	}
 
 	// Terminal summary.
@@ -323,6 +363,28 @@ func renderStepRow(s workflowStep, index, total, nameW int, activeDetail string)
 	}
 
 	return fmt.Sprintf("%s %s %s%s", glyphStr, name, counter, detail)
+}
+
+// renderActivityEntry formats one row of the per-step activity log. While
+// the tool is in flight the entry uses ▶ + cyan; once finished it switches
+// to ✓ + green plus an elapsed time suffix.
+func renderActivityEntry(a activityEntry) string {
+	var glyph string
+	var glyphCol color.Color
+	var dur string
+	if a.finishedAt.IsZero() {
+		glyph = "▶"
+		glyphCol = colDotTool
+	} else {
+		glyph = "✓"
+		glyphCol = colOK
+		d := a.finishedAt.Sub(a.startedAt)
+		if d > 0 {
+			dur = "  " + styDim.Render(fmtElapsed(d.Round(10*time.Millisecond)))
+		}
+	}
+	return lipgloss.NewStyle().Foreground(glyphCol).Render(glyph) + " " +
+		styMuted.Render(a.desc) + dur
 }
 
 func stepGlyph(s stepStatus) (string, color.Color) {
