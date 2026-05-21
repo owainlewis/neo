@@ -116,6 +116,31 @@ func TestSlashCommand_UnknownEmitsError(t *testing.T) {
 	}
 }
 
+// Regression: /run must not start a second workflow while one is already
+// active. Doing so would let the previous goroutine's events mutate the
+// new block and clear the new run when the old one finished.
+func TestSlashCommand_RunRejectsWhileWorkflowActive(t *testing.T) {
+	m := makeTestModel(t)
+	m.activeWorkflow = newWorkflowBlock("existing", "x", []string{"build"}, 1)
+
+	m.handleSlashCommand("/run code something")
+
+	// Should have emitted exactly one errorBlock; activeWorkflow unchanged.
+	if len(m.blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(m.blocks))
+	}
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "already running") {
+		t.Fatalf("error should mention concurrent workflow, got %v", eb.err)
+	}
+	if m.activeWorkflow.name != "existing" {
+		t.Fatalf("activeWorkflow replaced; name = %q", m.activeWorkflow.name)
+	}
+}
+
 // Regression: /cancel was unreachable while a workflow was running because
 // the enter handler short-circuited on m.activeWorkflow != nil before slash
 // commands were parsed.

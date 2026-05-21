@@ -344,7 +344,17 @@ func (m *model) handleSlashCommand(line string) {
 
 // startWorkflowCmd loads the named flow definition and kicks off an engine
 // run. Adds a workflowBlock to the scrollback to render its progress.
+//
+// Rejects the request if a workflow is already active; without this guard,
+// the previous run's goroutine keeps emitting workflowEventMsg /
+// workflowDoneMsg and Update would apply them to the new block, mixing
+// progress between runs (and clearing the new run early when the old one
+// finishes).
 func (m *model) startWorkflowCmd(name, task string) {
+	if m.activeWorkflow != nil {
+		m.appendBlock(errorBlock{err: fmt.Errorf("a workflow is already running — /cancel it first")})
+		return
+	}
 	def, err := m.wf.loadDefinition(name)
 	if err != nil {
 		m.appendBlock(errorBlock{err: fmt.Errorf("load flow %q: %w", name, err)})
