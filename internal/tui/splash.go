@@ -1,29 +1,17 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 )
 
-// neoBanner is the block-shadow ASCII art shown at the top of every new
-// chat session. Kept small (6 lines × ~27 cols) so it doesn't dominate
-// short terminals.
-var neoBanner = []string{
-	`███╗   ██╗███████╗ ██████╗ `,
-	`████╗  ██║██╔════╝██╔═══██╗`,
-	`██╔██╗ ██║█████╗  ██║   ██║`,
-	`██║╚██╗██║██╔══╝  ██║   ██║`,
-	`██║ ╚████║███████╗╚██████╔╝`,
-	`╚═╝  ╚═══╝╚══════╝ ╚═════╝ `,
-}
-
-// splashBlock renders a one-time welcome banner with version + model + cwd
-// + a hint about /help. Appended to the model's scrollback on construction
-// so it's the first thing the user sees and stays available when they
-// scroll back.
+// splashBlock renders the welcome banner shown once at the top of every
+// chat session: a small letter-spaced wordmark inside a thin rounded box,
+// metadata on one inline row, and a slash-command hint.
+//
+// Lives in scrollback so it stays available when the user scrolls back.
 type splashBlock struct {
 	version string
 	model   string
@@ -32,50 +20,52 @@ type splashBlock struct {
 }
 
 func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
-	// Banner: blue glyphs inside a rounded border, also in blue, so the
-	// whole block reads as a single unit.
-	bannerStyle := lipgloss.NewStyle().Foreground(colBanner).Bold(true)
-	innerLines := make([]string, 0, len(neoBanner))
-	for _, line := range neoBanner {
-		innerLines = append(innerLines, bannerStyle.Render(line))
-	}
-	bordered := lipgloss.NewStyle().
+	mark := lipgloss.NewStyle().
+		Foreground(colBanner).
+		Bold(true).
+		Render("n e o")
+	boxed := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colBanner).
 		Padding(0, 2).
-		Render(strings.Join(innerLines, "\n"))
+		Render(mark)
+
+	parts := []string{b.version, b.model}
+	if b.branch != "" && b.branch != "no-git" {
+		parts = append(parts, b.branch)
+	}
+	parts = append(parts, b.cwd)
+
+	sep := styDim.Render(" · ")
+	rendered := make([]string, len(parts))
+	for i, p := range parts {
+		rendered[i] = styMuted.Render(p)
+	}
+	metaLine := strings.Join(rendered, sep)
+
+	hint := styDim.Render("type ") + styTool.Render("/help") +
+		styDim.Render(" for slash commands")
 
 	var sb strings.Builder
-	// A little breathing room above the banner so it doesn't sit flush
-	// against the top of the viewport.
+	// Breathing room above the banner.
 	sb.WriteString("\n\n")
-	sb.WriteString(bordered)
-	sb.WriteString("\n\n")
-
-	rows := [][2]string{
-		{"version", b.version},
-		{"model", b.model},
-		{"cwd", b.cwd},
-	}
-	if b.branch != "" && b.branch != "no-git" {
-		rows = append(rows, [2]string{"branch", b.branch})
-	}
-
-	// Pad labels for clean alignment.
-	labelW := 0
-	for _, r := range rows {
-		if len(r[0]) > labelW {
-			labelW = len(r[0])
-		}
-	}
-	for _, r := range rows {
-		sb.WriteString(fmt.Sprintf("  %s  %s\n",
-			styDim.Render(padRight(r[0], labelW)),
-			styMuted.Render(r[1])))
-	}
-
-	sb.WriteString("\n  " + styDim.Render("type ") +
-		styTool.Render("/help") + styDim.Render(" for slash commands"))
-
+	sb.WriteString("  " + indent(boxed, "  "))
+	sb.WriteString("\n\n  ")
+	sb.WriteString(metaLine)
+	sb.WriteString("\n\n  ")
+	sb.WriteString(hint)
 	return sb.String()
+}
+
+// indent prepends a prefix to every line after the first; the first line is
+// expected to already carry its own leading padding from the caller.
+func indent(s, prefix string) string {
+	if !strings.Contains(s, "\n") {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i := 1; i < len(lines); i++ {
+		lines[i] = prefix + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
