@@ -315,8 +315,8 @@ const (
 	workflowPlaceholder = "workflow running — Esc to cancel"
 )
 
-// handleSlashCommand parses /run <flow> <task> and /cancel. Anything else
-// renders an error block. Called only when input begins with '/'.
+// handleSlashCommand parses slash commands. Called only when input begins
+// with '/'.
 func (m *model) handleSlashCommand(line string) {
 	parts := strings.Fields(line)
 	cmd := parts[0]
@@ -337,8 +337,12 @@ func (m *model) handleSlashCommand(line string) {
 		if m.workflowCancel != nil {
 			m.workflowCancel()
 		}
+	case "/flows":
+		m.appendBlock(buildFlowsBlock(m.wf.Config))
+	case "/help":
+		m.appendBlock(helpBlock{})
 	default:
-		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: %s", cmd)})
+		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: %s — try /help", cmd)})
 	}
 }
 
