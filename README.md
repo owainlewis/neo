@@ -10,6 +10,8 @@ CLI lets you run repeatable multi-step flows in CI or from scripts — each step
 is a plain Markdown prompt file that you can read and edit without touching
 any code.
 
+![neo splash screen](docs/screenshot.png)
+
 ## Features
 
 - **Interactive chat.** `neo chat` opens a Bubble Tea terminal UI. Type a task,
@@ -32,10 +34,13 @@ any code.
 ```bash
 git clone https://github.com/owainlewis/neo.git
 cd neo
-go build -o neo ./cmd/neo
+just build                          # or: go build -o neo ./cmd/neo
 export ANTHROPIC_API_KEY="sk-ant-..."
-./neo chat
+./neo                               # opens the chat TUI (default)
 ```
+
+`just build` stamps the current git description into the binary as the
+version shown on the splash screen (use `just print-version` to preview).
 
 Install onto your `$GOBIN` path:
 

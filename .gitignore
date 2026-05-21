@@ -3,3 +3,4 @@
 /dist/
 /.agent/
 /neo
+.DS_Store
