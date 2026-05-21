@@ -29,6 +29,10 @@ test-verbose:
 install:
     go install -ldflags "-X main.Version={{version}}" ./cmd/neo
 
+# Validate the install script with bash -n (syntax check)
+check-install-script:
+    bash -n install.sh && echo "install.sh syntax OK"
+
 # Remove the built binary
 clean:
     rm -f neo
