@@ -31,7 +31,7 @@ func (b textBlock) render(width int, md *glamour.TermRenderer) string {
 	if err != nil {
 		return wrap(b.text, width)
 	}
-	return strings.TrimRight(out, "\n")
+	return strings.Trim(out, "\n")
 }
 
 type thinkingBlock struct{ text string }

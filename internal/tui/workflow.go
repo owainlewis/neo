@@ -1,17 +1,86 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"image/color"
+	"path/filepath"
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/artifact"
+	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/workflow"
 )
+
+// WorkflowConfig carries everything the TUI needs to construct and run a
+// workflow.Engine in response to a /run slash command.
+type WorkflowConfig struct {
+	FlowsDir  string
+	PhasesDir string
+	Runner    *phase.Runner
+	Store     *artifact.Store
+}
+
+// teaSendFn matches the signature of tea.Program.Send. Extracted as an
+// interface alias so tests don't need a real program to drive the sink.
+type teaSendFn func(tea.Msg)
+
+// tuiSink converts workflow.Engine events into Bubble Tea messages so they
+// land on the Update goroutine and mutate the active workflowBlock safely.
+type tuiSink struct {
+	send teaSendFn
+}
+
+func (s *tuiSink) OnWorkflow(e workflow.Event) {
+	s.send(workflowEventMsg{ev: e})
+}
+
+func (s *tuiSink) OnAgent(phaseName string, ev agent.Event) {
+	s.send(workflowAgentEventMsg{phase: phaseName, ev: ev})
+}
+
+// Messages routed between the workflow goroutine and the Bubble Tea program.
+type workflowEventMsg struct{ ev workflow.Event }
+type workflowAgentEventMsg struct {
+	phase string
+	ev    agent.Event
+}
+type workflowDoneMsg struct{ err error }
+
+// loadWorkflow reads a flow definition by name from the configured FlowsDir.
+func (c WorkflowConfig) loadDefinition(name string) (workflow.Definition, error) {
+	def, err := workflow.LoadDefinition(filepath.Join(c.FlowsDir, name+".yaml"))
+	if err != nil {
+		return workflow.Definition{}, err
+	}
+	return *def, nil
+}
+
+// launchWorkflow constructs an engine for the given def and runs it in a
+// goroutine. The returned cancel function aborts the run; the engine's events
+// flow back to the program via the sink. When Run returns, a workflowDoneMsg
+// is sent so the model can clear its active state.
+func (c WorkflowConfig) launchWorkflow(ctx context.Context, send teaSendFn, def workflow.Definition, task string) context.CancelFunc {
+	runCtx, cancel := context.WithCancel(ctx)
+	sink := &tuiSink{send: send}
+	eng := &workflow.Engine{
+		PhasesDir: c.PhasesDir,
+		Runner:    c.Runner,
+		Store:     c.Store,
+		Sink:      sink,
+	}
+	go func() {
+		err := eng.Run(runCtx, def, task)
+		send(workflowDoneMsg{err: err})
+	}()
+	return cancel
+}
 
 // workflowBlock renders a single workflow run as a Pi-style status widget
 // inside the chat scrollback. It is mutable — events from the workflow
