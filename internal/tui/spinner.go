@@ -48,14 +48,14 @@ func randomCaption() string {
 func toolVerb(name string, args map[string]any) string {
 	switch name {
 	case "bash":
-		cmd := strings.TrimSpace(stringArgT(args, "command"))
-		return "running " + truncateT(oneLineT(cmd), 60)
+		cmd := strings.TrimSpace(stringArg(args, "command"))
+		return "running " + truncate(oneLine(cmd), 60)
 	case "read_file":
-		return "reading " + shortPath(stringArgT(args, "path"))
+		return "reading " + shortPath(stringArg(args, "path"))
 	case "write_file":
-		return "writing " + shortPath(stringArgT(args, "path"))
+		return "writing " + shortPath(stringArg(args, "path"))
 	case "edit_file":
-		return "editing " + shortPath(stringArgT(args, "path"))
+		return "editing " + shortPath(stringArg(args, "path"))
 	}
 	return name
 }
@@ -75,29 +75,3 @@ func shortPath(p string) string {
 	return ".../" + parent + "/" + file
 }
 
-// Local copies of helpers also defined in blocks.go. Duplication is
-// deliberate and temporary — see GH #22 for the dedupe plan.
-func stringArgT(args map[string]any, key string) string {
-	if v, ok := args[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
-}
-
-func oneLineT(s string) string {
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ⏎ ")
-	return strings.TrimSpace(s)
-}
-
-func truncateT(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return "…"
-	}
-	return s[:n-1] + "…"
-}

@@ -32,16 +32,25 @@ type splashBlock struct {
 }
 
 func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
-	bannerStyle := lipgloss.NewStyle().Foreground(colDotThinking).Bold(true)
+	// Banner: blue glyphs inside a rounded border, also in blue, so the
+	// whole block reads as a single unit.
+	bannerStyle := lipgloss.NewStyle().Foreground(colBanner).Bold(true)
+	innerLines := make([]string, 0, len(neoBanner))
+	for _, line := range neoBanner {
+		innerLines = append(innerLines, bannerStyle.Render(line))
+	}
+	bordered := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colBanner).
+		Padding(0, 2).
+		Render(strings.Join(innerLines, "\n"))
+
 	var sb strings.Builder
 	// A little breathing room above the banner so it doesn't sit flush
 	// against the top of the viewport.
 	sb.WriteString("\n\n")
-	for _, line := range neoBanner {
-		sb.WriteString(bannerStyle.Render(line))
-		sb.WriteString("\n")
-	}
-	sb.WriteString("\n")
+	sb.WriteString(bordered)
+	sb.WriteString("\n\n")
 
 	rows := [][2]string{
 		{"version", b.version},

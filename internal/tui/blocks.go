@@ -124,31 +124,6 @@ func toolCardContent(name string, args map[string]any) (string, string) {
 	return name, ""
 }
 
-func stringArg(args map[string]any, key string) string {
-	if v, ok := args[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
-}
-
-func oneLine(s string) string {
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ⏎ ")
-	return strings.TrimSpace(s)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return "…"
-	}
-	return s[:n-1] + "…"
-}
-
 func wrap(s string, width int) string {
 	if width <= 0 {
 		return s
@@ -156,13 +131,4 @@ func wrap(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-func fmtElapsed(d time.Duration) string {
-	switch {
-	case d < time.Second:
-		return fmt.Sprintf("Took %dms", d.Milliseconds())
-	case d < time.Minute:
-		return fmt.Sprintf("Took %.1fs", d.Seconds())
-	default:
-		return fmt.Sprintf("Took %s", d.Round(time.Second))
-	}
-}
+
