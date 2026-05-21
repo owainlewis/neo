@@ -185,9 +185,19 @@ func (b *workflowBlock) Apply(e workflow.Event) {
 		if e.Round > 0 {
 			b.round = e.Round
 		}
-		// Failed phases get reset so the retry round renders fresh.
+		// Every phase from RetryFrom onward will re-execute on the next
+		// round, so reset them all — not just the one that failed. Phases
+		// before RetryFrom keep their state since the engine won't revisit
+		// them. If the event lacks a phase name we fall back to the older
+		// behaviour and only reset rows marked phaseFailed.
+		resetFrom := len(b.phases) // sentinel: only reset failed phases
+		if e.Phase != "" {
+			if idx := b.phaseIndex(e.Phase); idx >= 0 {
+				resetFrom = idx
+			}
+		}
 		for i := range b.phases {
-			if b.phases[i].status == phaseFailed {
+			if i >= resetFrom || b.phases[i].status == phaseFailed {
 				b.phases[i] = workflowPhase{name: b.phases[i].name, status: phasePending}
 			}
 		}

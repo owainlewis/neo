@@ -169,7 +169,10 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 				failed = true
 				e.emit(Event{Kind: PhaseFailed, Phase: name, Round: round, Index: i + 1, Total: total, Message: "phase reports failure", Output: result.Output})
 				if def.RetryFrom != "" && round < maxRounds {
-					e.emit(Event{Kind: RoundRetrying, Round: round + 1, Total: total, Message: "retrying from " + def.RetryFrom})
+					// Phase carries the retry-from phase name so a sink can
+					// reset all phases from that index onward for the next
+					// round, not just the one that failed.
+					e.emit(Event{Kind: RoundRetrying, Phase: def.RetryFrom, Round: round + 1, Total: total, Message: "retrying from " + def.RetryFrom})
 					break
 				}
 				msg := fmt.Sprintf("phase %s failed (round %d)", name, round)

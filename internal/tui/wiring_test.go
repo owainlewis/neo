@@ -116,6 +116,21 @@ func TestSlashCommand_UnknownEmitsError(t *testing.T) {
 	}
 }
 
+// Regression: /cancel was unreachable while a workflow was running because
+// the enter handler short-circuited on m.activeWorkflow != nil before slash
+// commands were parsed.
+func TestSlashCommand_CancelWorksWhileWorkflowActive(t *testing.T) {
+	m := makeTestModel(t)
+	cancelled := false
+	m.activeWorkflow = newWorkflowBlock("demo", "x", []string{"build"}, 1)
+	m.workflowCancel = func() { cancelled = true }
+
+	m.handleSlashCommand("/cancel")
+	if !cancelled {
+		t.Fatal("/cancel did not invoke workflowCancel")
+	}
+}
+
 func TestSlashCommand_RunMissingFlowEmitsError(t *testing.T) {
 	// /run names a flow that doesn't exist; loadDefinition returns an error.
 	m := makeTestModel(t)

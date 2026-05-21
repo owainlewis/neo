@@ -170,19 +170,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.workflowCancel()
 			}
 		case "enter":
-			if m.busy || m.activeWorkflow != nil {
-				break
-			}
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
 				break
 			}
-			m.input.Reset()
-			m.resizeInput()
+			// Slash commands are parsed before the busy / active-workflow
+			// gate so /cancel remains reachable while a workflow is running.
 			if strings.HasPrefix(text, "/") {
+				m.input.Reset()
+				m.resizeInput()
 				m.handleSlashCommand(text)
 				break
 			}
+			// Chat text is suppressed while a turn or workflow is in flight.
+			if m.busy || m.activeWorkflow != nil {
+				break
+			}
+			m.input.Reset()
+			m.resizeInput()
 			m.appendBlock(userBlock{text: text})
 			m.busy = true
 			m.busySince = time.Now()
