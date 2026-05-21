@@ -131,6 +131,13 @@ func TestEngine_RetryFromOnFailureMarker(t *testing.T) {
 			if e.Round != 2 {
 				t.Fatalf("RoundRetrying.Round = %d, want 2", e.Round)
 			}
+			// Sink consumers (e.g. the TUI workflow block) need RetryFrom on
+			// the event so they can reset every downstream phase row before
+			// the retry round runs. Without this they only reset the failed
+			// row and downstream completed rows stay rendered as ✓.
+			if e.Phase != "build" {
+				t.Fatalf("RoundRetrying.Phase = %q, want %q (the RetryFrom phase)", e.Phase, "build")
+			}
 		}
 	}
 	if !sawFail || !sawRetry {

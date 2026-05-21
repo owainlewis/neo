@@ -91,6 +91,7 @@ func TestWorkflowBlock_RoundRetryingResetsFailedPhases(t *testing.T) {
 	b := newTestBlock(t, "build", "eval")
 	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build"})
 	b.Apply(workflow.Event{Kind: workflow.PhaseFailed, Phase: "build", Message: "broke"})
+	// No Phase on the event → fall back to "only reset failed".
 	b.Apply(workflow.Event{Kind: workflow.RoundRetrying, Round: 2})
 
 	if b.round != 2 {
@@ -109,6 +110,30 @@ func TestWorkflowBlock_RoundRetryingResetsFailedPhases(t *testing.T) {
 	}
 	if strings.Contains(out, "broke") {
 		t.Fatalf("expected reset to clear failure message, got:\n%s", out)
+	}
+}
+
+// When RoundRetrying carries the retry-from phase name, every phase from
+// that index onward is reset — including ones that previously completed.
+// Without this, downstream phases would still render as ✓ even though the
+// retry round is about to re-execute them.
+func TestWorkflowBlock_RoundRetryingResetsAllPhasesFromRetryFrom(t *testing.T) {
+	b := newTestBlock(t, "build", "eval", "finalize")
+	// Round 1: build and eval complete; finalize fails.
+	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "build"})
+	b.Apply(workflow.Event{Kind: workflow.PhaseCompleted, Phase: "build"})
+	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "eval"})
+	b.Apply(workflow.Event{Kind: workflow.PhaseCompleted, Phase: "eval"})
+	b.Apply(workflow.Event{Kind: workflow.PhaseStarted, Phase: "finalize"})
+	b.Apply(workflow.Event{Kind: workflow.PhaseFailed, Phase: "finalize", Message: "broke"})
+
+	// Engine retries from "build" — every phase will run again.
+	b.Apply(workflow.Event{Kind: workflow.RoundRetrying, Phase: "build", Round: 2})
+
+	for i, p := range b.phases {
+		if p.status != phasePending {
+			t.Errorf("phase[%d] %q not reset (status=%v) — should be pending after retry-from build", i, p.name, p.status)
+		}
 	}
 }
 

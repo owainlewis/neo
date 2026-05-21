@@ -14,6 +14,7 @@ var (
 	colDotReady    = lipgloss.Color("42")  // green  — idle, awaiting input
 	colDotThinking = lipgloss.Color("208") // orange — model is thinking
 	colDotTool     = lipgloss.Color("14")  // cyan   — a tool is in flight
+	colDotWorkflow = lipgloss.Color("13")  // magenta — a workflow is running
 	colCardBg  = lipgloss.Color("236")
 	colToolBg  = lipgloss.Color("235")
 	colInputBg = lipgloss.Color("234")

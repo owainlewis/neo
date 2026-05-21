@@ -97,7 +97,20 @@ func runChat(ctx context.Context) {
 		Tools:    reg,
 	})
 
-	if err := tui.Run(ctx, ag, cfg.Model); err != nil {
+	// Workflow support: /run <flow> kicks off a workflow.Engine that shares
+	// the chat's provider and tools but runs phases via its own phase.Runner.
+	wf := tui.WorkflowConfig{
+		FlowsDir:  cfg.FlowsDir,
+		PhasesDir: cfg.PhasesDir,
+		Runner: &phase.Runner{
+			Provider:     prov,
+			Tools:        reg,
+			DefaultModel: cfg.Model,
+		},
+		Store: artifact.NewStore(cfg.ArtifactsDir),
+	}
+
+	if err := tui.Run(ctx, ag, cfg.Model, wf); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
