@@ -1,16 +1,21 @@
 # Neo justfile
 
+# Version stamped into the binary at build time. Uses the nearest git tag
+# (with dirty suffix if there are uncommitted changes), falling back to the
+# short commit SHA, falling back to "dev" outside a git checkout.
+version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
+
 # List available recipes
 default:
     @just --list
 
-# Build the neo binary
+# Build the neo binary (stamps Version via -ldflags)
 build:
-    go build -o neo ./cmd/neo
+    go build -ldflags "-X main.Version={{version}}" -o neo ./cmd/neo
 
 # Run neo (dev mode)
 dev *args:
-    go run ./cmd/neo {{ args }}
+    go run -ldflags "-X main.Version={{version}}" ./cmd/neo {{ args }}
 
 # Run all tests
 test:
@@ -20,9 +25,9 @@ test:
 test-verbose:
     go test -v ./...
 
-# Install neo onto $GOBIN
+# Install neo onto $GOBIN (stamps Version)
 install:
-    go install ./cmd/neo
+    go install -ldflags "-X main.Version={{version}}" ./cmd/neo
 
 # Remove the built binary
 clean:
@@ -35,3 +40,7 @@ fmt:
 # Run go vet
 lint:
     go vet ./...
+
+# Print the version that would be stamped (for debugging)
+print-version:
+    @echo {{version}}
