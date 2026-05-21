@@ -15,7 +15,10 @@ var (
 	colDotThinking = lipgloss.Color("208") // orange — model is thinking
 	colDotTool     = lipgloss.Color("14")  // cyan   — a tool is in flight
 	colDotWorkflow = lipgloss.Color("13")  // magenta — a workflow is running
-	colCardBg  = lipgloss.Color("236")
+	// Splash banner colour. Picked to feel "neo blue" — saturated but not
+	// neon. xterm-256 39 is DeepSkyBlue1 (rgb 0/175/255).
+	colBanner = lipgloss.Color("39")
+	colCardBg = lipgloss.Color("236")
 	colToolBg  = lipgloss.Color("235")
 	colInputBg = lipgloss.Color("234")
 
