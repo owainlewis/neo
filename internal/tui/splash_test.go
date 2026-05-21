@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSplashBlock_RendersWordmarkTaglineAndMetadata(t *testing.T) {
+func TestSplashBlock_RendersWordmarkTaglineAndMetadataList(t *testing.T) {
 	b := splashBlock{
 		version: "v0.2.0",
 		model:   "claude-sonnet-4-6",
@@ -14,45 +14,78 @@ func TestSplashBlock_RendersWordmarkTaglineAndMetadata(t *testing.T) {
 	}
 	out := plain(b.render(80, nil))
 
-	for _, want := range []string{
-		"NEO", "a coding agent",
-		"v0.2.0", "claude-sonnet-4-6", "main", "~/Code/neo",
-		"/help",
-	} {
+	// Wordmark + tagline + hint.
+	for _, want := range []string{"NEO", "a coding agent", "/help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("splash missing %q:\n%s", want, out)
 		}
 	}
-	// Inline `·` separator between metadata values.
-	if !strings.Contains(out, "·") {
-		t.Errorf("expected `·` separator in metadata row, got:\n%s", out)
+	// Labelled list — each label appears alongside its value.
+	type pair struct{ label, value string }
+	for _, p := range []pair{
+		{"version", "v0.2.0"},
+		{"model", "claude-sonnet-4-6"},
+		{"branch", "main"},
+		{"cwd", "~/Code/neo"},
+	} {
+		if !strings.Contains(out, p.label) || !strings.Contains(out, p.value) {
+			t.Errorf("expected list row %q → %q, got:\n%s", p.label, p.value, out)
+		}
 	}
 }
 
-func TestSplashBlock_RendersGradientBar(t *testing.T) {
+func TestSplashBlock_GradientMatchesContentHeight(t *testing.T) {
+	// Full set: 3 header lines (wordmark, tagline, blank) + 4 list rows = 7.
+	full := splashBlock{version: "v", model: "m", cwd: "/c", branch: "main"}
+	if got := strings.Count(plain(full.render(80, nil)), "█"); got != 7 {
+		t.Fatalf("expected 7 gradient bar chars with branch, got %d", got)
+	}
+	// Without branch: 3 header + 3 list rows = 6.
+	short := splashBlock{version: "v", model: "m", cwd: "/c"}
+	if got := strings.Count(plain(short.render(80, nil)), "█"); got != 6 {
+		t.Fatalf("expected 6 gradient bar chars without branch, got %d", got)
+	}
+}
+
+func TestSplashBlock_OmitsBranchRowWhenAbsent(t *testing.T) {
 	b := splashBlock{version: "dev", model: "m", cwd: "/tmp"}
 	out := plain(b.render(80, nil))
-	// Five lines of █ — one per gradient stop. Count occurrences of the
-	// block character (the bar) to confirm the lockup is the expected shape.
-	got := strings.Count(out, "█")
-	if got != len(gradient) {
-		t.Fatalf("expected %d gradient bar chars, got %d in:\n%s", len(gradient), got, out)
+	if strings.Contains(out, "branch") {
+		t.Fatalf("expected no branch row when branch is empty, got:\n%s", out)
 	}
 }
 
-func TestSplashBlock_OmitsBranchWhenAbsent(t *testing.T) {
-	b := splashBlock{version: "dev", model: "m", cwd: "/tmp"}
-	out := plain(b.render(80, nil))
-	// "main" shouldn't appear when no branch was supplied.
-	if strings.Contains(out, "main") {
-		t.Fatalf("expected no branch token in output, got:\n%s", out)
-	}
-}
-
-func TestSplashBlock_OmitsBranchWhenNoGit(t *testing.T) {
+func TestSplashBlock_OmitsBranchRowWhenNoGit(t *testing.T) {
 	b := splashBlock{version: "dev", model: "m", cwd: "/tmp", branch: "no-git"}
 	out := plain(b.render(80, nil))
 	if strings.Contains(out, "no-git") {
-		t.Fatalf("expected no-git sentinel to be suppressed, got:\n%s", out)
+		t.Fatalf("no-git sentinel should be suppressed, got:\n%s", out)
+	}
+	if strings.Contains(out, "branch") {
+		t.Fatalf("branch row should be omitted on no-git, got:\n%s", out)
+	}
+}
+
+func TestGradientFor_PicksAcrossPalette(t *testing.T) {
+	cases := []struct {
+		n            int
+		firstIsLight bool
+		lastIsDark   bool
+	}{
+		{n: 1, firstIsLight: true, lastIsDark: false}, // single stop is light
+		{n: 5, firstIsLight: true, lastIsDark: true},
+		{n: 8, firstIsLight: true, lastIsDark: true},
+	}
+	for _, c := range cases {
+		got := gradientFor(c.n)
+		if len(got) != c.n {
+			t.Errorf("gradientFor(%d) len = %d, want %d", c.n, len(got), c.n)
+		}
+		if got[0] != skyPalette[0] {
+			t.Errorf("gradientFor(%d)[0] = %s, want palette start %s", c.n, got[0], skyPalette[0])
+		}
+		if c.lastIsDark && got[len(got)-1] != skyPalette[len(skyPalette)-1] {
+			t.Errorf("gradientFor(%d) last = %s, want palette end %s", c.n, got[len(got)-1], skyPalette[len(skyPalette)-1])
+		}
 	}
 }
