@@ -123,7 +123,13 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 
 	e.emit(Event{Kind: WorkflowStarted, Round: 1, Total: total})
 
-	artifacts := map[string]string{}
+	// Template context that's carried across rounds. `prev` is the most
+	// recently completed step (used as `.Prev` by the next step's template);
+	// `steps` holds the most recent output per step name (used as
+	// `.Steps[name]` for cross-reference). Both persist across rounds.
+	var prev *phase.StepRef
+	steps := map[string]*phase.StepRef{}
+
 	for round := 1; round <= maxRounds; round++ {
 		start := 0
 		if round > 1 {
@@ -143,7 +149,12 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 				return err
 			}
 
-			result, err := e.Runner.Run(ctx, pdef, phase.Input{Task: task, Artifacts: artifacts})
+			result, err := e.Runner.Run(ctx, pdef, phase.Input{
+				Task:  task,
+				Round: round,
+				Prev:  prev,
+				Steps: steps,
+			})
 			if err != nil {
 				msg := err.Error()
 				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: msg})
@@ -151,7 +162,9 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 				return err
 			}
 
-			artifacts[name] = result.Output
+			ref := &phase.StepRef{Name: name, Output: result.Output, Round: round}
+			steps[name] = ref
+			prev = ref
 			_ = e.Store.WritePhase(runID, name, round, result.Output)
 
 			if failsHeuristic(result.Output) {
