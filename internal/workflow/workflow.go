@@ -301,7 +301,7 @@ func (e *Engine) runCommandStep(ctx context.Context, name, command, cwd string) 
 	}
 	if err != nil {
 		if ctx.Err() != nil {
-			return out, fmt.Errorf("command cancelled: %w", ctx.Err())
+			return out, ctx.Err()
 		}
 		if ee, ok := err.(*exec.ExitError); ok {
 			return out, fmt.Errorf("command failed with exit %d", ee.ExitCode())

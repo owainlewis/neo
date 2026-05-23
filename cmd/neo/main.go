@@ -166,23 +166,23 @@ func runFlow(ctx context.Context, args []string) {
 }
 
 func definitionForRef(cfg *config.Config, ref string) (workflow.Definition, error) {
+	fc, ok := cfg.Flows[ref]
+	if ok {
+		return workflow.Definition{
+			Name:      ref,
+			Steps:     fc.Steps,
+			RetryFrom: fc.RetryFrom,
+			MaxRounds: fc.MaxRounds,
+		}, nil
+	}
 	if workflow.LooksLikeFile(ref) {
 		return workflow.LoadFile(ref)
 	}
 	if _, err := os.Stat(ref); err == nil {
 		return workflow.LoadFile(ref)
 	}
-	fc, ok := cfg.Flows[ref]
-	if !ok {
-		return workflow.Definition{}, fmt.Errorf("no flow %q in config (%s)\nAvailable: %s",
-			ref, cfg.Source(), strings.Join(cfg.FlowNames(), ", "))
-	}
-	return workflow.Definition{
-		Name:      ref,
-		Steps:     fc.Steps,
-		RetryFrom: fc.RetryFrom,
-		MaxRounds: fc.MaxRounds,
-	}, nil
+	return workflow.Definition{}, fmt.Errorf("no flow %q in config (%s)\nAvailable: %s",
+		ref, cfg.Source(), strings.Join(cfg.FlowNames(), ", "))
 }
 
 // runStep runs a single step against a task using the configured step

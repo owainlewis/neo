@@ -56,6 +56,17 @@ type workflowDoneMsg struct{ err error }
 // definitionFor returns the workflow.Definition for a flow by name from the
 // loaded config, or an error if the flow doesn't exist.
 func (c WorkflowConfig) definitionFor(name string) (workflow.Definition, error) {
+	if c.Config != nil {
+		fc, ok := c.Config.Flows[name]
+		if ok {
+			return workflow.Definition{
+				Name:      name,
+				Steps:     fc.Steps,
+				RetryFrom: fc.RetryFrom,
+				MaxRounds: fc.MaxRounds,
+			}, nil
+		}
+	}
 	if workflow.LooksLikeFile(name) {
 		return workflow.LoadFile(name)
 	}
@@ -65,16 +76,7 @@ func (c WorkflowConfig) definitionFor(name string) (workflow.Definition, error) 
 	if c.Config == nil {
 		return workflow.Definition{}, fmt.Errorf("no config loaded")
 	}
-	fc, ok := c.Config.Flows[name]
-	if !ok {
-		return workflow.Definition{}, fmt.Errorf("no flow %q in config (%s)", name, c.Config.Source())
-	}
-	return workflow.Definition{
-		Name:      name,
-		Steps:     fc.Steps,
-		RetryFrom: fc.RetryFrom,
-		MaxRounds: fc.MaxRounds,
-	}, nil
+	return workflow.Definition{}, fmt.Errorf("no flow %q in config (%s)", name, c.Config.Source())
 }
 
 // launchWorkflow constructs an engine for the given def and runs it in a

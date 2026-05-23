@@ -400,6 +400,35 @@ steps:
 	}
 }
 
+func TestEngine_FileFlowCommandCancellationReturnsContextCanceled(t *testing.T) {
+	dir := t.TempDir()
+	flowPath := filepath.Join(dir, "cancel-flow.yml")
+	if err := os.WriteFile(flowPath, []byte(`
+steps:
+  - name: wait
+    type: command
+    run: sleep 5
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	def, err := LoadFile(flowPath)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	eng := &Engine{
+		Runner: &phase.Runner{Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(), DefaultModel: "m"},
+		Store:  artifact.NewStore(filepath.Join(dir, "runs")),
+		Sink:   &recordingSink{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = eng.Run(ctx, def, "task")
+	if err != context.Canceled {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+}
+
 func equalKinds(a, b []EventKind) bool {
 	if len(a) != len(b) {
 		return false
