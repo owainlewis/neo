@@ -97,6 +97,26 @@ func TestRender_RoundExposed(t *testing.T) {
 	}
 }
 
+func TestRender_WorkflowFileContextExposed(t *testing.T) {
+	def := Definition{
+		Name:   "build",
+		Prompt: "run={{.RunID}} cwd={{.CWD}} flow={{.FlowPath}} step={{.StepName}} task={{.Task}}",
+		Source: "test",
+	}
+	sys, _ := runOnce(t, def, Input{
+		Task:     "fix issue",
+		RunID:    "flow-123",
+		CWD:      "/tmp/project",
+		FlowPath: "/tmp/project/build-flow.yml",
+		StepName: "build",
+	})
+	for _, want := range []string{"run=flow-123", "cwd=/tmp/project", "flow=/tmp/project/build-flow.yml", "step=build", "task=fix issue"} {
+		if !strings.Contains(sys, want) {
+			t.Fatalf("rendered prompt missing %q: %q", want, sys)
+		}
+	}
+}
+
 func TestRender_TemplateParseErrorSurfacesSource(t *testing.T) {
 	def := Definition{
 		Name:   "broken",

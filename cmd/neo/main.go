@@ -42,6 +42,8 @@ func main() {
 	switch os.Args[1] {
 	case "chat":
 		runChat(ctx)
+	case "run":
+		runFlow(ctx, os.Args[2:])
 	case "flow":
 		runFlow(ctx, os.Args[2:])
 	case "step":
@@ -61,7 +63,8 @@ func printUsage() {
 USAGE:
   neo                               Interactive chat mode (default)
   neo chat                          Interactive chat mode (explicit)
-  neo flow <flow-name> "<task>"     Run a named flow against a task (headless)
+  neo run <flow.yml|flow-name> "<task>"  Run a flow file or named flow (headless)
+  neo flow <flow.yml|flow-name> "<task>" Alias for neo run
   neo step <step-name> "<task>"     Run a single step (headless)
   neo help                          Show this help
 
@@ -131,17 +134,16 @@ func runChat(ctx context.Context) {
 // is grep-friendly in CI.
 func runFlow(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, `usage: neo flow <flow-name> "<task>"`)
+		fmt.Fprintln(os.Stderr, `usage: neo run <flow.yml|flow-name> "<task>"`)
 		os.Exit(2)
 	}
-	name := args[0]
+	ref := args[0]
 	task := strings.Join(args[1:], " ")
 
 	cfg := mustConfig()
-	fc, ok := cfg.Flows[name]
-	if !ok {
-		fmt.Fprintf(os.Stderr, "no flow %q in config (%s)\nAvailable: %s\n",
-			name, cfg.Source(), strings.Join(cfg.FlowNames(), ", "))
+	def, err := definitionForRef(cfg, ref)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
@@ -156,17 +158,31 @@ func runFlow(ctx context.Context, args []string) {
 		Store:    store,
 		Sink:     &cliSink{out: os.Stdout},
 	}
-	def := workflow.Definition{
-		Name:      name,
-		Steps:     fc.Steps,
-		RetryFrom: fc.RetryFrom,
-		MaxRounds: fc.MaxRounds,
-	}
 	if err := eng.Run(ctx, def, task); err != nil {
 		fmt.Fprintf(os.Stderr, "\nflow failed: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("\nflow completed.")
+}
+
+func definitionForRef(cfg *config.Config, ref string) (workflow.Definition, error) {
+	if workflow.LooksLikeFile(ref) {
+		return workflow.LoadFile(ref)
+	}
+	if _, err := os.Stat(ref); err == nil {
+		return workflow.LoadFile(ref)
+	}
+	fc, ok := cfg.Flows[ref]
+	if !ok {
+		return workflow.Definition{}, fmt.Errorf("no flow %q in config (%s)\nAvailable: %s",
+			ref, cfg.Source(), strings.Join(cfg.FlowNames(), ", "))
+	}
+	return workflow.Definition{
+		Name:      ref,
+		Steps:     fc.Steps,
+		RetryFrom: fc.RetryFrom,
+		MaxRounds: fc.MaxRounds,
+	}, nil
 }
 
 // runStep runs a single step against a task using the configured step

@@ -11,7 +11,7 @@ import (
 
 func TestHelpBlock_ListsAllSlashCommands(t *testing.T) {
 	out := plain(helpBlock{}.render(80, nil))
-	for _, c := range []string{"/run", "/flows", "/cancel", "/help"} {
+	for _, c := range []string{"/flow", "/run", "/flows", "/cancel", "/help"} {
 		if !strings.Contains(out, c) {
 			t.Errorf("/help missing command %q: %s", c, out)
 		}

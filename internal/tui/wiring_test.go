@@ -65,7 +65,19 @@ func TestTuiSink_ForwardsAgentEventsWithPhase(t *testing.T) {
 func makeTestModel(t *testing.T) *model {
 	t.Helper()
 	return &model{
-		send: func(tea.Msg) {},
+		send:  func(tea.Msg) {},
+		input: newChatInput(),
+	}
+}
+
+func TestModel_PasteMsgUpdatesChatInput(t *testing.T) {
+	m := makeTestModel(t)
+
+	updated, _ := m.Update(tea.PasteMsg{Content: "hello\nworld"})
+	got := updated.(*model).input.Value()
+
+	if got != "hello\nworld" {
+		t.Fatalf("paste did not update input: %q", got)
 	}
 }
 

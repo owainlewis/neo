@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -247,7 +248,171 @@ func TestEngine_RestoresRunnerOnEventOnExit(t *testing.T) {
 	}
 }
 
+func TestLoadFile_ParsesAgentAndCommandSteps(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "BUILD.md")
+	if err := os.WriteFile(promptPath, []byte("build {{.Task}} {{.RunID}}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	flowPath := filepath.Join(dir, "build-flow.yml")
+	if err := os.WriteFile(flowPath, []byte(`
+steps:
+  - name: build
+    type: agent
+    prompt: BUILD.md
+  - name: test
+    type: command
+    run: test -n "{{.RunID}}"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def, err := LoadFile(flowPath)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if def.Name != "build-flow.yml" {
+		t.Fatalf("name = %q", def.Name)
+	}
+	if got := def.StepNames(); !equalStrings(got, []string{"build", "test"}) {
+		t.Fatalf("step names = %v", got)
+	}
+	if def.StepDefs[0].Kind != StepAgent || def.StepDefs[1].Kind != StepCommand {
+		t.Fatalf("unexpected kinds: %+v", def.StepDefs)
+	}
+	if !strings.Contains(def.StepDefs[0].Prompt, "{{.Task}}") {
+		t.Fatalf("prompt not loaded: %q", def.StepDefs[0].Prompt)
+	}
+}
+
+func TestLoadFile_RepoSmokeExampleLoads(t *testing.T) {
+	def, err := LoadFile(filepath.Join("..", "..", "examples", "neo-smoke-flow.yml"))
+	if err != nil {
+		t.Fatalf("LoadFile examples/neo-smoke-flow.yml: %v", err)
+	}
+	if got := def.StepNames(); !equalStrings(got, []string{"plan", "check-run-directory-exists", "check-plan-file-exists", "check-plan-mentions-smoke", "focused-tests", "summarize"}) {
+		t.Fatalf("step names = %v", got)
+	}
+}
+
+func TestEngine_FileFlowRunsAgentAndCommandSteps(t *testing.T) {
+	dir := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	promptPath := filepath.Join(dir, "BUILD.md")
+	if err := os.WriteFile(promptPath, []byte("step={{.StepName}} run={{.RunID}} task={{.Task}}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	flowPath := filepath.Join(dir, "build-flow.yml")
+	if err := os.WriteFile(flowPath, []byte(`
+steps:
+  - name: build
+    type: agent
+    prompt: BUILD.md
+  - name: check
+    type: command
+    run: test -n "{{.RunID}}"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	def, err := LoadFile(flowPath)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("built")}}
+	pr := &phase.Runner{Provider: prov, Tools: tools.NewRegistry(), DefaultModel: "m"}
+	sink := &recordingSink{}
+	eng := &Engine{
+		Runner: pr,
+		Store:  artifact.NewStore(filepath.Join(dir, "runs")),
+		Sink:   sink,
+	}
+
+	if err := eng.Run(context.Background(), def, "fix issue 21"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(prov.Calls) != 1 {
+		t.Fatalf("expected one agent call, got %d", len(prov.Calls))
+	}
+	sys := prov.Calls[0].System
+	for _, want := range []string{"step=build", "run=build-flow-yml-", "task=fix issue 21"} {
+		if !strings.Contains(sys, want) {
+			t.Fatalf("agent prompt missing %q: %q", want, sys)
+		}
+	}
+	if got := sink.kinds(); got[len(got)-1] != WorkflowCompleted {
+		t.Fatalf("expected completion, got %v", got)
+	}
+	var sawCommand bool
+	for _, ev := range sink.agent {
+		if ev.step == "check" && ev.ev.Kind == agent.EventToolCall && ev.ev.Name == "bash" {
+			sawCommand = true
+		}
+	}
+	if !sawCommand {
+		t.Fatalf("expected command step to emit bash activity, got %+v", sink.agent)
+	}
+}
+
+func TestEngine_FileFlowCommandFailureStopsWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	flowPath := filepath.Join(dir, "fail-flow.yml")
+	if err := os.WriteFile(flowPath, []byte(`
+steps:
+  - name: fail
+    type: command
+    run: exit 7
+  - name: never
+    type: command
+    run: echo nope
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	def, err := LoadFile(flowPath)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	sink := &recordingSink{}
+	eng := &Engine{
+		Runner: &phase.Runner{Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(), DefaultModel: "m"},
+		Store:  artifact.NewStore(filepath.Join(dir, "runs")),
+		Sink:   sink,
+	}
+
+	err = eng.Run(context.Background(), def, "task")
+	if err == nil {
+		t.Fatal("expected command failure")
+	}
+	if !strings.Contains(err.Error(), "exit 7") {
+		t.Fatalf("expected exit code in error, got %v", err)
+	}
+	kinds := sink.kinds()
+	if !equalKinds(kinds, []EventKind{WorkflowStarted, StepStarted, StepFailed, WorkflowFailed}) {
+		t.Fatalf("unexpected events: %v", kinds)
+	}
+}
+
 func equalKinds(a, b []EventKind) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}

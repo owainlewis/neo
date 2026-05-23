@@ -11,6 +11,10 @@ markers renders unchanged — templates are opt-in.
 |---|---|---|
 | `.Task` | `string` | The original workflow task. Also delivered separately as the user message; mostly useful when you want to inline the task inside the system prompt. |
 | `.Round` | `int` | 1-based current round number. Increments on `retry_from`. |
+| `.RunID` | `string` | Stable identifier for the current workflow run. Useful for artifact paths such as `docs/{{.RunID}}/PLAN.md`. |
+| `.CWD` | `string` | Current working directory at workflow start. |
+| `.FlowPath` | `string` | Absolute path to the flow YAML file when the run came from `/flow <file.yml>`. Empty for legacy named config flows. |
+| `.StepName` | `string` | Current step name. |
 | `.Prev` | `*StepRef` or `nil` | The step that completed immediately before this one. `nil` on the very first executed step of the workflow. |
 | `.Prev.Name` | `string` | Step name (e.g. `"review"`). |
 | `.Prev.Output` | `string` | The final agent message from that step. |

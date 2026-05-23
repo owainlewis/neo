@@ -1,0 +1,26 @@
+steps:
+  - name: plan
+    type: agent
+    prompt: flows/SMOKE_PLAN.md
+    tools: [read_file, write_file]
+
+  - name: check-run-directory-exists
+    type: command
+    run: test -d ".agent/runs/{{ .RunID }}"
+
+  - name: check-plan-file-exists
+    type: command
+    run: test -s ".agent/runs/{{ .RunID }}/PLAN.md"
+
+  - name: check-plan-mentions-smoke
+    type: command
+    run: grep -qi "smoke" ".agent/runs/{{ .RunID }}/PLAN.md"
+
+  - name: focused-tests
+    type: command
+    run: go test ./internal/workflow ./internal/phase
+
+  - name: summarize
+    type: agent
+    prompt: flows/SMOKE_SUMMARY.md
+    tools: [read_file]

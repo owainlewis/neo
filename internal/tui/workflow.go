@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"os"
 	"strings"
 	"time"
 
@@ -55,6 +56,12 @@ type workflowDoneMsg struct{ err error }
 // definitionFor returns the workflow.Definition for a flow by name from the
 // loaded config, or an error if the flow doesn't exist.
 func (c WorkflowConfig) definitionFor(name string) (workflow.Definition, error) {
+	if workflow.LooksLikeFile(name) {
+		return workflow.LoadFile(name)
+	}
+	if _, err := os.Stat(name); err == nil {
+		return workflow.LoadFile(name)
+	}
 	if c.Config == nil {
 		return workflow.Definition{}, fmt.Errorf("no config loaded")
 	}
@@ -110,6 +117,8 @@ type workflowBlock struct {
 	finishedAt  time.Time
 	terminal    workflow.EventKind // WorkflowCompleted, WorkflowFailed, or ""
 	failMessage string
+	finalStep   string
+	finalOutput string
 }
 
 type stepStatus int
@@ -127,6 +136,7 @@ type workflowStep struct {
 	started  time.Time
 	finished time.Time
 	message  string
+	note     string
 	// activity holds the most recent tool calls for this step, head=newest.
 	// Used to render a persistent log under the active row so fast tool
 	// calls don't flash past unreadably.
@@ -175,6 +185,8 @@ func (b *workflowBlock) Apply(e workflow.Event) {
 		b.steps[idx].status = stepActive
 		b.steps[idx].started = time.Now()
 		b.steps[idx].message = ""
+		b.steps[idx].note = ""
+		b.steps[idx].activity = nil
 		b.active = idx
 		if e.Round > 0 {
 			b.round = e.Round
@@ -187,6 +199,8 @@ func (b *workflowBlock) Apply(e workflow.Event) {
 		}
 		b.steps[idx].status = stepCompleted
 		b.steps[idx].finished = time.Now()
+		b.finalStep = e.Step
+		b.finalOutput = e.Output
 		if b.active == idx {
 			b.active = -1
 		}
@@ -221,6 +235,8 @@ func (b *workflowBlock) Apply(e workflow.Event) {
 				b.steps[i] = workflowStep{name: b.steps[i].name, status: stepPending}
 			}
 		}
+		b.finalStep = ""
+		b.finalOutput = ""
 	case workflow.WorkflowCompleted:
 		b.terminal = workflow.WorkflowCompleted
 		b.finishedAt = time.Now()
@@ -259,8 +275,20 @@ func (b *workflowBlock) ApplyAgent(stepName string, ev agent.Event) {
 				break
 			}
 		}
+		if ev.IsError {
+			s.note = toolResultNote(ev.Text)
+		}
 		// Intentionally do NOT clear b.detail — keep the last action
 		// visible in the status bar until the next tool call replaces it.
+	case agent.EventAssistantText:
+		if note := assistantNote(ev.Text); note != "" {
+			s.note = note
+			b.detail = note
+		}
+	case agent.EventError:
+		if ev.Err != nil {
+			s.note = "error: " + truncate(oneLine(ev.Err.Error()), 100)
+		}
 	}
 }
 
@@ -273,7 +301,7 @@ func (b *workflowBlock) stepIndex(name string) int {
 	return -1
 }
 
-func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
+func (b *workflowBlock) render(width int, md *glamour.TermRenderer) string {
 	var sb strings.Builder
 
 	// Header: name + round counter.
@@ -287,7 +315,7 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 		if limit < 10 {
 			limit = 10
 		}
-		sb.WriteString(styMuted.Render("  " + truncate(oneLine(b.task), limit)) + "\n")
+		sb.WriteString(styMuted.Render("  "+truncate(oneLine(b.task), limit)) + "\n")
 	}
 	sb.WriteString("\n")
 
@@ -301,10 +329,9 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	total := len(b.steps)
 	for i, s := range b.steps {
 		// When an active step has an activity log we suppress the row's
-		// detail column so the running tool isn't shown twice (once in
-		// the row, once at the top of the log).
+		// detail column so the running tool or note isn't shown twice.
 		rowDetail := b.detail
-		if s.status == stepActive && len(s.activity) > 0 {
+		if s.status == stepActive && (len(s.activity) > 0 || s.note != "") {
 			rowDetail = ""
 		}
 		sb.WriteString("  " + renderStepRow(s, i+1, total, nameW, rowDetail))
@@ -314,6 +341,9 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 				sb.WriteString("      " + renderActivityEntry(a) + "\n")
 			}
 		}
+		if renderStepNote(b, s) {
+			sb.WriteString("      " + styMuted.Render(s.note) + "\n")
+		}
 	}
 
 	// Terminal summary.
@@ -321,6 +351,14 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	case workflow.WorkflowCompleted:
 		d := b.finishedAt.Sub(b.startedAt).Round(time.Second)
 		sb.WriteString("\n  " + styOK.Render("✓ completed") + styMuted.Render(fmt.Sprintf("  %s", d)))
+		if strings.TrimSpace(b.finalOutput) != "" {
+			sb.WriteString("\n\n  " + styAccent.Render("summary"))
+			if b.finalStep != "" {
+				sb.WriteString(styDim.Render(" from " + b.finalStep))
+			}
+			sb.WriteString("\n")
+			sb.WriteString(renderFinalOutput(b.finalOutput, width, md))
+		}
 	case workflow.WorkflowFailed:
 		sb.WriteString("\n  " + styErr.Render("✗ failed"))
 		if b.failMessage != "" {
@@ -357,12 +395,126 @@ func renderStepRow(s workflowStep, index, total, nameW int, activeDetail string)
 			detail = "  " + styErr.Render(truncate(oneLine(s.message), 60))
 		}
 	case stepActive:
+		var parts []string
 		if activeDetail != "" {
-			detail = "  " + styMuted.Render(truncate(oneLine(activeDetail), 60))
+			parts = append(parts, truncate(oneLine(activeDetail), 60))
+		}
+		if !s.started.IsZero() {
+			parts = append(parts, fmtElapsed(time.Since(s.started).Round(100*time.Millisecond)))
+		}
+		if len(parts) > 0 {
+			detail = "  " + styMuted.Render(strings.Join(parts, "  "))
 		}
 	}
 
 	return fmt.Sprintf("%s %s %s%s", glyphStr, name, counter, detail)
+}
+
+func renderStepNote(b *workflowBlock, s workflowStep) bool {
+	if s.note == "" {
+		return false
+	}
+	if s.status == stepPending {
+		return false
+	}
+	// The completed widget already renders the final step output in full.
+	if b.terminal == workflow.WorkflowCompleted && b.finalOutput != "" && s.name == b.finalStep {
+		return false
+	}
+	return true
+}
+
+func assistantNote(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	return "note: " + truncate(oneLine(firstUsefulLine(text)), 100)
+}
+
+func toolResultNote(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "output: command returned an error"
+	}
+	return "output: " + truncate(oneLine(outputHint(text)), 100)
+}
+
+func firstUsefulLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return text
+}
+
+func outputHint(text string) string {
+	lines := strings.Split(text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || line == "stdout:" || line == "stderr:" || strings.HasPrefix(line, "duration:") || strings.HasPrefix(line, "$ ") {
+			continue
+		}
+		return line
+	}
+	return firstUsefulLine(text)
+}
+
+const maxFinalOutputRunes = 2400
+
+func renderFinalOutput(output string, width int, md *glamour.TermRenderer) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return ""
+	}
+
+	runes := []rune(output)
+	truncated := false
+	if len(runes) > maxFinalOutputRunes {
+		output = string(runes[:maxFinalOutputRunes])
+		truncated = true
+	}
+
+	if md != nil {
+		if rendered, err := md.Render(output); err == nil {
+			return indentFinalOutput(strings.Trim(rendered, "\n"), truncated)
+		}
+	}
+
+	lineLimit := width - 4
+	if lineLimit < 20 {
+		lineLimit = 20
+	}
+
+	var sb strings.Builder
+	for _, line := range strings.Split(output, "\n") {
+		sb.WriteString("  ")
+		sb.WriteString(styMuted.Render(truncate(line, lineLimit)))
+		sb.WriteString("\n")
+	}
+	if truncated {
+		sb.WriteString("  ")
+		sb.WriteString(styDim.Render("... output truncated"))
+		sb.WriteString("\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func indentFinalOutput(output string, truncated bool) string {
+	var sb strings.Builder
+	for _, line := range strings.Split(output, "\n") {
+		sb.WriteString("  ")
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	if truncated {
+		sb.WriteString("  ")
+		sb.WriteString(styDim.Render("... output truncated"))
+		sb.WriteString("\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // renderActivityEntry formats one row of the per-step activity log. While

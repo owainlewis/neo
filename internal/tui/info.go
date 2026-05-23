@@ -18,7 +18,8 @@ var slashCommands = []struct {
 	cmd  string
 	desc string
 }{
-	{"/run <flow> [task]", "start a flow (see /flows)"},
+	{"/flow <file|name> [task]", "start a flow file or named flow"},
+	{"/run <file|name> [task]", "alias for /flow"},
 	{"/flows", "list available flows + their steps"},
 	{"/cancel", "cancel the running flow"},
 	{"/help", "show this list"},
@@ -38,16 +39,16 @@ func (helpBlock) render(width int, _ *glamour.TermRenderer) string {
 // flowsBlock lists configured flows with a step-resolution health check
 // per flow so the user can see at a glance which ones are runnable.
 type flowsBlock struct {
-	source   string // "neo.yaml" / "~/.neo/config.yaml" / "embedded"
-	entries  []flowEntry
-	noFlows  bool
+	source  string // "neo.yaml" / "~/.neo/config.yaml" / "embedded"
+	entries []flowEntry
+	noFlows bool
 }
 
 type flowEntry struct {
 	name    string
 	steps   []string
-	round   int // max_rounds
-	missing []string // step names that don't resolve because the file isn't found anywhere
+	round   int          // max_rounds
+	missing []string     // step names that don't resolve because the file isn't found anywhere
 	broken  []brokenStep // step names whose file exists but failed to parse / read
 }
 
@@ -133,6 +134,6 @@ func (b flowsBlock) render(width int, _ *glamour.TermRenderer) string {
 				styErr.Render(fmt.Sprintf("broken step %q: %s", b.name, b.err))))
 		}
 	}
-	sb.WriteString("\n" + styDim.Render("  run with: /run <name> [task]"))
+	sb.WriteString("\n" + styDim.Render("  run with: /flow <name> [task]"))
 	return strings.TrimRight(sb.String(), "\n")
 }

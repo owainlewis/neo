@@ -78,6 +78,9 @@ neo chat
 # Interactive terminal chat
 neo chat
 
+# Run a flow file against a task
+neo run build-flow.yml "Please fix GitHub issue 21"
+
 # Run the built-in "code" flow (write → review) against a task
 neo flow code "Add request-cancellation support to the HTTP client"
 
@@ -93,11 +96,84 @@ neo help
 | Command | Description |
 |---------|-------------|
 | `neo chat` | Open the interactive terminal coding agent |
-| `neo flow <name> "<task>"` | Run a named flow from `neo.yaml` |
+| `neo run <flow.yml\|name> "<task>"` | Run a flow file or named flow |
+| `neo flow <flow.yml\|name> "<task>"` | Alias for `neo run` |
 | `neo step <name> "<task>"` | Run a single step prompt from `flows/<name>.md` |
 | `neo help` | Show CLI help |
 
-## Flows
+## Flow Files
+
+The chat UI starts in normal chat mode. From chat, run a repeatable workflow
+with:
+
+```text
+/flow build-flow.yml Please fix GitHub issue 21
+```
+
+Neo switches into workflow mode, renders a checklist while the flow runs, then
+returns to chat when the flow completes or fails.
+
+A flow file is a small YAML pipeline of agent and command steps:
+
+```yaml
+steps:
+  - name: plan
+    type: agent
+    prompt: flows/PLAN.md
+
+  - name: check-plan
+    type: command
+    run: test -s "docs/{{ .RunID }}/PLAN.md"
+
+  - name: build
+    type: agent
+    prompt: flows/BUILD.md
+
+  - name: test
+    type: command
+    run: go test ./...
+
+  - name: finalizer
+    type: agent
+    prompt: flows/FINALIZER.md
+```
+
+Agent prompt paths are resolved relative to the flow file. Prompts are
+Markdown files rendered with a small template context:
+
+```markdown
+Task:
+
+{{ .Task }}
+
+Run ID:
+
+{{ .RunID }}
+
+Create a plan and save it to:
+
+docs/{{ .RunID }}/PLAN.md
+```
+
+Command steps run through the shell and pass when they exit with code `0`.
+Agent steps pass when the agent completes without a runtime error. There is no
+semantic pass/fail or looping in flow-file v1; use command steps as hard gates.
+In chat, a completed flow shows the final step output under the progress
+widget, so a final summary agent can leave a useful result behind.
+
+Try the local smoke flow without needing a GitHub issue:
+
+```bash
+neo run examples/neo-smoke-flow.yml "Check the simple flow runner"
+```
+
+Or from chat:
+
+```text
+/flow examples/neo-smoke-flow.yml Check the simple flow runner
+```
+
+## Config Flows
 
 A flow is a named sequence of steps defined in `neo.yaml`. The engine runs
 each step in order, passing prior step outputs as context. If a step reports

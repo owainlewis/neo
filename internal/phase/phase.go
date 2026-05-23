@@ -31,10 +31,14 @@ type StepRef struct {
 // the original workflow task; Round, Prev and Steps form the template
 // context surfaced to the step's prompt body.
 type Input struct {
-	Task  string
-	Round int                 // 1-based
-	Prev  *StepRef            // nil for the very first step of the workflow
-	Steps map[string]*StepRef // most recent output by step name (cross-reference)
+	Task     string
+	Round    int                 // 1-based
+	Prev     *StepRef            // nil for the very first step of the workflow
+	Steps    map[string]*StepRef // most recent output by step name (cross-reference)
+	RunID    string              // workflow run identifier, stable for the run
+	CWD      string              // current working directory at workflow start
+	FlowPath string              // path to the flow file, when the run came from one
+	StepName string              // current step name
 }
 
 type Result struct {
@@ -53,10 +57,14 @@ type Runner struct {
 // templateContext is the value passed to text/template execution. Keep this
 // in sync with the documented variables (.Task, .Round, .Prev, .Steps).
 type templateContext struct {
-	Task  string
-	Round int
-	Prev  *StepRef
-	Steps map[string]*StepRef
+	Task     string
+	Round    int
+	Prev     *StepRef
+	Steps    map[string]*StepRef
+	RunID    string
+	CWD      string
+	FlowPath string
+	StepName string
 }
 
 func (r *Runner) Run(ctx context.Context, def Definition, in Input) (*Result, error) {
@@ -104,18 +112,28 @@ func (r *Runner) Run(ctx context.Context, def Definition, in Input) (*Result, er
 }
 
 func renderPrompt(def Definition, in Input) (string, error) {
-	tmpl, err := template.New(def.Name).Parse(def.Prompt)
+	return RenderText(def.Name, def.Source, def.Prompt, in)
+}
+
+// RenderText renders arbitrary workflow-owned text (agent prompts, command
+// strings) with the same template context as step prompts.
+func RenderText(name, source, text string, in Input) (string, error) {
+	tmpl, err := template.New(name).Parse(text)
 	if err != nil {
-		return "", fmt.Errorf("step %q (%s): template parse: %w", def.Name, def.Source, err)
+		return "", fmt.Errorf("step %q (%s): template parse: %w", name, source, err)
 	}
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, templateContext{
-		Task:  in.Task,
-		Round: in.Round,
-		Prev:  in.Prev,
-		Steps: in.Steps,
+		Task:     in.Task,
+		Round:    in.Round,
+		Prev:     in.Prev,
+		Steps:    in.Steps,
+		RunID:    in.RunID,
+		CWD:      in.CWD,
+		FlowPath: in.FlowPath,
+		StepName: in.StepName,
 	}); err != nil {
-		return "", fmt.Errorf("step %q (%s): template execute: %w", def.Name, def.Source, err)
+		return "", fmt.Errorf("step %q (%s): template execute: %w", name, source, err)
 	}
 	return buf.String(), nil
 }

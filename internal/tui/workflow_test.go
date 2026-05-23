@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/glamour/v2"
+
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/workflow"
 )
@@ -73,6 +75,20 @@ func TestWorkflowBlock_PhaseCompletedShowsDuration(t *testing.T) {
 	}
 }
 
+func TestWorkflowBlock_ActivePhaseShowsElapsedTime(t *testing.T) {
+	b := newTestBlock(t, "build")
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
+	b.steps[0].started = time.Now().Add(-2 * time.Second)
+
+	out := plain(b.render(80, nil))
+	if !strings.Contains(out, "▶ build") {
+		t.Fatalf("expected active build row, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Took 2") {
+		t.Fatalf("expected active elapsed time, got:\n%s", out)
+	}
+}
+
 func TestWorkflowBlock_PhaseFailedShowsMessage(t *testing.T) {
 	b := newTestBlock(t, "build")
 	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "build"})
@@ -84,6 +100,44 @@ func TestWorkflowBlock_PhaseFailedShowsMessage(t *testing.T) {
 	}
 	if !strings.Contains(out, "tests failed") {
 		t.Fatalf("expected failure message, got:\n%s", out)
+	}
+}
+
+func TestWorkflowBlock_AssistantTextShowsStepNote(t *testing.T) {
+	b := newTestBlock(t, "plan", "summarize")
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "plan"})
+	b.ApplyAgent("plan", agent.Event{
+		Kind: agent.EventAssistantText,
+		Text: "\n\nCreated the smoke test plan.\nIt checks the run directory.",
+	})
+	b.Apply(workflow.Event{Kind: workflow.StepCompleted, Step: "plan", Output: "Created the smoke test plan."})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "summarize"})
+
+	out := plain(b.render(80, nil))
+	if !strings.Contains(out, "note: Created the smoke test plan.") {
+		t.Fatalf("expected assistant note under completed step, got:\n%s", out)
+	}
+}
+
+func TestWorkflowBlock_FailedToolResultShowsOutputHint(t *testing.T) {
+	b := newTestBlock(t, "focused-tests")
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "focused-tests"})
+	b.ApplyAgent("focused-tests", agent.Event{
+		Kind: agent.EventToolCall,
+		Name: "bash",
+		Args: map[string]any{"command": "go test ./..."},
+	})
+	b.ApplyAgent("focused-tests", agent.Event{
+		Kind:    agent.EventToolResult,
+		Name:    "bash",
+		Text:    "$ go test ./...\nduration: 1s\n\nstderr:\n--- FAIL: TestSmoke\nFAIL",
+		IsError: true,
+	})
+	b.Apply(workflow.Event{Kind: workflow.StepFailed, Step: "focused-tests", Message: "command failed with exit 1"})
+
+	out := plain(b.render(80, nil))
+	if !strings.Contains(out, "output: FAIL") {
+		t.Fatalf("expected failed output hint, got:\n%s", out)
 	}
 }
 
@@ -149,6 +203,56 @@ func TestWorkflowBlock_WorkflowCompletedShowsSummary(t *testing.T) {
 	// Duration of at least 5s should appear.
 	if !strings.Contains(out, "5s") {
 		t.Fatalf("expected 5s duration in summary, got:\n%s", out)
+	}
+}
+
+func TestWorkflowBlock_WorkflowCompletedShowsFinalStepOutput(t *testing.T) {
+	b := newTestBlock(t, "plan", "summarize")
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "plan"})
+	b.Apply(workflow.Event{Kind: workflow.StepCompleted, Step: "plan", Output: "internal plan text"})
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "summarize"})
+	b.Apply(workflow.Event{
+		Kind:   workflow.StepCompleted,
+		Step:   "summarize",
+		Output: "Flow behaved as expected.\nChecks passed.",
+	})
+	b.Apply(workflow.Event{Kind: workflow.WorkflowCompleted})
+
+	out := plain(b.render(80, nil))
+	for _, want := range []string{"summary from summarize", "Flow behaved as expected.", "Checks passed."} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected final output to contain %q, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "internal plan text") {
+		t.Fatalf("expected only final step output, got:\n%s", out)
+	}
+}
+
+func TestWorkflowBlock_FinalStepOutputRendersMarkdownWhenRendererAvailable(t *testing.T) {
+	md, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(80),
+	)
+	if err != nil {
+		t.Fatalf("markdown renderer: %v", err)
+	}
+
+	b := newTestBlock(t, "summarize")
+	b.Apply(workflow.Event{Kind: workflow.StepStarted, Step: "summarize"})
+	b.Apply(workflow.Event{
+		Kind:   workflow.StepCompleted,
+		Step:   "summarize",
+		Output: "# Result\n\n- **Passed** checks\n",
+	})
+	b.Apply(workflow.Event{Kind: workflow.WorkflowCompleted})
+
+	out := plain(b.render(80, md))
+	if !strings.Contains(out, "Result") || !strings.Contains(out, "Passed") {
+		t.Fatalf("expected rendered markdown summary, got:\n%s", out)
+	}
+	if strings.Contains(out, "# Result") || strings.Contains(out, "**Passed**") {
+		t.Fatalf("expected markdown formatting to render, got raw markdown:\n%s", out)
 	}
 }
 

@@ -95,13 +95,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, wf
 		md = nil
 	}
 
-	ta := textarea.New()
-	ta.Placeholder = defaultPlaceholder
-	ta.Prompt = "› "
-	ta.CharLimit = 0
-	ta.SetHeight(1)
-	ta.ShowLineNumbers = false
-	ta.Focus()
+	ta := newChatInput()
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
@@ -231,6 +225,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setDotColor(colDotThinking)
 		}
 
+	case tea.PasteMsg:
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		cmds = append(cmds, cmd)
+		m.resizeInput()
+
 	case workflowEventMsg:
 		if m.activeWorkflow != nil {
 			m.activeWorkflow.Apply(msg.ev)
@@ -269,6 +269,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		cmds = append(cmds, cmd)
+		if m.activeWorkflow != nil {
+			m.refreshViewport()
+		}
 
 	case rotateCaptionMsg:
 		if m.busy {
@@ -327,15 +330,26 @@ const (
 	workflowPlaceholder = "workflow running — Esc to cancel"
 )
 
+func newChatInput() textarea.Model {
+	ta := textarea.New()
+	ta.Placeholder = defaultPlaceholder
+	ta.Prompt = "› "
+	ta.CharLimit = 0
+	ta.SetHeight(1)
+	ta.ShowLineNumbers = false
+	ta.Focus()
+	return ta
+}
+
 // handleSlashCommand parses slash commands. Called only when input begins
 // with '/'.
 func (m *model) handleSlashCommand(line string) {
 	parts := strings.Fields(line)
 	cmd := parts[0]
 	switch cmd {
-	case "/run":
+	case "/flow", "/run":
 		if len(parts) < 2 {
-			m.appendBlock(errorBlock{err: fmt.Errorf("usage: /run <flow-name> [task]")})
+			m.appendBlock(errorBlock{err: fmt.Errorf("usage: /flow <flow-file.yml|flow-name> [task]")})
 			return
 		}
 		name := parts[1]
@@ -376,7 +390,7 @@ func (m *model) startWorkflowCmd(name, task string) {
 	// engine would also try to take over Runner.OnEvent, which is being
 	// driven by the chat turn and would race with it.
 	if m.busy {
-		m.appendBlock(errorBlock{err: fmt.Errorf("a chat turn is in flight — wait or Esc to cancel before /run")})
+		m.appendBlock(errorBlock{err: fmt.Errorf("a chat turn is in flight — wait or Esc to cancel before /flow")})
 		return
 	}
 	def, err := m.wf.definitionFor(name)
@@ -384,7 +398,7 @@ func (m *model) startWorkflowCmd(name, task string) {
 		m.appendBlock(errorBlock{err: err})
 		return
 	}
-	block := newWorkflowBlock(def.Name, task, def.Steps, def.MaxRounds)
+	block := newWorkflowBlock(def.Name, task, def.StepNames(), def.MaxRounds)
 	m.activeWorkflow = block
 	m.appendBlock(block)
 	m.input.Placeholder = workflowPlaceholder
@@ -436,8 +450,12 @@ func (m *model) statusLine() string {
 func (m *model) workflowStatusBody() string {
 	w := m.activeWorkflow
 	if w.active >= 0 && w.active < len(w.steps) {
-		step := w.steps[w.active].name
+		active := w.steps[w.active]
+		step := active.name
 		s := fmt.Sprintf("workflow: %s · %d/%d", step, w.active+1, len(w.steps))
+		if !active.started.IsZero() {
+			s += " · " + fmtElapsed(time.Since(active.started).Round(100*time.Millisecond))
+		}
 		if w.detail != "" {
 			s += " · " + w.detail
 		}

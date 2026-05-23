@@ -5,8 +5,13 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/owainlewis/neo/internal/agent"
@@ -22,6 +27,40 @@ type Definition struct {
 	Steps     []string
 	RetryFrom string
 	MaxRounds int
+	FlowPath  string
+	StepDefs  []StepDefinition
+}
+
+// StepKind is the tiny v1 workflow vocabulary: run an agent prompt or run a
+// shell command gate.
+type StepKind string
+
+const (
+	StepAgent   StepKind = "agent"
+	StepCommand StepKind = "command"
+)
+
+// StepDefinition is a concrete step loaded from a flow YAML file.
+type StepDefinition struct {
+	Name   string
+	Kind   StepKind
+	Prompt string
+	Run    string
+	Tools  []string
+	Model  string
+	Source string
+}
+
+// StepNames returns the user-facing sequence for rendering and progress.
+func (d Definition) StepNames() []string {
+	if len(d.StepDefs) == 0 {
+		return d.Steps
+	}
+	out := make([]string, 0, len(d.StepDefs))
+	for _, step := range d.StepDefs {
+		out = append(out, step.Name)
+	}
+	return out
 }
 
 // StepResolver returns the prompt + per-step settings for a named step.
@@ -89,15 +128,17 @@ func (e *Engine) emit(ev Event) {
 // ctx is cancelled. The returned error is non-nil iff the workflow ended in a
 // terminal failure state (matched by a WorkflowFailed event).
 func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
-	runID := fmt.Sprintf("%s-%d", def.Name, time.Now().Unix())
+	runID := fmt.Sprintf("%s-%d", slug(def.Name), time.Now().Unix())
 	if err := e.Store.InitRun(runID); err != nil {
 		return err
 	}
 
-	total := len(def.Steps)
+	cwd, _ := os.Getwd()
+	stepNames := def.StepNames()
+	total := len(stepNames)
 	retryStart := 0
 	if def.RetryFrom != "" {
-		for i, s := range def.Steps {
+		for i, s := range stepNames {
 			if s == def.RetryFrom {
 				retryStart = i
 				break
@@ -138,38 +179,33 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 
 		failed := false
 		for i := start; i < total; i++ {
-			name := def.Steps[i]
+			name := stepNames[i]
 			e.emit(Event{Kind: StepStarted, Step: name, Round: round, Index: i + 1, Total: total})
 
-			pdef, err := e.Resolver.ResolveStep(name)
+			output, err := e.runStep(ctx, def, i, name, task, round, prev, steps, runID, cwd)
 			if err != nil {
 				msg := err.Error()
-				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: msg})
+				if output != "" {
+					_ = e.Store.WritePhase(runID, name, round, output)
+				}
+				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: msg, Output: output})
 				e.emit(Event{Kind: WorkflowFailed, Message: msg})
 				return err
 			}
 
-			result, err := e.Runner.Run(ctx, pdef, phase.Input{
-				Task:  task,
-				Round: round,
-				Prev:  prev,
-				Steps: steps,
-			})
-			if err != nil {
-				msg := err.Error()
-				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: msg})
-				e.emit(Event{Kind: WorkflowFailed, Message: msg})
-				return err
-			}
-
-			ref := &phase.StepRef{Name: name, Output: result.Output, Round: round}
+			ref := &phase.StepRef{Name: name, Output: output, Round: round}
 			steps[name] = ref
 			prev = ref
-			_ = e.Store.WritePhase(runID, name, round, result.Output)
+			if err := e.Store.WritePhase(runID, name, round, output); err != nil {
+				msg := err.Error()
+				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: msg})
+				e.emit(Event{Kind: WorkflowFailed, Message: msg})
+				return err
+			}
 
-			if failsHeuristic(result.Output) {
+			if len(def.StepDefs) == 0 && failsHeuristic(output) {
 				failed = true
-				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: "step reports failure", Output: result.Output})
+				e.emit(Event{Kind: StepFailed, Step: name, Round: round, Index: i + 1, Total: total, Message: "step reports failure", Output: output})
 				if def.RetryFrom != "" && round < maxRounds {
 					// Step carries the retry-from name so a sink can reset
 					// all rows from that index onward for the next round,
@@ -182,7 +218,7 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 				return fmt.Errorf("%s", msg)
 			}
 
-			e.emit(Event{Kind: StepCompleted, Step: name, Round: round, Index: i + 1, Total: total, Output: result.Output})
+			e.emit(Event{Kind: StepCompleted, Step: name, Round: round, Index: i + 1, Total: total, Output: output})
 		}
 
 		if !failed {
@@ -194,4 +230,130 @@ func (e *Engine) Run(ctx context.Context, def Definition, task string) error {
 	msg := fmt.Sprintf("max rounds (%d) reached", maxRounds)
 	e.emit(Event{Kind: WorkflowFailed, Message: msg})
 	return fmt.Errorf("%s", msg)
+}
+
+func (e *Engine) runStep(ctx context.Context, def Definition, idx int, name, task string, round int, prev *phase.StepRef, steps map[string]*phase.StepRef, runID, cwd string) (string, error) {
+	in := phase.Input{
+		Task:     task,
+		Round:    round,
+		Prev:     prev,
+		Steps:    steps,
+		RunID:    runID,
+		CWD:      cwd,
+		FlowPath: def.FlowPath,
+		StepName: name,
+	}
+
+	if len(def.StepDefs) == 0 {
+		pdef, err := e.Resolver.ResolveStep(name)
+		if err != nil {
+			return "", err
+		}
+		result, err := e.Runner.Run(ctx, pdef, in)
+		if err != nil {
+			return "", err
+		}
+		return result.Output, nil
+	}
+
+	step := def.StepDefs[idx]
+	switch step.Kind {
+	case StepAgent:
+		result, err := e.Runner.Run(ctx, phase.Definition{
+			Name:   step.Name,
+			Prompt: step.Prompt,
+			Tools:  step.Tools,
+			Model:  step.Model,
+			Source: step.Source,
+		}, in)
+		if err != nil {
+			return "", err
+		}
+		return result.Output, nil
+	case StepCommand:
+		cmd, err := phase.RenderText(step.Name, step.Source, step.Run, in)
+		if err != nil {
+			return "", err
+		}
+		return e.runCommandStep(ctx, step.Name, cmd, cwd)
+	default:
+		return "", fmt.Errorf("step %q: unknown type %q", step.Name, step.Kind)
+	}
+}
+
+func (e *Engine) runCommandStep(ctx context.Context, name, command, cwd string) (string, error) {
+	if e.Sink != nil {
+		e.Sink.OnAgent(name, agent.Event{Kind: agent.EventToolCall, Name: "bash", Args: map[string]any{"command": command}})
+	}
+
+	started := time.Now()
+	c := exec.CommandContext(ctx, "/bin/bash", "-lc", command)
+	c.Dir = cwd
+	var stdout, stderr bytes.Buffer
+	c.Stdout = &stdout
+	c.Stderr = &stderr
+	err := c.Run()
+	out := formatCommandOutput(command, time.Since(started), stdout.String(), stderr.String())
+
+	isErr := err != nil
+	if e.Sink != nil {
+		e.Sink.OnAgent(name, agent.Event{Kind: agent.EventToolResult, Name: "bash", Text: out, IsError: isErr})
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return out, fmt.Errorf("command cancelled: %w", ctx.Err())
+		}
+		if ee, ok := err.(*exec.ExitError); ok {
+			return out, fmt.Errorf("command failed with exit %d", ee.ExitCode())
+		}
+		return out, err
+	}
+	return out, nil
+}
+
+func formatCommandOutput(command string, d time.Duration, stdout, stderr string) string {
+	var b strings.Builder
+	b.WriteString("$ ")
+	b.WriteString(command)
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("duration: %s\n", d.Round(time.Millisecond)))
+	if stdout != "" {
+		b.WriteString("\nstdout:\n")
+		b.WriteString(stdout)
+		if !strings.HasSuffix(stdout, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	if stderr != "" {
+		b.WriteString("\nstderr:\n")
+		b.WriteString(stderr)
+		if !strings.HasSuffix(stderr, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func slug(s string) string {
+	s = filepath.Base(s)
+	s = strings.ToLower(s)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		ok := r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "flow"
+	}
+	return out
 }
