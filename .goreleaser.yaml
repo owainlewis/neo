@@ -1,0 +1,80 @@
+version: 2
+
+project_name: neo
+
+builds:
+  - id: neo
+    main: ./cmd/neo
+    binary: neo
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.Version={{ .Version }}
+
+archives:
+  - id: neo
+    ids:
+      - neo
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  github:
+    owner: owainlewis
+    name: neo
+  footer: |
+    ## Install
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash
+    ```
+
+    ```bash
+    brew install --cask owainlewis/tap/neo
+    ```
+
+homebrew_casks:
+  - name: neo
+    ids:
+      - neo
+    binaries:
+      - neo
+    repository:
+      owner: owainlewis
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/owainlewis/neo
+    description: Fast, minimalist coding agent written in Go
+    commit_author:
+      name: goreleaserbot
+      email: noreply@github.com
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"

@@ -36,7 +36,8 @@ curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | ba
 ```
 
 The script auto-detects your OS and architecture, downloads the matching
-pre-built binary from GitHub Releases, and installs it to `~/.local/bin`.
+pre-built release archive from GitHub Releases, verifies its checksum when
+available, and installs it to `~/.local/bin`.
 If no pre-built binary is available for your platform it falls back to
 `go install` (requires Go 1.25+).
 
@@ -48,6 +49,12 @@ curl -fsSL .../install.sh | bash -s -- --version v1.2.3
 
 # Install to a custom directory
 curl -fsSL .../install.sh | bash -s -- --bin-dir /usr/local/bin
+```
+
+### Homebrew
+
+```bash
+brew install --cask owainlewis/tap/neo
 ```
 
 ### Manual install
@@ -192,6 +199,22 @@ just fmt          # gofmt -w .
 just lint         # go vet ./...
 just clean        # remove the ./neo binary
 ```
+
+## Releasing
+
+Releases are built by GitHub Actions when a `v*` tag is pushed:
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The release workflow runs tests, builds Linux and macOS binaries for `amd64`
+and `arm64`, publishes GitHub release notes and checksums, and updates the
+Homebrew cask in `owainlewis/homebrew-tap`.
+
+The Homebrew tap update requires a repository secret named
+`HOMEBREW_TAP_GITHUB_TOKEN` with write access to `owainlewis/homebrew-tap`.
 
 ## License
 

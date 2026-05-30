@@ -117,27 +117,70 @@ download() {
   fi
 }
 
+# ── Checksum helper ──────────────────────────────────────────────────────────
+verify_checksum() {
+  local file="$1" asset="$2" version="$3" tmp_dir="$4"
+  local checksums="${tmp_dir}/checksums.txt"
+  local url="https://github.com/${REPO}/releases/download/${version}/checksums.txt"
+
+  if ! download "$url" "$checksums" 2>/dev/null; then
+    warn "checksums.txt not found; skipping checksum verification"
+    return 0
+  fi
+
+  local expected
+  expected=$(awk -v asset="$asset" '$2 == asset { print $1; exit }' "$checksums")
+  if [[ -z "$expected" ]]; then
+    warn "No checksum entry for ${asset}; skipping checksum verification"
+    return 0
+  fi
+
+  local actual
+  if command -v sha256sum &>/dev/null; then
+    actual=$(sha256sum "$file" | awk '{print $1}')
+  elif command -v shasum &>/dev/null; then
+    actual=$(shasum -a 256 "$file" | awk '{print $1}')
+  else
+    warn "No SHA-256 tool found; skipping checksum verification"
+    return 0
+  fi
+
+  [[ "$actual" == "$expected" ]] || die "Checksum mismatch for ${asset}"
+  success "Verified checksum"
+}
+
 # ── Install via pre-built release binary ─────────────────────────────────────
 install_from_release() {
   local version="$1" platform="$2" bin_dir="$3"
   local ext=""
   [[ "$platform" == windows* ]] && ext=".exe"
 
-  # Expected asset name pattern: neo_<os>_<arch>[.exe]
-  local asset="neo_${platform}${ext}"
+  # Expected GoReleaser asset name pattern: neo_<os>_<arch>.tar.gz
+  local asset="neo_${platform}.tar.gz"
   local url="https://github.com/${REPO}/releases/download/${version}/${asset}"
   local tmp_dir
   tmp_dir=$(mktemp -d)
   trap 'rm -rf "$tmp_dir"' EXIT
 
   info "Downloading ${asset} (${version})…"
-  if ! download "$url" "${tmp_dir}/${BIN_NAME}${ext}" 2>/dev/null; then
+  if ! download "$url" "${tmp_dir}/${asset}" 2>/dev/null; then
     warn "Release asset not found at: $url"
     return 1
   fi
 
+  verify_checksum "${tmp_dir}/${asset}" "$asset" "$version" "$tmp_dir"
+
+  command -v tar &>/dev/null || die "tar is required to extract ${asset}"
+  tar -xzf "${tmp_dir}/${asset}" -C "$tmp_dir"
+
+  local extracted="${tmp_dir}/${BIN_NAME}${ext}"
+  if [[ ! -f "$extracted" ]]; then
+    extracted=$(find "$tmp_dir" -type f -name "${BIN_NAME}${ext}" | head -n 1)
+  fi
+  [[ -n "$extracted" && -f "$extracted" ]] || die "Archive did not contain ${BIN_NAME}${ext}"
+
   mkdir -p "$bin_dir"
-  install -m 0755 "${tmp_dir}/${BIN_NAME}${ext}" "${bin_dir}/${BIN_NAME}${ext}"
+  install -m 0755 "$extracted" "${bin_dir}/${BIN_NAME}${ext}"
   success "Installed ${BIN_NAME} → ${bin_dir}/${BIN_NAME}${ext}"
   return 0
 }
