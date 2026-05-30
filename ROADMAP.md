@@ -15,12 +15,10 @@ Three layers, each in its own package, each replaceable:
 - **Capabilities** (`internal/tools`, and the modules below) — everything the
   core can be given: tools, a system prompt, project context, skills. Each is
   opt-in.
-- **Surfaces** (`internal/tui`, `cmd/neo`) — interactive chat (Bubble Tea) and
-  the headless `flow`/`step` CLI. Both drive the same core.
+- **Surfaces** (`internal/tui`, `cmd/neo`) — the interactive chat (Bubble Tea).
 
-Workflows (`internal/workflow`, `internal/phase`) are a thin orchestration layer
-that reuses the core: ordered Markdown steps with templated prompts, retry-from
-semantics, and structured pass/fail verdicts.
+A first pass at multi-step workflows was removed to keep the core focused; it
+will be revisited deliberately once the core agent is rock solid (see Later).
 
 ## Done
 
@@ -30,26 +28,19 @@ semantics, and structured pass/fail verdicts.
       writes, strict single-match edits, per-step tool whitelisting.
 - [x] **Anthropic provider** — `Provider` interface with one implementation.
       Exponential backoff + jitter on 429/5xx, respects `Retry-After` (cap 30s).
-- [x] **Workflow engine** — multi-step flows, retry-from a named step, max-rounds
-      cap, cross-step template context (`.Task` / `.Round` / `.Prev` / `.Steps`).
-- [x] **Verdict detection** — structured ```` ```neo-result ```` JSON block,
-      with a prose-marker fallback for older prompts.
-- [x] **Config** — `neo.yaml` → `~/.neo/config.yaml` → embedded default;
-      Markdown step prompts with optional YAML frontmatter (tool/model override).
+- [x] **Config** — `neo.yaml` → `~/.neo/config.yaml` → embedded default, with
+      tri-state feature flags for layered capabilities.
+- [x] **AGENTS.md loading** — `internal/projectctx` discovers project + global
+      `AGENTS.md` and injects it into the chat prompt, behind `features.agents_file`.
 - [x] **TUI** — Bubble Tea v2 chat (blocking + spinner, no streaming by design),
-      workflow status grid, splash screen.
-- [x] **Artifact store** — per-run, per-step outputs written under `.agent/runs`.
+      splash screen.
 
 ## Next: capability modules (feature-flagged)
 
 Each lands as its own package behind a config flag, wired in `cmd/neo`. The point
-is that a reader can turn one off and see exactly what it contributed.
+is that a reader can turn one off and see exactly what it contributed. The
+feature-flag seam and AGENTS.md loading are done (see above) — this is the template.
 
-- [ ] **Feature flags** — a `features` block in `neo.yaml` and a `Features`
-      struct. Every capability below checks its flag. Core is always on.
-- [ ] **AGENTS.md loading** — discover `AGENTS.md` (project, walking up to repo
-      root, plus `~/.neo/AGENTS.md`) and inject as a dynamic system-prompt
-      section. Flag: `features.agents_file`.
 - [ ] **Skill loading** — Codex-style skills. Discover `SKILL.md` files (name +
       description frontmatter) from `.neo/skills/` and `~/.neo/skills/`. Reference
       a skill in input with `$skill-name` to expand its body into the turn.
@@ -74,6 +65,13 @@ is that a reader can turn one off and see exactly what it contributed.
 - [ ] **Second provider** — a non-Anthropic `Provider` to prove the seam holds.
 - [ ] **Model catalog** — context-window sizes and pricing to drive compaction
       thresholds and cost display.
+
+## Exploration (once the core is rock solid)
+
+- [ ] **Workflows, done properly** — revisit multi-step orchestration with a
+      clear design, rather than the half-finished engine that was removed.
+- [ ] **Long-lived / always-on mode** — an agent that stays resident and reacts
+      to incoming events (a "Hermes"-style listener) rather than one-shot turns.
 
 ## Design principles
 
