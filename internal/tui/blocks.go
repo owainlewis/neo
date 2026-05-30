@@ -130,5 +130,3 @@ func wrap(s string, width int) string {
 	}
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
-
-

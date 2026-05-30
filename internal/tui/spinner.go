@@ -74,4 +74,3 @@ func shortPath(p string) string {
 	}
 	return ".../" + parent + "/" + file
 }
-

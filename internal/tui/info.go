@@ -38,16 +38,16 @@ func (helpBlock) render(width int, _ *glamour.TermRenderer) string {
 // flowsBlock lists configured flows with a step-resolution health check
 // per flow so the user can see at a glance which ones are runnable.
 type flowsBlock struct {
-	source   string // "neo.yaml" / "~/.neo/config.yaml" / "embedded"
-	entries  []flowEntry
-	noFlows  bool
+	source  string // "neo.yaml" / "~/.neo/config.yaml" / "embedded"
+	entries []flowEntry
+	noFlows bool
 }
 
 type flowEntry struct {
 	name    string
 	steps   []string
-	round   int // max_rounds
-	missing []string // step names that don't resolve because the file isn't found anywhere
+	round   int          // max_rounds
+	missing []string     // step names that don't resolve because the file isn't found anywhere
 	broken  []brokenStep // step names whose file exists but failed to parse / read
 }
 

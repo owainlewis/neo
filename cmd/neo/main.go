@@ -14,6 +14,7 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/phase"
+	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/tui"
 	"github.com/owainlewis/neo/internal/workflow"
@@ -80,6 +81,26 @@ func newRegistry() *tools.Registry {
 	)
 }
 
+// chatSystem builds the chat agent's system prompt: the base instructions plus,
+// when the feature is enabled, any AGENTS.md project context discovered from the
+// working directory. A discovery error is non-fatal — it degrades to the base
+// prompt with a warning rather than failing to start.
+func chatSystem(cfg *config.Config) string {
+	if !cfg.AgentsFileEnabled() {
+		return chatSystemPrompt
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return chatSystemPrompt
+	}
+	docs, err := projectctx.Load(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: AGENTS.md: %v\n", err)
+		return chatSystemPrompt
+	}
+	return projectctx.Augment(chatSystemPrompt, docs)
+}
+
 func mustConfig() *config.Config {
 	cfg, err := config.Load()
 	if err != nil {
@@ -105,7 +126,7 @@ func runChat(ctx context.Context) {
 
 	ag := agent.New(agent.Config{
 		Model:    cfg.Model,
-		System:   chatSystemPrompt,
+		System:   chatSystem(cfg),
 		Provider: prov,
 		Tools:    reg,
 	})

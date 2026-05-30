@@ -5,6 +5,7 @@ package config
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -39,12 +40,33 @@ type Config struct {
 	Model        string                `yaml:"model"`
 	ArtifactsDir string                `yaml:"artifacts_dir"`
 	Flows        map[string]FlowConfig `yaml:"flows"`
+	Features     Features              `yaml:"features"`
 
 	// Internal — where this config came from and which directories to
 	// search for step prompts. Set by Load and used by ResolveStep.
-	source     string
-	stepDirs   []string // project flows/ → user ~/.neo/flows/
-	homeFlows  string   // for diagnostics
+	source   string
+	stepDirs []string // project flows/ → user ~/.neo/flows/
+}
+
+// Features toggles optional, layered capabilities. The core agent loop is never
+// gated by a feature — only capabilities built on top of it. Each flag is a
+// tri-state *bool: nil ("absent from config") falls back to a built-in default,
+// so a minimal neo.yaml still gets the full experience; set a flag to false to
+// turn the capability off explicitly.
+type Features struct {
+	AgentsFile *bool `yaml:"agents_file"` // load AGENTS.md into the chat system prompt
+}
+
+// AgentsFileEnabled reports whether AGENTS.md loading is on (default: true).
+func (c *Config) AgentsFileEnabled() bool { return featureEnabled(c.Features.AgentsFile, true) }
+
+// featureEnabled resolves a tri-state flag: nil means "unset — use the
+// default"; a non-nil pointer means the user set it explicitly.
+func featureEnabled(flag *bool, def bool) bool {
+	if flag == nil {
+		return def
+	}
+	return *flag
 }
 
 // FlowConfig is one named flow's orchestration spec.
@@ -82,7 +104,6 @@ func Load() (*Config, error) {
 		}
 		cfg.source = path
 		cfg.stepDirs = stepDirs
-		cfg.homeFlows = userFlows
 		return cfg, nil
 	}
 
@@ -92,7 +113,6 @@ func Load() (*Config, error) {
 	}
 	cfg.source = "embedded"
 	cfg.stepDirs = stepDirs
-	cfg.homeFlows = userFlows
 	return cfg, nil
 }
 
@@ -162,8 +182,8 @@ func (c *Config) FlowNames() []string {
 // embedded asset matches the name. The error lists every location tried so
 // the user can see exactly where to add the missing file.
 type StepNotFoundError struct {
-	Name      string
-	Searched  []string
+	Name     string
+	Searched []string
 }
 
 func (e *StepNotFoundError) Error() string {
@@ -207,32 +227,10 @@ func errIsNotExist(err error) bool {
 		return false
 	}
 	var pathErr *fs.PathError
-	if as := errors_As(err, &pathErr); as {
+	if errors.As(err, &pathErr) {
 		return os.IsNotExist(pathErr.Err)
 	}
 	return os.IsNotExist(err)
-}
-
-// errors_As avoids importing the errors package solely for As, keeping the
-// import list short. Local fallback only used by errIsNotExist.
-func errors_As(err error, target any) bool {
-	pe, ok := target.(**fs.PathError)
-	if !ok {
-		return false
-	}
-	for err != nil {
-		if v, ok := err.(*fs.PathError); ok {
-			*pe = v
-			return true
-		}
-		type unwrapper interface{ Unwrap() error }
-		u, ok := err.(unwrapper)
-		if !ok {
-			return false
-		}
-		err = u.Unwrap()
-	}
-	return false
 }
 
 // parseStep extracts optional YAML frontmatter for tool / model overrides
