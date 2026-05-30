@@ -11,11 +11,12 @@ func TestSplashBlock_RendersWordmarkTaglineAndMetadataList(t *testing.T) {
 		model:   "claude-sonnet-4-6",
 		cwd:     "~/Code/neo",
 		branch:  "main",
+		tagline: "Ship it",
 	}
 	out := plain(b.render(80, nil))
 
 	// Wordmark + tagline + hint.
-	for _, want := range []string{"NEO", "a coding agent", "/help"} {
+	for _, want := range []string{"NEO", "Ship it", "/help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("splash missing %q:\n%s", want, out)
 		}
@@ -64,6 +65,32 @@ func TestSplashBlock_OmitsBranchRowWhenNoGit(t *testing.T) {
 	if strings.Contains(out, "branch") {
 		t.Fatalf("branch row should be omitted on no-git, got:\n%s", out)
 	}
+}
+
+func TestTaglines_AllNonEmptyAndCapitalized(t *testing.T) {
+	if len(taglines) == 0 {
+		t.Fatal("expected at least one tagline")
+	}
+	for _, tl := range taglines {
+		if tl == "" {
+			t.Error("tagline must not be empty")
+			continue
+		}
+		first := rune(tl[0])
+		if first < 'A' || first > 'Z' {
+			t.Errorf("tagline %q must start with a capital letter", tl)
+		}
+	}
+}
+
+func TestRandomTagline_ReturnsAMember(t *testing.T) {
+	got := randomTagline()
+	for _, tl := range taglines {
+		if tl == got {
+			return
+		}
+	}
+	t.Fatalf("randomTagline returned %q which is not in taglines", got)
 }
 
 func TestGradientFor_PicksAcrossPalette(t *testing.T) {

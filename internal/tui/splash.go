@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"strings"
 
 	"charm.land/glamour/v2"
@@ -17,6 +18,7 @@ type splashBlock struct {
 	model   string
 	cwd     string
 	branch  string
+	tagline string // motivational line under the wordmark; picked once per session
 }
 
 // skyPalette is the Tailwind sky color ramp (light → dark) used by the
@@ -33,7 +35,27 @@ var skyPalette = []string{
 	"#0c4a6e", // sky-900
 }
 
-const tagline = "a coding agent"
+// taglines are short, capitalized motivational lines shown under the wordmark.
+// One is chosen per session (see randomTagline) so it stays stable across
+// viewport refreshes.
+var taglines = []string{
+	"Let's build something great",
+	"Make it work, then make it right",
+	"One small step at a time",
+	"Code with intention",
+	"Less, but better",
+	"Think. Build. Verify.",
+	"Today, we make it work",
+	"Clarity over cleverness",
+	"Small steps, solid ground",
+	"Trust the process",
+	"Ship it",
+	"Onward",
+}
+
+func randomTagline() string {
+	return taglines[rand.IntN(len(taglines))]
+}
 
 func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
 	wordmark := lipgloss.NewStyle().
@@ -67,6 +89,10 @@ func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
 
 	// Compose the full content column: wordmark, tagline, breathing
 	// space, then the metadata list.
+	tagline := b.tagline
+	if tagline == "" {
+		tagline = taglines[0]
+	}
 	content := []string{wordmark, styMuted.Render(tagline), ""}
 	content = append(content, metaLines...)
 
