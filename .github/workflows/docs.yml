@@ -1,0 +1,51 @@
+name: Developer Docs
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/developer/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: developer-docs-main
+  cancel-in-progress: true
+
+jobs:
+  generate-docs:
+    name: Generate developer docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Generate docs
+        run: go run ./cmd/neo-docs
+
+      - name: Commit updated docs
+        run: |
+          if git diff --quiet -- docs/developer; then
+            echo "developer docs are current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/developer
+          git commit -m "docs: update generated developer docs"
+          git push
