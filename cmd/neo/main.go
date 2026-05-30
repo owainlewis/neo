@@ -12,6 +12,7 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/projectctx"
+	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/tui"
 )
@@ -114,15 +115,38 @@ func runChat(ctx context.Context) {
 	prov := mustProvider()
 	reg := newRegistry()
 
+	// Skills are loaded once: their catalog is advertised in the system prompt,
+	// and the same slice drives $name expansion in the TUI.
+	sk := loadSkills(cfg)
+	system := skills.Augment(chatSystem(cfg), sk)
+
 	ag := agent.New(agent.Config{
 		Model:    cfg.Model,
-		System:   chatSystem(cfg),
+		System:   system,
 		Provider: prov,
 		Tools:    reg,
 	})
 
-	if err := tui.Run(ctx, ag, cfg.Model, Version); err != nil {
+	if err := tui.Run(ctx, ag, cfg.Model, Version, sk); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// loadSkills discovers skills when the feature is enabled. A discovery error is
+// non-fatal — it warns and returns no skills rather than failing to start.
+func loadSkills(cfg *config.Config) []skills.Skill {
+	if !cfg.SkillsEnabled() {
+		return nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	sk, err := skills.Load(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skills: %v\n", err)
+		return nil
+	}
+	return sk
 }

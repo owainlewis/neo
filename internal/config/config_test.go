@@ -101,3 +101,26 @@ func TestFeatures_AgentsFileExplicitFalseDisables(t *testing.T) {
 		}
 	})
 }
+
+func TestFeatures_SkillsDefaultsOnExplicitFalseDisables(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if !cfg.SkillsEnabled() {
+			t.Fatal("expected skills to default on when omitted")
+		}
+
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\nfeatures:\n  skills: false\n")
+		cfg, err = Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.SkillsEnabled() {
+			t.Fatal("expected skills disabled when set to false")
+		}
+	})
+}

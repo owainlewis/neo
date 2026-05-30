@@ -18,11 +18,13 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/skills"
 )
 
-// Run starts the Bubble Tea chat TUI. It returns when the user quits.
-func Run(ctx context.Context, ag *agent.Agent, model, version string) error {
-	m, err := newModel(ctx, ag, model, version)
+// Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
+// loaded skill set used for $name expansion (nil when the feature is off).
+func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skills.Skill) error {
+	m, err := newModel(ctx, ag, model, version, sk)
 	if err != nil {
 		return err
 	}
@@ -68,9 +70,12 @@ type model struct {
 	// recreating the renderer on resize so we never re-probe the terminal
 	// from inside raw mode (which leaks the OSC 11 reply into the textarea).
 	mdStyleName string
+
+	// skills drives $name expansion of the user's input before it's sent.
+	skills []skills.Skill
 }
 
-func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string) (*model, error) {
+func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill) (*model, error) {
 	// Detect dark/light once, here, before Bubble Tea puts stdin in raw mode.
 	// Glamour's WithAutoStyle issues an OSC 11 query each time; doing that
 	// from inside Update (e.g. on resize) leaks the terminal's reply into the
@@ -125,6 +130,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string) (*
 		spin:        sp,
 		caption:     randomCaption(),
 		md:          md,
+		skills:      sk,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -186,11 +192,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			m.resizeInput()
 			m.appendBlock(userBlock{text: text})
+			// Expand any $name skill references: the user sees what they typed,
+			// the agent receives the expanded message.
+			sent, used := skills.Expand(text, m.skills)
+			if len(used) > 0 {
+				m.appendBlock(noticeBlock{text: "applied skill: " + strings.Join(used, ", ")})
+			}
 			m.busy = true
 			m.busySince = time.Now()
 			m.caption = randomCaption()
 			m.setDotColor(colDotThinking)
-			cmds = append(cmds, m.startSend(text))
+			cmds = append(cmds, m.startSend(sent))
 		case "shift+enter", "alt+enter", "ctrl+j":
 			// Insert a newline. Most terminals don't distinguish shift+enter
 			// from enter without enhanced-key reporting; alt+enter and

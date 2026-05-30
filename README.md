@@ -20,6 +20,8 @@ top as independent, feature-flagged modules.
   and easy to reason about.
 - **AGENTS.md support.** Drop an `AGENTS.md` in your project (or `~/.neo/`) and
   its guidance is loaded into the agent's system prompt. Feature-flagged.
+- **Skills.** Reusable prompt snippets in `.neo/skills/<name>/SKILL.md`. Mention
+  `$name` in a message and the skill's instructions are expanded into that turn.
 - **Modular core.** The agent loop knows nothing about coding, files, or project
   context — capabilities are injected and can be toggled in config.
 
@@ -97,6 +99,33 @@ It discovers, in increasing priority:
 
 Disable it by setting the feature flag to `false` (see Configuration).
 
+## Skills
+
+Skills are reusable prompt snippets you invoke on demand. Each lives at
+`.neo/skills/<name>/SKILL.md` (project) or `~/.neo/skills/<name>/SKILL.md`
+(global), with simple frontmatter:
+
+```markdown
+---
+name: review
+description: review the current diff for correctness and broken contracts
+---
+
+You are reviewing a code change. Work from the actual diff…
+```
+
+Neo advertises each skill's **name + description** in the system prompt (so the
+model knows they exist), and when you mention **`$name`** in a message it expands
+that skill's full body into the turn:
+
+```
+use the $review skill on my changes
+```
+
+Project skills override global ones of the same name. This repo ships
+`$review` and `$commit` under `.neo/skills/` as working examples. Disable the
+feature by setting `skills: false` (see Configuration).
+
 ## Configuration
 
 Neo looks for a config file in this order:
@@ -121,6 +150,7 @@ model: claude-sonnet-4-6
 # to false to disable it. The core agent loop is never affected by these.
 features:
   agents_file: true   # load AGENTS.md into the system prompt
+  skills: true        # discover .neo/skills, advertise them, expand $name
 ```
 
 ## Tools
@@ -143,6 +173,7 @@ internal/config/        Config loading and feature flags
 internal/config/defaults/   Embedded neo.yaml
 internal/llm/           Provider interface + Anthropic client
 internal/projectctx/    AGENTS.md discovery and system-prompt injection
+internal/skills/        skill discovery, catalog, and $name expansion
 internal/tools/         bash, read_file, write_file, edit_file implementations
 internal/tui/           Bubble Tea terminal UI
 ```

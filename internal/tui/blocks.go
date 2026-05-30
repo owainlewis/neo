@@ -95,6 +95,13 @@ func (b toolResultBlock) render(width int, _ *glamour.TermRenderer) string {
 	return style.Width(width - 2).Render(body + footer)
 }
 
+// noticeBlock is a quiet one-line status note (e.g. an applied skill).
+type noticeBlock struct{ text string }
+
+func (b noticeBlock) render(width int, _ *glamour.TermRenderer) string {
+	return styMuted.Render("· " + b.text)
+}
+
 type errorBlock struct{ err error }
 
 func (b errorBlock) render(width int, _ *glamour.TermRenderer) string {
