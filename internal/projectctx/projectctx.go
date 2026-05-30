@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/owainlewis/neo/internal/workspace"
 )
 
 // fileName is the instruction file neo looks for. AGENTS.md is the emerging
@@ -49,10 +51,7 @@ func Load(cwd string) ([]Doc, error) {
 
 	// Ancestor chain, added outermost → cwd so the most specific file wins by
 	// appearing last.
-	dirs, err := ancestors(cwd)
-	if err != nil {
-		return nil, err
-	}
+	dirs := workspace.Ancestors(cwd)
 	for i := len(dirs) - 1; i >= 0; i-- {
 		d, ok, err := readDoc(filepath.Join(dirs[i], fileName))
 		if err != nil {
@@ -63,35 +62,6 @@ func Load(cwd string) ([]Doc, error) {
 		}
 	}
 	return docs, nil
-}
-
-// ancestors returns cwd and each parent up to and including the repository root
-// (first directory containing .git) or the filesystem root, cwd first.
-func ancestors(cwd string) ([]string, error) {
-	dir, err := filepath.Abs(cwd)
-	if err != nil {
-		return nil, err
-	}
-	var dirs []string
-	for {
-		dirs = append(dirs, dir)
-		if isRepoRoot(dir) {
-			break
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break // reached the filesystem root
-		}
-		dir = parent
-	}
-	return dirs, nil
-}
-
-// isRepoRoot reports whether dir contains a .git entry (directory or file, the
-// latter covering git worktrees and submodules).
-func isRepoRoot(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, ".git"))
-	return err == nil
 }
 
 // readDoc reads a single instruction file. A missing or whitespace-only file

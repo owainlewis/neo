@@ -20,6 +20,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/owainlewis/neo/internal/workspace"
 )
 
 const fileName = "SKILL.md"
@@ -48,7 +50,7 @@ func Load(cwd string) ([]Skill, error) {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		dirs = append(dirs, filepath.Join(home, ".neo", "skills"))
 	}
-	dirs = append(dirs, filepath.Join(projectRoot(cwd), ".neo", "skills"))
+	dirs = append(dirs, filepath.Join(workspace.Root(cwd), ".neo", "skills"))
 
 	// Later directories override earlier ones (project beats global).
 	for _, dir := range dirs {
@@ -140,25 +142,6 @@ func splitFrontmatter(content []byte) (fm, body []byte) {
 		}
 	}
 	return nil, content // unterminated — treat the whole file as body
-}
-
-// projectRoot returns the repository root containing cwd (first ancestor with a
-// .git entry), or cwd itself if none is found.
-func projectRoot(cwd string) string {
-	dir, err := filepath.Abs(cwd)
-	if err != nil {
-		return cwd
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return cwd // no repo root found
-		}
-		dir = parent
-	}
 }
 
 // Augment appends a catalog of available skills (name + description only) to a
