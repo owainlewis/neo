@@ -160,7 +160,7 @@ install_from_release() {
   local url="https://github.com/${REPO}/releases/download/${version}/${asset}"
   local tmp_dir
   tmp_dir=$(mktemp -d)
-  trap 'rm -rf "$tmp_dir"' EXIT
+  trap "rm -rf '$tmp_dir'" EXIT
 
   info "Downloading ${asset} (${version})…"
   if ! download "$url" "${tmp_dir}/${asset}" 2>/dev/null; then
