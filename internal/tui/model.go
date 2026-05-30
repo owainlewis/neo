@@ -141,6 +141,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, wf
 		model:   modelTag,
 		cwd:     cwd,
 		branch:  branch,
+		tagline: randomTagline(),
 	})
 	return m, nil
 }
