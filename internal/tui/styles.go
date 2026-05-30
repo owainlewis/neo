@@ -32,8 +32,7 @@ var (
 
 	styCardTool = lipgloss.NewStyle().
 			Background(colToolBg).
-			Padding(0, 1).
-			MarginTop(1)
+			Padding(0, 1)
 
 	styCardResult = lipgloss.NewStyle().
 			Background(colCardBg).
