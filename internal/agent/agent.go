@@ -35,6 +35,7 @@ type Config struct {
 	Tools    *tools.Registry
 	MaxTurns int
 	OnEvent  func(Event)
+	Messages []llm.Message
 }
 
 type Agent struct {
@@ -46,7 +47,7 @@ func New(cfg Config) *Agent {
 	if cfg.MaxTurns == 0 {
 		cfg.MaxTurns = 50
 	}
-	return &Agent{cfg: cfg}
+	return &Agent{cfg: cfg, messages: cloneMessages(cfg.Messages)}
 }
 
 func (a *Agent) emit(e Event) {
@@ -61,7 +62,7 @@ func (a *Agent) SetEventHandler(fn func(Event)) {
 	a.cfg.OnEvent = fn
 }
 
-func (a *Agent) Transcript() []llm.Message { return a.messages }
+func (a *Agent) Transcript() []llm.Message { return cloneMessages(a.messages) }
 
 func (a *Agent) Send(ctx context.Context, userText string) (string, error) {
 	a.messages = append(a.messages, llm.Message{
@@ -136,4 +137,29 @@ func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) 
 		return fmt.Sprintf("error: %v\n%s", err, out), true
 	}
 	return out, false
+}
+
+func cloneMessages(in []llm.Message) []llm.Message {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]llm.Message, len(in))
+	for i, msg := range in {
+		out[i].Role = msg.Role
+		if len(msg.Content) == 0 {
+			continue
+		}
+		out[i].Content = make([]llm.ContentBlock, len(msg.Content))
+		for j, block := range msg.Content {
+			out[i].Content[j] = block
+			if block.Input != nil {
+				cp := make(map[string]any, len(block.Input))
+				for k, v := range block.Input {
+					cp[k] = v
+				}
+				out[i].Content[j].Input = cp
+			}
+		}
+	}
+	return out
 }

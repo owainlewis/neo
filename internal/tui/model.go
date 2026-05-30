@@ -18,13 +18,28 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/skills"
 )
 
+type Options struct {
+	AfterSend func() error
+}
+
+type Option func(*Options)
+
+func WithAfterSend(fn func() error) Option {
+	return func(opts *Options) { opts.AfterSend = fn }
+}
+
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
 // loaded skill set used for $name expansion (nil when the feature is off).
-func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skills.Skill) error {
-	m, err := newModel(ctx, ag, model, version, sk)
+func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skills.Skill, options ...Option) error {
+	opts := Options{}
+	for _, option := range options {
+		option(&opts)
+	}
+	m, err := newModel(ctx, ag, model, version, sk, opts)
 	if err != nil {
 		return err
 	}
@@ -73,9 +88,11 @@ type model struct {
 
 	// skills drives $name expansion of the user's input before it's sent.
 	skills []skills.Skill
+
+	afterSend func() error
 }
 
-func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill) (*model, error) {
+func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
 	// Detect dark/light once, here, before Bubble Tea puts stdin in raw mode.
 	// Glamour's WithAutoStyle issues an OSC 11 query each time; doing that
 	// from inside Update (e.g. on resize) leaks the terminal's reply into the
@@ -131,6 +148,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		caption:     randomCaption(),
 		md:          md,
 		skills:      sk,
+		afterSend:   opts.AfterSend,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -140,6 +158,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		branch:  branch,
 		tagline: randomTagline(),
 	})
+	m.appendTranscript(ag.Transcript())
 	return m, nil
 }
 
@@ -457,11 +476,54 @@ func (m *model) handleEvent(e agent.Event) {
 	}
 }
 
+func (m *model) appendTranscript(messages []llm.Message) {
+	for _, msg := range messages {
+		switch msg.Role {
+		case llm.RoleUser:
+			var toolResults []llm.ContentBlock
+			var textParts []string
+			for _, block := range msg.Content {
+				switch block.Type {
+				case "text":
+					if strings.TrimSpace(block.Text) != "" {
+						textParts = append(textParts, block.Text)
+					}
+				case "tool_result":
+					toolResults = append(toolResults, block)
+				}
+			}
+			if len(textParts) > 0 {
+				m.blocks = append(m.blocks, userBlock{text: strings.Join(textParts, "\n")})
+			}
+			for _, block := range toolResults {
+				m.blocks = append(m.blocks, toolResultBlock{text: block.Content, isError: block.IsError})
+			}
+		case llm.RoleAssistant:
+			for _, block := range msg.Content {
+				switch block.Type {
+				case "text":
+					if strings.TrimSpace(block.Text) != "" {
+						m.blocks = append(m.blocks, textBlock{text: block.Text})
+					}
+				case "tool_use":
+					m.blocks = append(m.blocks, toolCallBlock{name: block.Name, args: block.Input})
+				}
+			}
+		}
+	}
+	m.refreshViewport()
+}
+
 func (m *model) startSend(text string) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.sendCancel = cancel
 	return func() tea.Msg {
 		_, err := m.ag.Send(ctx, text)
+		if m.afterSend != nil {
+			if saveErr := m.afterSend(); saveErr != nil && err == nil {
+				err = saveErr
+			}
+		}
 		return sendResultMsg{err: err}
 	}
 }
