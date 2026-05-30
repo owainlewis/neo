@@ -45,19 +45,62 @@ func (c *Client) Name() string { return "anthropic" }
 
 type apiRequest struct {
 	Model     string         `json:"model"`
-	System    string         `json:"system,omitempty"`
+	System    any            `json:"system,omitempty"` // string or []systemBlock
 	Messages  []llm.Message  `json:"messages"`
 	Tools     []llm.ToolSpec `json:"tools,omitempty"`
 	MaxTokens int            `json:"max_tokens"`
 }
 
+// systemBlock is an Anthropic system content block. A non-nil CacheControl marks
+// a prompt-cache breakpoint: this block and everything before it are cached.
+type systemBlock struct {
+	Type         string        `json:"type"` // always "text"
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
+type cacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
 type apiResponse struct {
 	Content    []llm.ContentBlock `json:"content"`
 	StopReason string             `json:"stop_reason"`
-	Error      *struct {
+	Usage      *struct {
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	} `json:"usage,omitempty"`
+	Error *struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+// systemPayload renders the request's system prompt for the API. When the
+// request carries SystemBlocks it emits a content-block array, attaching a
+// cache_control breakpoint to each block flagged for caching; otherwise it
+// falls back to the plain System string.
+func systemPayload(req llm.Request) any {
+	if len(req.SystemBlocks) == 0 {
+		return req.System
+	}
+	blocks := make([]systemBlock, 0, len(req.SystemBlocks))
+	for _, b := range req.SystemBlocks {
+		if b.Text == "" {
+			continue
+		}
+		blk := systemBlock{Type: "text", Text: b.Text}
+		if b.Cache {
+			blk.CacheControl = &cacheControl{Type: "ephemeral"}
+		}
+		blocks = append(blocks, blk)
+	}
+	if len(blocks) == 0 {
+		return nil
+	}
+	return blocks
 }
 
 func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
@@ -66,7 +109,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 	}
 	body, err := json.Marshal(apiRequest{
 		Model:     req.Model,
-		System:    req.System,
+		System:    systemPayload(req),
 		Messages:  req.Messages,
 		Tools:     req.Tools,
 		MaxTokens: req.MaxTokens,
@@ -124,7 +167,16 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 		if out.Error != nil {
 			return nil, fmt.Errorf("anthropic: %s", out.Error.Message)
 		}
-		return &llm.Response{Content: out.Content, StopReason: out.StopReason}, nil
+		resp := &llm.Response{Content: out.Content, StopReason: out.StopReason}
+		if out.Usage != nil {
+			resp.Usage = llm.Usage{
+				InputTokens:         out.Usage.InputTokens,
+				OutputTokens:        out.Usage.OutputTokens,
+				CacheCreationTokens: out.Usage.CacheCreationInputTokens,
+				CacheReadTokens:     out.Usage.CacheReadInputTokens,
+			}
+		}
+		return resp, nil
 	}
 	return nil, lastErr
 }

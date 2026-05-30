@@ -17,7 +17,7 @@ const (
 	userConfigDir     = ".neo"
 	userConfigName    = "config.yaml"
 
-	defaultModel = "claude-sonnet-4-6"
+	defaultModel = "claude-opus-4-8"
 )
 
 //go:embed defaults/neo.yaml
@@ -39,8 +39,9 @@ type Config struct {
 // so a minimal neo.yaml still gets the full experience; set a flag to false to
 // turn the capability off explicitly.
 type Features struct {
-	AgentsFile *bool `yaml:"agents_file"` // load AGENTS.md into the chat system prompt
-	Skills     *bool `yaml:"skills"`      // discover and expand $name skills
+	AgentsFile    *bool `yaml:"agents_file"`    // load AGENTS.md into the chat system prompt
+	Skills        *bool `yaml:"skills"`         // discover and expand $name skills
+	PromptCaching *bool `yaml:"prompt_caching"` // cache the static system prompt prefix
 }
 
 // AgentsFileEnabled reports whether AGENTS.md loading is on (default: true).
@@ -48,6 +49,12 @@ func (c *Config) AgentsFileEnabled() bool { return featureEnabled(c.Features.Age
 
 // SkillsEnabled reports whether skill loading is on (default: true).
 func (c *Config) SkillsEnabled() bool { return featureEnabled(c.Features.Skills, true) }
+
+// PromptCachingEnabled reports whether the static system prompt is marked for
+// provider-side prompt caching (default: true).
+func (c *Config) PromptCachingEnabled() bool {
+	return featureEnabled(c.Features.PromptCaching, true)
+}
 
 // featureEnabled resolves a tri-state flag: nil means "unset — use the
 // default"; a non-nil pointer means the user set it explicitly.

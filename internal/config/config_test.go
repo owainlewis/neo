@@ -124,3 +124,26 @@ func TestFeatures_SkillsDefaultsOnExplicitFalseDisables(t *testing.T) {
 		}
 	})
 }
+
+func TestFeatures_PromptCachingDefaultsOnExplicitFalseDisables(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if !cfg.PromptCachingEnabled() {
+			t.Fatal("expected prompt_caching to default on when omitted")
+		}
+
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\nfeatures:\n  prompt_caching: false\n")
+		cfg, err = Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.PromptCachingEnabled() {
+			t.Fatal("expected prompt_caching disabled when set to false")
+		}
+	})
+}

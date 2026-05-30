@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,5 +128,85 @@ func TestComplete_GivesUpAfterMaxRetries(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&calls); got != 3 { // attempt 0 + 2 retries
 		t.Fatalf("expected 3 attempts, got %d", got)
+	}
+}
+
+func TestComplete_SystemBlocksCarryCacheControl(t *testing.T) {
+	var captured struct {
+		System []struct {
+			Type         string         `json:"type"`
+			Text         string         `json:"text"`
+			CacheControl map[string]any `json:"cache_control"`
+		} `json:"system"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.WriteHeader(200)
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(srv).Complete(context.Background(), llm.Request{
+		Model: "m",
+		SystemBlocks: []llm.SystemBlock{
+			{Text: "static base", Cache: true},
+			{Text: "dynamic tail"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(captured.System) != 2 {
+		t.Fatalf("expected 2 system blocks, got %d", len(captured.System))
+	}
+	if captured.System[0].Text != "static base" || captured.System[0].CacheControl["type"] != "ephemeral" {
+		t.Fatalf("first block should be cached static base: %+v", captured.System[0])
+	}
+	if captured.System[1].CacheControl != nil {
+		t.Fatalf("second block should not be cached: %+v", captured.System[1])
+	}
+}
+
+func TestComplete_FallsBackToSystemString(t *testing.T) {
+	var captured struct {
+		System string `json:"system"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.WriteHeader(200)
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(srv).Complete(context.Background(), llm.Request{
+		Model:  "m",
+		System: "plain prompt",
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if captured.System != "plain prompt" {
+		t.Fatalf("expected plain system string, got %q", captured.System)
+	}
+}
+
+func TestComplete_ParsesCacheUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":7,"cache_creation_input_tokens":100,"cache_read_input_tokens":200}}`))
+	}))
+	defer srv.Close()
+
+	resp, err := newTestClient(srv).Complete(context.Background(), llm.Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	want := llm.Usage{InputTokens: 5, OutputTokens: 7, CacheCreationTokens: 100, CacheReadTokens: 200}
+	if resp.Usage != want {
+		t.Fatalf("usage = %+v, want %+v", resp.Usage, want)
 	}
 }

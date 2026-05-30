@@ -8,7 +8,7 @@ import (
 func TestSplashBlock_RendersWordmarkTaglineAndMetadataList(t *testing.T) {
 	b := splashBlock{
 		version: "v0.2.0",
-		model:   "claude-sonnet-4-6",
+		model:   "claude-opus-4-8",
 		cwd:     "~/Code/neo",
 		branch:  "main",
 		tagline: "Ship it",
@@ -25,7 +25,7 @@ func TestSplashBlock_RendersWordmarkTaglineAndMetadataList(t *testing.T) {
 	type pair struct{ label, value string }
 	for _, p := range []pair{
 		{"version", "v0.2.0"},
-		{"model", "claude-sonnet-4-6"},
+		{"model", "claude-opus-4-8"},
 		{"branch", "main"},
 		{"cwd", "~/Code/neo"},
 	} {

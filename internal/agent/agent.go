@@ -29,13 +29,17 @@ type Event struct {
 }
 
 type Config struct {
-	Model    string
-	System   string
-	Provider llm.Provider
-	Tools    *tools.Registry
-	MaxTurns int
-	OnEvent  func(Event)
-	Messages []llm.Message
+	Model string
+	// System is the flattened system prompt. SystemBlocks, when set, carries the
+	// same prompt as ordered segments so the provider can place cache breakpoints;
+	// the loop passes both so providers can use whichever they support.
+	System       string
+	SystemBlocks []llm.SystemBlock
+	Provider     llm.Provider
+	Tools        *tools.Registry
+	MaxTurns     int
+	OnEvent      func(Event)
+	Messages     []llm.Message
 }
 
 type Agent struct {
@@ -76,10 +80,11 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 	var finalText strings.Builder
 	for turn := 0; turn < a.cfg.MaxTurns; turn++ {
 		resp, err := a.cfg.Provider.Complete(ctx, llm.Request{
-			Model:    a.cfg.Model,
-			System:   a.cfg.System,
-			Messages: a.messages,
-			Tools:    a.cfg.Tools.Specs(),
+			Model:        a.cfg.Model,
+			System:       a.cfg.System,
+			SystemBlocks: a.cfg.SystemBlocks,
+			Messages:     a.messages,
+			Tools:        a.cfg.Tools.Specs(),
 		})
 		if err != nil {
 			a.emit(Event{Kind: EventError, Err: err})

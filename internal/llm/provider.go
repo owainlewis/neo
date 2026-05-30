@@ -32,17 +32,40 @@ type ToolSpec struct {
 	InputSchema map[string]any `json:"input_schema"`
 }
 
+// SystemBlock is one segment of a structured system prompt. Splitting the prompt
+// into blocks lets a provider cache the stable prefix (Cache == true) while the
+// dynamic tail (git status, project context) varies per session without evicting
+// the cached entry. Providers without caching simply concatenate the text.
+type SystemBlock struct {
+	Text  string
+	Cache bool // mark this block as a cache breakpoint (cache it and everything before it)
+}
+
 type Request struct {
-	Model     string
-	System    string
-	Messages  []Message
-	Tools     []ToolSpec
-	MaxTokens int
+	Model    string
+	System   string
+	Messages []Message
+	Tools    []ToolSpec
+	// SystemBlocks, when non-empty, supersedes System: it carries the system
+	// prompt as ordered segments so a provider can place cache breakpoints. The
+	// flattened text of SystemBlocks should match System.
+	SystemBlocks []SystemBlock
+	MaxTokens    int
+}
+
+// Usage reports token accounting for a single completion. Cache fields are
+// zero for providers that don't support prompt caching.
+type Usage struct {
+	InputTokens         int
+	OutputTokens        int
+	CacheCreationTokens int // tokens written to the cache on this request
+	CacheReadTokens     int // tokens served from the cache on this request
 }
 
 type Response struct {
 	Content    []ContentBlock
 	StopReason string
+	Usage      Usage
 }
 
 type Provider interface {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/config"
+	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
@@ -86,20 +87,37 @@ func newRegistry() *tools.Registry {
 	)
 }
 
-// chatSystem builds the chat agent's system prompt: the base instructions, plus
-// AGENTS.md project context and the skill catalog when those features are on and
-// discoverable. Discovery errors are non-fatal — they warn and fall back to the
-// prompt built so far rather than failing to start.
-func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) string {
-	system := chatSystemPrompt
+// chatSystem builds the chat agent's system prompt as ordered blocks: a stable,
+// cacheable base (the static instructions plus the skill catalog) followed by
+// dynamic project context (AGENTS.md) kept in its own, uncached block. Splitting
+// it this way lets prompt caching reuse the base across turns and sessions while
+// the project tail varies. Discovery errors are non-fatal — they warn and fall
+// back to the blocks built so far rather than failing to start.
+//
+// It returns both the flattened string and the blocks so the agent can pass
+// whichever a provider supports.
+func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []llm.SystemBlock) {
+	// Base block: static instructions + skill catalog. Stable within a session
+	// and largely reused across them, so it's the cache breakpoint.
+	base := skills.Augment(chatSystemPrompt, sk)
+	cache := cfg.PromptCachingEnabled()
+	blocks := []llm.SystemBlock{{Text: base, Cache: cache}}
+
 	if cfg.AgentsFileEnabled() && cwd != "" {
 		if docs, err := projectctx.Load(cwd); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: AGENTS.md: %v\n", err)
-		} else {
-			system = projectctx.Augment(system, docs)
+		} else if section := projectctx.Augment("", docs); section != "" {
+			// Dynamic tail: kept uncached and after the breakpoint so it never
+			// evicts the cached base.
+			blocks = append(blocks, llm.SystemBlock{Text: section})
 		}
 	}
-	return skills.Augment(system, sk)
+
+	var b strings.Builder
+	for _, blk := range blocks {
+		b.WriteString(blk.Text)
+	}
+	return b.String(), blocks
 }
 
 func mustConfig() *config.Config {
@@ -172,12 +190,14 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// (via chatSystem), and the same slice drives $name expansion in the TUI.
 	sk := loadSkills(cfg, cwd)
 
+	system, systemBlocks := chatSystem(cfg, cwd, sk)
 	ag := agent.New(agent.Config{
-		Model:    cfg.Model,
-		System:   chatSystem(cfg, cwd, sk),
-		Provider: prov,
-		Tools:    reg,
-		Messages: sess.Messages,
+		Model:        cfg.Model,
+		System:       system,
+		SystemBlocks: systemBlocks,
+		Provider:     prov,
+		Tools:        reg,
+		Messages:     sess.Messages,
 	})
 
 	saveSession := func() error {

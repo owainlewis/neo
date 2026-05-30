@@ -54,7 +54,7 @@ will be revisited deliberately once the core agent is rock solid (see Later).
 
 ## Later
 
-- [ ] **Prompt caching** — `cache_control` on the static system prompt; keep the
+- [x] **Prompt caching** — `cache_control` on the static system prompt; keep the
       dynamic sections (git, project context) separate to maximize cache hits.
 - [ ] **Second provider** — a non-Anthropic `Provider` to prove the seam holds.
 - [ ] **Model catalog** — context-window sizes and pricing to drive compaction
