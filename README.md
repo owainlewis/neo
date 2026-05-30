@@ -3,29 +3,25 @@
 [![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Neo is a fast, minimalist coding agent with first-class workflow support, written in Go.
+Neo is a fast, minimalist coding agent written in Go.
 
-An interactive terminal UI lets you chat with the agent directly. A headless
-CLI lets you run repeatable multi-step flows in CI or from scripts — each step
-is a plain Markdown prompt file that you can read and edit without touching
-any code.
+An interactive terminal UI lets you chat with the agent directly — watch it read
+files, run commands, and make edits in real time. The codebase is intentionally
+small and modular: a policy-free core agent loop, with capabilities layered on
+top as independent, feature-flagged modules.
 
 ![neo splash screen](docs/screenshot.png)
 
 ## Features
 
-- **Interactive chat.** `neo chat` opens a Bubble Tea terminal UI. Type a task,
-  watch the agent read files, run commands, and make edits in real time.
-- **Multi-step flows.** `neo flow <name> "<task>"` runs a named sequence of
-  agent steps. Each step receives the outputs of all prior steps as context.
-- **Single-step runs.** `neo step <name> "<task>"` runs one step prompt
-  against a task — useful for iterating on a prompt without a full flow.
-- **Plain-text prompts.** Step prompts are Markdown files (`flows/*.md`).
-  Customize them by adding a `flows/` directory to your project or `~/.neo/flows/`.
-- **Per-step overrides.** A step's Markdown file can carry optional YAML
-  frontmatter to restrict its tool set or pin a specific model.
+- **Interactive chat.** `neo` opens a Bubble Tea terminal UI. Type a task and
+  watch the agent work.
 - **Small tool surface.** bash, read\_file, write\_file, edit\_file — inspectable
   and easy to reason about.
+- **AGENTS.md support.** Drop an `AGENTS.md` in your project (or `~/.neo/`) and
+  its guidance is loaded into the agent's system prompt. Feature-flagged.
+- **Modular core.** The agent loop knows nothing about coding, files, or project
+  context — capabilities are injected and can be toggled in config.
 
 ## Quick Start
 
@@ -69,21 +65,17 @@ Install onto your `$GOBIN` path:
 
 ```bash
 go install github.com/owainlewis/neo/cmd/neo@latest
-neo chat
+neo
 ```
 
 ## Usage
 
 ```bash
-# Interactive terminal chat
+# Interactive terminal chat (default)
+neo
+
+# Same thing, explicit
 neo chat
-
-# Run the built-in "code" flow (write → review) against a task
-neo flow code "Add request-cancellation support to the HTTP client"
-
-# Run a single step headlessly
-neo step write "Refactor the config loader"
-neo step review "Check the current diff for blocking issues"
 
 neo help
 ```
@@ -92,70 +84,18 @@ neo help
 
 | Command | Description |
 |---------|-------------|
-| `neo chat` | Open the interactive terminal coding agent |
-| `neo flow <name> "<task>"` | Run a named flow from `neo.yaml` |
-| `neo step <name> "<task>"` | Run a single step prompt from `flows/<name>.md` |
+| `neo` / `neo chat` | Open the interactive terminal coding agent |
 | `neo help` | Show CLI help |
 
-## Flows
+## AGENTS.md
 
-A flow is a named sequence of steps defined in `neo.yaml`. The engine runs
-each step in order, passing prior step outputs as context. If a step reports
-failure and `retry_from` is set, the engine rewinds to that step and tries
-again (up to `max_rounds` times).
+Neo loads project instructions from `AGENTS.md` into the chat system prompt.
+It discovers, in increasing priority:
 
-### Built-in flow: `code`
+1. `~/.neo/AGENTS.md` — user-global guidance
+2. `AGENTS.md` from the repository root down to your working directory
 
-```yaml
-flows:
-  code:
-    steps: [write, review]
-    retry_from: write
-    max_rounds: 2
-```
-
-| Flow | Steps | Behaviour |
-|------|-------|-----------|
-| `code` | `write` → `review` | Writes the change, then reviews it. Retries `write` if review fails. |
-
-### Defining your own flows
-
-Add a `neo.yaml` to your project (or `~/.neo/config.yaml` globally):
-
-```yaml
-model: claude-sonnet-4-6
-
-flows:
-  ship:
-    steps: [write, test, review]
-    retry_from: write
-    max_rounds: 3
-```
-
-Then add the corresponding step prompts in `flows/write.md`, `flows/test.md`,
-and `flows/review.md`. Any step not found locally falls back to the embedded
-defaults.
-
-## Step Prompts
-
-A step prompt is a Markdown file. It may include optional YAML frontmatter to
-restrict the tool set or override the model for that step:
-
-```markdown
----
-tools: [bash, read_file]
-model: claude-haiku-4-5
----
-
-You are the REVIEW step of a coding flow.
-…
-```
-
-**Prompt resolution order** (first match wins):
-
-1. `./flows/<name>.md` — project-local override
-2. `~/.neo/flows/<name>.md` — user-global override
-3. Embedded defaults (shipped with the binary)
+Disable it by setting the feature flag to `false` (see Configuration).
 
 ## Configuration
 
@@ -174,19 +114,13 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 **`neo.yaml` reference:**
 
 ```yaml
-# Model used for all steps unless overridden in frontmatter.
-# Default: claude-sonnet-4-6
+# Model used by the agent. Default: claude-sonnet-4-6
 model: claude-sonnet-4-6
 
-# Directory where step artifacts are written.
-# Default: .agent/runs
-artifacts_dir: .agent/runs
-
-flows:
-  code:
-    steps: [write, review]
-    retry_from: write   # rewind to this step on failure
-    max_rounds: 2       # maximum retry rounds (0 or omitted = 1)
+# Optional, layered capabilities. Each defaults to on when omitted; set a flag
+# to false to disable it. The core agent loop is never affected by these.
+features:
+  agents_file: true   # load AGENTS.md into the system prompt
 ```
 
 ## Tools
@@ -205,14 +139,12 @@ The agent has four built-in tools:
 ```text
 cmd/neo/                CLI entry point and command dispatch
 internal/agent/         Core agent loop and event model
-internal/config/        Config loading, flow definitions, step resolution
-internal/config/defaults/   Embedded neo.yaml and built-in step prompts
-internal/artifact/      Per-run artifact storage (.agent/runs/)
-internal/flow/          (reserved)
-internal/phase/         Single-step runner
+internal/config/        Config loading and feature flags
+internal/config/defaults/   Embedded neo.yaml
+internal/llm/           Provider interface + Anthropic client
+internal/projectctx/    AGENTS.md discovery and system-prompt injection
 internal/tools/         bash, read_file, write_file, edit_file implementations
 internal/tui/           Bubble Tea terminal UI
-internal/workflow/      Multi-step workflow engine
 ```
 
 ## Development

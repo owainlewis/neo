@@ -21,14 +21,13 @@ import (
 )
 
 // Run starts the Bubble Tea chat TUI. It returns when the user quits.
-func Run(ctx context.Context, ag *agent.Agent, model, version string, wf WorkflowConfig) error {
-	m, err := newModel(ctx, ag, model, version, wf)
+func Run(ctx context.Context, ag *agent.Agent, model, version string) error {
+	m, err := newModel(ctx, ag, model, version)
 	if err != nil {
 		return err
 	}
 	// AltScreen + MouseMode are properties of the View in v2 (see View()).
 	p := tea.NewProgram(m)
-	m.send = p.Send
 	// Pipe agent events directly into the Bubble Tea program. This avoids a
 	// hand-rolled channel pump and the back-pressure that came with it.
 	ag.SetEventHandler(func(e agent.Event) { p.Send(agentEventMsg{ev: e}) })
@@ -69,16 +68,9 @@ type model struct {
 	// recreating the renderer on resize so we never re-probe the terminal
 	// from inside raw mode (which leaks the OSC 11 reply into the textarea).
 	mdStyleName string
-
-	// Workflow plumbing. Set after the Bubble Tea program is constructed in
-	// Run(); workflow goroutines use send to push messages back.
-	wf             WorkflowConfig
-	send           teaSendFn
-	activeWorkflow *workflowBlock
-	workflowCancel context.CancelFunc
 }
 
-func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, wf WorkflowConfig) (*model, error) {
+func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string) (*model, error) {
 	// Detect dark/light once, here, before Bubble Tea puts stdin in raw mode.
 	// Glamour's WithAutoStyle issues an OSC 11 query each time; doing that
 	// from inside Update (e.g. on resize) leaks the terminal's reply into the
@@ -133,7 +125,6 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, wf
 		spin:        sp,
 		caption:     randomCaption(),
 		md:          md,
-		wf:          wf,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -169,34 +160,27 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.sendCancel != nil {
 				m.sendCancel()
 			}
-			if m.workflowCancel != nil {
-				m.workflowCancel()
-			}
 			m.quitting = true
 			return m, tea.Quit
 		case "esc":
-			// Soft interrupt: cancel whatever is in flight without quitting.
+			// Soft interrupt: cancel the in-flight turn without quitting.
 			if m.busy && m.sendCancel != nil {
 				m.sendCancel()
-			}
-			if m.activeWorkflow != nil && m.workflowCancel != nil {
-				m.workflowCancel()
 			}
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
 				break
 			}
-			// Slash commands are parsed before the busy / active-workflow
-			// gate so /cancel remains reachable while a workflow is running.
+			// Slash commands are parsed before the busy gate.
 			if strings.HasPrefix(text, "/") {
 				m.input.Reset()
 				m.resizeInput()
 				m.handleSlashCommand(text)
 				break
 			}
-			// Chat text is suppressed while a turn or workflow is in flight.
-			if m.busy || m.activeWorkflow != nil {
+			// Chat text is suppressed while a turn is in flight.
+			if m.busy {
 				break
 			}
 			m.input.Reset()
@@ -230,29 +214,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setDotColor(colDotTool)
 		} else if m.busy {
 			m.setDotColor(colDotThinking)
-		}
-
-	case workflowEventMsg:
-		if m.activeWorkflow != nil {
-			m.activeWorkflow.Apply(msg.ev)
-			m.refreshViewport()
-		}
-
-	case workflowAgentEventMsg:
-		if m.activeWorkflow != nil {
-			m.activeWorkflow.ApplyAgent(msg.step, msg.ev)
-			m.refreshViewport()
-		}
-
-	case workflowDoneMsg:
-		if m.workflowCancel != nil {
-			m.workflowCancel()
-			m.workflowCancel = nil
-		}
-		m.activeWorkflow = nil
-		m.input.Placeholder = defaultPlaceholder
-		if msg.err != nil && msg.err != context.Canceled {
-			m.appendBlock(errorBlock{err: msg.err})
 		}
 
 	case sendResultMsg:
@@ -323,10 +284,7 @@ func makeView(content string) tea.View {
 // shouldn't flicker numbers or trivia at the user.
 const elapsedThreshold = 3 * time.Second
 
-const (
-	defaultPlaceholder  = "Ask neo anything…   ⌥↩ newline · ↩ send"
-	workflowPlaceholder = "workflow running — Esc to cancel"
-)
+const defaultPlaceholder = "Ask neo anything…   ⌥↩ newline · ↩ send"
 
 // handleSlashCommand parses slash commands. Called only when input begins
 // with '/'.
@@ -334,63 +292,11 @@ func (m *model) handleSlashCommand(line string) {
 	parts := strings.Fields(line)
 	cmd := parts[0]
 	switch cmd {
-	case "/run":
-		if len(parts) < 2 {
-			m.appendBlock(errorBlock{err: fmt.Errorf("usage: /run <flow-name> [task]")})
-			return
-		}
-		name := parts[1]
-		task := strings.TrimSpace(strings.Join(parts[2:], " "))
-		m.startWorkflowCmd(name, task)
-	case "/cancel":
-		if m.activeWorkflow == nil {
-			m.appendBlock(errorBlock{err: fmt.Errorf("no workflow running")})
-			return
-		}
-		if m.workflowCancel != nil {
-			m.workflowCancel()
-		}
-	case "/flows":
-		m.appendBlock(buildFlowsBlock(m.wf.Config))
 	case "/help":
 		m.appendBlock(helpBlock{})
 	default:
 		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: %s — try /help", cmd)})
 	}
-}
-
-// startWorkflowCmd loads the named flow definition and kicks off an engine
-// run. Adds a workflowBlock to the scrollback to render its progress.
-//
-// Rejects the request if a workflow is already active; without this guard,
-// the previous run's goroutine keeps emitting workflowEventMsg /
-// workflowDoneMsg and Update would apply them to the new block, mixing
-// progress between runs (and clearing the new run early when the old one
-// finishes).
-func (m *model) startWorkflowCmd(name, task string) {
-	if m.activeWorkflow != nil {
-		m.appendBlock(errorBlock{err: fmt.Errorf("a workflow is already running — /cancel it first")})
-		return
-	}
-	// Also reject when a chat turn is in flight. The chat agent and the
-	// workflow's phase.Runner share the same Provider/Tools instance; the
-	// engine would also try to take over Runner.OnEvent, which is being
-	// driven by the chat turn and would race with it.
-	if m.busy {
-		m.appendBlock(errorBlock{err: fmt.Errorf("a chat turn is in flight — wait or Esc to cancel before /run")})
-		return
-	}
-	def, err := m.wf.definitionFor(name)
-	if err != nil {
-		m.appendBlock(errorBlock{err: err})
-		return
-	}
-	block := newWorkflowBlock(def.Name, task, def.Steps, def.MaxRounds)
-	m.activeWorkflow = block
-	m.appendBlock(block)
-	m.input.Placeholder = workflowPlaceholder
-	m.setDotColor(colDotWorkflow)
-	m.workflowCancel = m.wf.launchWorkflow(m.ctx, m.send, def, task)
 }
 
 // setDotColor swaps the spinner's foreground so the pulsing dot reflects
@@ -401,11 +307,6 @@ func (m *model) setDotColor(c color.Color) {
 }
 
 func (m *model) statusLine() string {
-	// Workflow has priority — its dot color and label override the chat state.
-	if m.activeWorkflow != nil {
-		return " " + m.spin.View() + " " + styMuted.Render(m.workflowStatusBody())
-	}
-
 	if !m.busy {
 		// Steady green dot when idle — no pulse, no spinner machinery.
 		dot := lipgloss.NewStyle().Foreground(colDotReady).Render("●")
@@ -431,20 +332,6 @@ func (m *model) statusLine() string {
 		line += "  " + styDim.Render(formatElapsed(elapsed))
 	}
 	return line
-}
-
-// workflowStatusBody describes the current workflow step for the status line.
-func (m *model) workflowStatusBody() string {
-	w := m.activeWorkflow
-	if w.active >= 0 && w.active < len(w.steps) {
-		step := w.steps[w.active].name
-		s := fmt.Sprintf("workflow: %s · %d/%d", step, w.active+1, len(w.steps))
-		if w.detail != "" {
-			s += " · " + w.detail
-		}
-		return s
-	}
-	return fmt.Sprintf("workflow: %s · round %d/%d", w.name, w.round, w.maxRounds)
 }
 
 func formatElapsed(d time.Duration) string {

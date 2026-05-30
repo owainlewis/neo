@@ -36,6 +36,14 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
+// padRight pads s with spaces to width n (no-op if already wider).
+func padRight(s string, n int) string {
+	if len(s) >= n {
+		return s
+	}
+	return s + strings.Repeat(" ", n-len(s))
+}
+
 // fmtElapsed formats a duration for display in tool-result and step-row
 // elapsed columns.
 func fmtElapsed(d time.Duration) string {
