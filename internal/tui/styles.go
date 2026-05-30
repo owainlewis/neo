@@ -3,12 +3,12 @@ package tui
 import "charm.land/lipgloss/v2"
 
 var (
-	colMuted   = lipgloss.Color("244")
-	colDim     = lipgloss.Color("240")
-	colAccent  = lipgloss.Color("12")
-	colTool    = lipgloss.Color("14")
-	colOK      = lipgloss.Color("10")
-	colErr     = lipgloss.Color("9")
+	colMuted  = lipgloss.Color("244")
+	colDim    = lipgloss.Color("240")
+	colAccent = lipgloss.Color("12")
+	colTool   = lipgloss.Color("14")
+	colOK     = lipgloss.Color("10")
+	colErr    = lipgloss.Color("9")
 	// Status-dot palette. The dot is always present in the status line; its
 	// color encodes what the agent is doing.
 	colDotReady    = lipgloss.Color("42")  // green  — idle, awaiting input
@@ -17,8 +17,8 @@ var (
 	colDotWorkflow = lipgloss.Color("13")  // magenta — a workflow is running
 	// Splash banner colour. Picked to feel "neo blue" — saturated but not
 	// neon. xterm-256 39 is DeepSkyBlue1 (rgb 0/175/255).
-	colBanner = lipgloss.Color("39")
-	colCardBg = lipgloss.Color("236")
+	colBanner  = lipgloss.Color("39")
+	colCardBg  = lipgloss.Color("236")
 	colToolBg  = lipgloss.Color("235")
 	colInputBg = lipgloss.Color("234")
 

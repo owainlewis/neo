@@ -29,12 +29,12 @@ type Event struct {
 }
 
 type Config struct {
-	Model        string
-	System       string
-	Provider     llm.Provider
-	Tools        *tools.Registry
-	MaxTurns     int
-	OnEvent      func(Event)
+	Model    string
+	System   string
+	Provider llm.Provider
+	Tools    *tools.Registry
+	MaxTurns int
+	OnEvent  func(Event)
 }
 
 type Agent struct {

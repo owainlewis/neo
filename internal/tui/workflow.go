@@ -287,7 +287,7 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 		if limit < 10 {
 			limit = 10
 		}
-		sb.WriteString(styMuted.Render("  " + truncate(oneLine(b.task), limit)) + "\n")
+		sb.WriteString(styMuted.Render("  "+truncate(oneLine(b.task), limit)) + "\n")
 	}
 	sb.WriteString("\n")
 
