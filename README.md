@@ -87,6 +87,10 @@ neo
 neo chat
 
 neo help
+
+# Saved sessions
+neo sessions
+neo resume <session-id>
 ```
 
 ### Commands
@@ -94,7 +98,26 @@ neo help
 | Command | Description |
 |---------|-------------|
 | `neo` / `neo chat` | Open the interactive terminal coding agent |
+| `neo sessions` | List saved chat sessions |
+| `neo resume <id>` | Resume a saved chat session |
 | `neo help` | Show CLI help |
+
+## Sessions
+
+Neo saves chat sessions under `~/.neo/sessions/` so conversations can be
+resumed later. Session files contain the agent transcript, basic metadata such
+as cwd and model, and tool call/result messages needed to continue the model
+conversation.
+
+```bash
+neo sessions        # list recent sessions
+neo resume <id>     # reopen a saved session
+```
+
+Future gateways should map transport sessions onto the same store instead of
+creating separate transcript formats. For example, a Telegram DM can map
+`telegram:chat:<id>` to a Neo session, and a Slack thread can map
+`slack:channel:<id>:thread:<ts>` to a Neo session.
 
 ## AGENTS.md
 
@@ -180,6 +203,7 @@ internal/config/        Config loading and feature flags
 internal/config/defaults/   Embedded neo.yaml
 internal/llm/           Provider interface + Anthropic client
 internal/projectctx/    AGENTS.md discovery and system-prompt injection
+internal/session/       Saved session metadata and transcripts
 internal/skills/        skill discovery, catalog, and $name expansion
 internal/tools/         bash, read_file, write_file, edit_file implementations
 internal/tui/           Bubble Tea terminal UI

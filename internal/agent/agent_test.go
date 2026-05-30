@@ -71,6 +71,47 @@ func TestAgent_ToolUseFollowedByText(t *testing.T) {
 	assertToolUseResultsPaired(t, ag.Transcript())
 }
 
+func TestAgent_RestoresTranscriptFromConfig(t *testing.T) {
+	prior := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "first"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "text", Text: "first reply"}}},
+	}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("second reply")}}
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(),
+		Messages: prior,
+	})
+
+	out, err := ag.Send(context.Background(), "second")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "second reply" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if got := len(prov.Calls[0].Messages); got != 3 {
+		t.Fatalf("provider saw %d messages, want 3", got)
+	}
+	if got := prov.Calls[0].Messages[0].Content[0].Text; got != "first" {
+		t.Fatalf("provider did not receive restored first message: %q", got)
+	}
+}
+
+func TestAgent_TranscriptReturnsCopy(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("hello")}}
+	ag := newTestAgent(t, prov)
+	if _, err := ag.Send(context.Background(), "hi"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	transcript := ag.Transcript()
+	transcript[0].Content[0].Text = "mutated"
+	if got := ag.Transcript()[0].Content[0].Text; got == "mutated" {
+		t.Fatal("Transcript allowed caller to mutate agent state")
+	}
+}
+
 func TestAgent_ProviderErrorLeavesTranscriptClean(t *testing.T) {
 	// First call returns OK with a tool_use; second call (after we feed the
 	// tool result back) errors. The transcript must still satisfy the

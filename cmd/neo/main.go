@@ -2,16 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/projectctx"
+	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/tui"
@@ -40,6 +44,14 @@ func main() {
 	switch os.Args[1] {
 	case "chat":
 		runChat(ctx)
+	case "sessions":
+		listSessions(ctx)
+	case "resume":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: neo resume <session-id>")
+			os.Exit(2)
+		}
+		resumeSession(ctx, os.Args[2])
 	case "-h", "--help", "help":
 		printUsage()
 	default:
@@ -55,6 +67,8 @@ func printUsage() {
 USAGE:
   neo                Interactive chat mode (default)
   neo chat           Interactive chat mode (explicit)
+  neo sessions       List saved chat sessions
+  neo resume <id>    Resume a saved chat session
   neo help           Show this help
 
 CONFIG:
@@ -107,11 +121,52 @@ func mustProvider() *anthropic.Client {
 }
 
 func runChat(ctx context.Context) {
+	store := mustSessionStore()
+	runChatSession(ctx, store, nil)
+}
+
+func resumeSession(ctx context.Context, id string) {
+	store := mustSessionStore()
+	sess, err := store.Load(ctx, id)
+	if err != nil {
+		if errors.Is(err, session.ErrNotFound) {
+			fmt.Fprintf(os.Stderr, "session not found: %s\n", id)
+		} else {
+			fmt.Fprintf(os.Stderr, "load session: %v\n", err)
+		}
+		os.Exit(1)
+	}
+	if sess.Metadata.CWD != "" {
+		if info, err := os.Stat(sess.Metadata.CWD); err == nil && info.IsDir() {
+			if err := os.Chdir(sess.Metadata.CWD); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: session cwd %s: %v; using current directory\n", sess.Metadata.CWD, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: session cwd %s is unavailable; using current directory\n", sess.Metadata.CWD)
+		}
+	}
+	runChatSession(ctx, store, sess)
+}
+
+func runChatSession(ctx context.Context, store *session.Store, sess *session.Session) {
 	cfg := mustConfig()
 	prov := mustProvider()
 	reg := newRegistry()
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
+
+	if sess == nil {
+		var err error
+		sess, err = store.Create(ctx, session.Metadata{
+			Source: session.DefaultSource,
+			CWD:    cwd,
+			Model:  cfg.Model,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create session: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// Skills are loaded once: the catalog is advertised in the system prompt
 	// (via chatSystem), and the same slice drives $name expansion in the TUI.
@@ -122,12 +177,69 @@ func runChat(ctx context.Context) {
 		System:   chatSystem(cfg, cwd, sk),
 		Provider: prov,
 		Tools:    reg,
+		Messages: sess.Messages,
 	})
 
-	if err := tui.Run(ctx, ag, cfg.Model, Version, sk); err != nil {
+	saveSession := func() error {
+		sess.Messages = ag.Transcript()
+		sess.Metadata.CWD = cwd
+		sess.Metadata.Model = cfg.Model
+		return store.Save(ctx, sess)
+	}
+
+	if err := tui.Run(ctx, ag, cfg.Model, Version, sk, tui.WithAfterSend(saveSession)); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func listSessions(ctx context.Context) {
+	store := mustSessionStore()
+	items, err := store.List(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "list sessions: %v\n", err)
+		os.Exit(1)
+	}
+	if len(items) == 0 {
+		fmt.Println("no saved sessions")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tUPDATED\tMODEL\tCWD\tTITLE")
+	for _, meta := range items {
+		title := meta.Title
+		if title == "" {
+			title = "(untitled)"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			meta.ID,
+			meta.UpdatedAt.Local().Format("2006-01-02 15:04"),
+			meta.Model,
+			shortPath(meta.CWD),
+			title,
+		)
+	}
+	_ = w.Flush()
+}
+
+func mustSessionStore() *session.Store {
+	store, err := session.DefaultStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
+		os.Exit(1)
+	}
+	return store
+}
+
+func shortPath(path string) string {
+	if path == "" {
+		return "-"
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" && (path == home || strings.HasPrefix(path, home+string(os.PathSeparator))) {
+		return "~" + strings.TrimPrefix(path, home)
+	}
+	return path
 }
 
 // loadSkills discovers skills when the feature is enabled. A discovery error is
