@@ -32,21 +32,15 @@ will be revisited deliberately once the core agent is rock solid (see Later).
       tri-state feature flags for layered capabilities.
 - [x] **AGENTS.md loading** — `internal/projectctx` discovers project + global
       `AGENTS.md` and injects it into the chat prompt, behind `features.agents_file`.
+- [x] **Skill loading** — `internal/skills` discovers `SKILL.md` files from
+      `.neo/skills/` and `~/.neo/skills/`, advertises their name + description in
+      the system prompt, and expands a skill's body when the user mentions
+      `$name`. Behind `features.skills`. (Model-decided/dynamic triggering is a
+      future layer.)
 - [x] **TUI** — Bubble Tea v2 chat (blocking + spinner, no streaming by design),
       splash screen.
 
-## Next: capability modules (feature-flagged)
-
-Each lands as its own package behind a config flag, wired in `cmd/neo`. The point
-is that a reader can turn one off and see exactly what it contributed. The
-feature-flag seam and AGENTS.md loading are done (see above) — this is the template.
-
-- [ ] **Skill loading** — Codex-style skills. Discover `SKILL.md` files (name +
-      description frontmatter) from `.neo/skills/` and `~/.neo/skills/`. Reference
-      a skill in input with `$skill-name` to expand its body into the turn.
-      Available skills are advertised to the model. Flag: `features.skills`.
-
-## Then: core robustness
+## Next: core robustness
 
 - [ ] **Grep tool** — content search with context lines. The most-used tool in
       any coding agent; today the model shells out to `bash grep`.

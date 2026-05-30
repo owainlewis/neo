@@ -40,10 +40,14 @@ type Config struct {
 // turn the capability off explicitly.
 type Features struct {
 	AgentsFile *bool `yaml:"agents_file"` // load AGENTS.md into the chat system prompt
+	Skills     *bool `yaml:"skills"`      // discover and expand $name skills
 }
 
 // AgentsFileEnabled reports whether AGENTS.md loading is on (default: true).
 func (c *Config) AgentsFileEnabled() bool { return featureEnabled(c.Features.AgentsFile, true) }
+
+// SkillsEnabled reports whether skill loading is on (default: true).
+func (c *Config) SkillsEnabled() bool { return featureEnabled(c.Features.Skills, true) }
 
 // featureEnabled resolves a tri-state flag: nil means "unset — use the
 // default"; a non-nil pointer means the user set it explicitly.

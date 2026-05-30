@@ -12,6 +12,7 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/projectctx"
+	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/tui"
 )
@@ -71,24 +72,20 @@ func newRegistry() *tools.Registry {
 	)
 }
 
-// chatSystem builds the chat agent's system prompt: the base instructions plus,
-// when the feature is enabled, any AGENTS.md project context discovered from the
-// working directory. A discovery error is non-fatal — it degrades to the base
-// prompt with a warning rather than failing to start.
-func chatSystem(cfg *config.Config) string {
-	if !cfg.AgentsFileEnabled() {
-		return chatSystemPrompt
+// chatSystem builds the chat agent's system prompt: the base instructions, plus
+// AGENTS.md project context and the skill catalog when those features are on and
+// discoverable. Discovery errors are non-fatal — they warn and fall back to the
+// prompt built so far rather than failing to start.
+func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) string {
+	system := chatSystemPrompt
+	if cfg.AgentsFileEnabled() && cwd != "" {
+		if docs, err := projectctx.Load(cwd); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: AGENTS.md: %v\n", err)
+		} else {
+			system = projectctx.Augment(system, docs)
+		}
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return chatSystemPrompt
-	}
-	docs, err := projectctx.Load(cwd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: AGENTS.md: %v\n", err)
-		return chatSystemPrompt
-	}
-	return projectctx.Augment(chatSystemPrompt, docs)
+	return skills.Augment(system, sk)
 }
 
 func mustConfig() *config.Config {
@@ -114,15 +111,35 @@ func runChat(ctx context.Context) {
 	prov := mustProvider()
 	reg := newRegistry()
 
+	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
+
+	// Skills are loaded once: the catalog is advertised in the system prompt
+	// (via chatSystem), and the same slice drives $name expansion in the TUI.
+	sk := loadSkills(cfg, cwd)
+
 	ag := agent.New(agent.Config{
 		Model:    cfg.Model,
-		System:   chatSystem(cfg),
+		System:   chatSystem(cfg, cwd, sk),
 		Provider: prov,
 		Tools:    reg,
 	})
 
-	if err := tui.Run(ctx, ag, cfg.Model, Version); err != nil {
+	if err := tui.Run(ctx, ag, cfg.Model, Version, sk); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// loadSkills discovers skills when the feature is enabled. A discovery error is
+// non-fatal — it warns and returns no skills rather than failing to start.
+func loadSkills(cfg *config.Config, cwd string) []skills.Skill {
+	if !cfg.SkillsEnabled() || cwd == "" {
+		return nil
+	}
+	sk, err := skills.Load(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skills: %v\n", err)
+		return nil
+	}
+	return sk
 }

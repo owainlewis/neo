@@ -7,3 +7,4 @@ model: claude-sonnet-4-6
 # to false to disable it. The core agent loop is never affected by these.
 features:
   agents_file: true # load AGENTS.md (project tree + ~/.neo) into the system prompt
+  skills: true      # discover .neo/skills, advertise them, expand $name references
