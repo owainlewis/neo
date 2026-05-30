@@ -154,16 +154,22 @@ func resumeSession(ctx context.Context, id string) {
 		}
 		os.Exit(1)
 	}
-	if sess.Metadata.CWD != "" {
-		if info, err := os.Stat(sess.Metadata.CWD); err == nil && info.IsDir() {
-			if err := os.Chdir(sess.Metadata.CWD); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: session cwd %s: %v; using current directory\n", sess.Metadata.CWD, err)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: session cwd %s is unavailable; using current directory\n", sess.Metadata.CWD)
-		}
-	}
+	restoreSessionCWD(sess.Metadata.CWD)
 	runChatSession(ctx, store, sess)
+}
+
+func restoreSessionCWD(cwd string) {
+	if cwd == "" {
+		return
+	}
+	info, err := os.Stat(cwd)
+	if err != nil || !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "warning: session cwd %s is unavailable; using current directory\n", cwd)
+		return
+	}
+	if err := os.Chdir(cwd); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: session cwd %s: %v; using current directory\n", cwd, err)
+	}
 }
 
 func runChatSession(ctx context.Context, store *session.Store, sess *session.Session) {

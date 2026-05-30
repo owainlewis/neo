@@ -73,7 +73,7 @@ func NewStore(dir string) *Store {
 
 func (s *Store) Dir() string { return s.dir }
 
-func (s *Store) Create(_ context.Context, meta Metadata) (*Session, error) {
+func (s *Store) Create(ctx context.Context, meta Metadata) (*Session, error) {
 	now := time.Now().UTC()
 	if meta.ID == "" {
 		id, err := newID()
@@ -92,15 +92,15 @@ func (s *Store) Create(_ context.Context, meta Metadata) (*Session, error) {
 		meta.UpdatedAt = meta.CreatedAt
 	}
 	sess := &Session{Metadata: meta}
-	if err := s.Save(context.Background(), sess); err != nil {
+	if err := s.Save(ctx, sess); err != nil {
 		return nil, err
 	}
 	return sess, nil
 }
 
 func (s *Store) Load(_ context.Context, id string) (*Session, error) {
-	id = strings.TrimSpace(id)
-	if id == "" || strings.ContainsAny(id, `/\\`) {
+	id, err := cleanID(id)
+	if err != nil {
 		return nil, fmt.Errorf("invalid session id %q", id)
 	}
 	b, err := os.ReadFile(s.sessionPath(id))
@@ -124,14 +124,14 @@ func (s *Store) Save(_ context.Context, sess *Session) error {
 	if sess == nil {
 		return fmt.Errorf("session: nil session")
 	}
-	if strings.TrimSpace(sess.Metadata.ID) == "" {
+	if isBlankID(sess.Metadata.ID) {
 		id, err := newID()
 		if err != nil {
 			return err
 		}
 		sess.Metadata.ID = id
 	}
-	if strings.ContainsAny(sess.Metadata.ID, `/\\`) {
+	if hasPathSeparator(sess.Metadata.ID) {
 		return fmt.Errorf("invalid session id %q", sess.Metadata.ID)
 	}
 	if sess.Metadata.Source == "" {
@@ -152,8 +152,7 @@ func (s *Store) Save(_ context.Context, sess *Session) error {
 	if err != nil {
 		return fmt.Errorf("encode session %s: %w", sess.Metadata.ID, err)
 	}
-	b = append(b, '\n')
-	if err := writeFileAtomic(s.sessionPath(sess.Metadata.ID), b, 0o600); err != nil {
+	if err := writeJSONAtomic(s.sessionPath(sess.Metadata.ID), b); err != nil {
 		return err
 	}
 	idx, err := s.readIndex()
@@ -167,9 +166,6 @@ func (s *Store) Save(_ context.Context, sess *Session) error {
 func (s *Store) List(_ context.Context) ([]Metadata, error) {
 	idx, err := s.readIndex()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	items := append([]Metadata(nil), idx.Sessions...)
@@ -193,8 +189,8 @@ func (s *Store) FindByExternal(ctx context.Context, source, external string) (*S
 }
 
 func (s *Store) Delete(ctx context.Context, id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" || strings.ContainsAny(id, `/\\`) {
+	id, err := cleanID(id)
+	if err != nil {
 		return fmt.Errorf("invalid session id %q", id)
 	}
 	if err := os.Remove(s.sessionPath(id)); err != nil && !os.IsNotExist(err) {
@@ -202,9 +198,6 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 	idx, err := s.readIndex()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
 	filtered := idx.Sessions[:0]
@@ -272,8 +265,7 @@ func (s *Store) writeIndex(idx index) error {
 	if err != nil {
 		return fmt.Errorf("encode session index: %w", err)
 	}
-	b = append(b, '\n')
-	return writeFileAtomic(s.indexPath(), b, 0o600)
+	return writeJSONAtomic(s.indexPath(), b)
 }
 
 func upsertMetadata(idx *index, meta Metadata) {
@@ -312,6 +304,26 @@ func writeFileAtomic(path string, b []byte, perm os.FileMode) error {
 		return fmt.Errorf("replace %s: %w", path, err)
 	}
 	return nil
+}
+
+func writeJSONAtomic(path string, b []byte) error {
+	return writeFileAtomic(path, append(b, '\n'), 0o600)
+}
+
+func cleanID(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if isBlankID(id) || hasPathSeparator(id) {
+		return id, fmt.Errorf("invalid")
+	}
+	return id, nil
+}
+
+func isBlankID(id string) bool {
+	return strings.TrimSpace(id) == ""
+}
+
+func hasPathSeparator(id string) bool {
+	return strings.ContainsAny(id, `/\\`)
 }
 
 func newID() (string, error) {

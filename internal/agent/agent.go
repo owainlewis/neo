@@ -151,20 +151,30 @@ func cloneMessages(in []llm.Message) []llm.Message {
 	out := make([]llm.Message, len(in))
 	for i, msg := range in {
 		out[i].Role = msg.Role
-		if len(msg.Content) == 0 {
-			continue
-		}
-		out[i].Content = make([]llm.ContentBlock, len(msg.Content))
-		for j, block := range msg.Content {
-			out[i].Content[j] = block
-			if block.Input != nil {
-				cp := make(map[string]any, len(block.Input))
-				for k, v := range block.Input {
-					cp[k] = v
-				}
-				out[i].Content[j].Input = cp
-			}
-		}
+		out[i].Content = cloneContentBlocks(msg.Content)
+	}
+	return out
+}
+
+func cloneContentBlocks(in []llm.ContentBlock) []llm.ContentBlock {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]llm.ContentBlock, len(in))
+	for i, block := range in {
+		out[i] = block
+		out[i].Input = cloneInput(block.Input)
+	}
+	return out
+}
+
+func cloneInput(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
 	}
 	return out
 }
