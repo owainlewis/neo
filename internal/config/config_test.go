@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,7 +149,7 @@ func TestResolveStep_NotFoundListsSearchedPaths(t *testing.T) {
 			t.Fatal("expected error")
 		}
 		var nf *StepNotFoundError
-		if !errAs(err, &nf) {
+		if !errors.As(err, &nf) {
 			t.Fatalf("expected StepNotFoundError, got %T: %v", err, err)
 		}
 		if len(nf.Searched) < 2 {
@@ -281,21 +282,32 @@ func TestFlowNames_Sorted(t *testing.T) {
 	}
 }
 
-// errAs is a tiny generic wrapper around errors.As to keep tests terse.
-func errAs[T error](err error, target *T) bool {
-	for err != nil {
-		if t, ok := err.(T); ok {
-			*target = t
-			return true
+func TestFeatures_AgentsFileDefaultsOnWhenAbsent(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
 		}
-		type unwrapper interface{ Unwrap() error }
-		u, ok := err.(unwrapper)
-		if !ok {
-			return false
+		if !cfg.AgentsFileEnabled() {
+			t.Fatal("expected agents_file to default on when omitted")
 		}
-		err = u.Unwrap()
-	}
-	return false
+	})
+}
+
+func TestFeatures_AgentsFileExplicitFalseDisables(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\nfeatures:\n  agents_file: false\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.AgentsFileEnabled() {
+			t.Fatal("expected agents_file disabled when set to false")
+		}
+	})
 }
 
 func writeFile(t *testing.T, path, body string) {
