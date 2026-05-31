@@ -18,8 +18,13 @@ First hit wins. Config files are not merged.
 
 # LLM backend: "anthropic" (default) or "openai".
 # anthropic → requires ANTHROPIC_API_KEY
-# openai    → requires OPENAI_API_KEY
+# openai    → uses the Responses API; auth via openai_auth (below)
 provider: anthropic
+
+# How the "openai" provider authenticates (ignored for other providers):
+#   api_key      → uses OPENAI_API_KEY (default)
+#   subscription → uses a ChatGPT/Codex subscription via OAuth; run `neo login`
+# openai_auth: api_key
 
 model: claude-opus-4-8
 
