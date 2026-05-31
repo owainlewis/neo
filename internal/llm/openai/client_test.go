@@ -137,6 +137,38 @@ func TestToInput_ReplaysRawReasoningBeforeToolResult(t *testing.T) {
 	}
 }
 
+func TestToInput_PreservesAssistantItemOrder(t *testing.T) {
+	req := llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+				{Type: "text", Text: "I will check."},
+				{Type: "tool_use", ID: "call_1", Name: "bash", Input: map[string]any{"cmd": "ls"}},
+				{Type: "text", Text: "Done."},
+			}},
+			{Role: llm.RoleUser, Content: []llm.ContentBlock{
+				{Type: "tool_result", ToolUseID: "call_1", Content: "file.txt"},
+			}},
+		},
+	}
+
+	items := toInput(req)
+	if len(items) != 4 {
+		t.Fatalf("expected 4 input items, got %d: %+v", len(items), items)
+	}
+	if items[0].Type != "message" || items[0].Content[0].Text != "I will check." {
+		t.Fatalf("assistant preamble not first: %+v", items[0])
+	}
+	if items[1].Type != "function_call" || items[1].CallID != "call_1" {
+		t.Fatalf("tool call not second: %+v", items[1])
+	}
+	if items[2].Type != "message" || items[2].Content[0].Text != "Done." {
+		t.Fatalf("assistant follow-up not third: %+v", items[2])
+	}
+	if items[3].Type != "function_call_output" || items[3].CallID != "call_1" {
+		t.Fatalf("tool result not fourth: %+v", items[3])
+	}
+}
+
 func TestToResponse_PreservesReasoningItems(t *testing.T) {
 	raw := []byte(`{"status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"secret"},{"type":"function_call","call_id":"call_1","name":"bash","arguments":"{\"cmd\":\"ls\"}"}]}`)
 	var out apiResponse

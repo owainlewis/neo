@@ -94,6 +94,59 @@ func TestCodex_StreamAssembly(t *testing.T) {
 	}
 }
 
+func TestCodex_StreamPreservesRawReasoning(t *testing.T) {
+	raw := []byte(`event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"secret"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"bash","arguments":"{\"cmd\":\"ls\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"status":"completed"}}
+
+data: [DONE]
+`)
+
+	resp, err := parseCodexStream(raw)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(resp.Content) != 2 {
+		t.Fatalf("expected reasoning + tool use, got %+v", resp.Content)
+	}
+	if resp.Content[0].Type != "raw" || string(resp.Content[0].Raw) != `{"type":"reasoning","id":"rs_1","encrypted_content":"secret"}` {
+		t.Fatalf("reasoning raw item not preserved: %+v", resp.Content[0])
+	}
+	if resp.Content[1].Type != "tool_use" || resp.Content[1].ID != "call_1" {
+		t.Fatalf("tool call not preserved: %+v", resp.Content[1])
+	}
+}
+
+func TestCodex_StreamIncompleteReturnsMaxTokens(t *testing.T) {
+	raw := []byte(`event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"partial"}]}}
+
+event: response.incomplete
+data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":4,"output_tokens":2}}}
+
+data: [DONE]
+`)
+
+	resp, err := parseCodexStream(raw)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if resp.StopReason != "max_tokens" {
+		t.Fatalf("stop reason: got %q want max_tokens", resp.StopReason)
+	}
+	if len(resp.Content) != 1 || resp.Content[0].Text != "partial" {
+		t.Fatalf("partial output was not preserved: %+v", resp.Content)
+	}
+	if resp.Usage.InputTokens != 4 || resp.Usage.OutputTokens != 2 {
+		t.Fatalf("usage not preserved: %+v", resp.Usage)
+	}
+}
+
 func TestCodex_StreamError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

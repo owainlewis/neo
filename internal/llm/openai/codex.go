@@ -192,12 +192,13 @@ func parseCodexStream(raw []byte) (*llm.Response, error) {
 			// the authoritative source of content on the Codex backend.
 			var item outputItem
 			if err := json.Unmarshal(ev.Item, &item); err == nil {
+				item.Raw = append(item.Raw[:0], ev.Item...)
 				items = append(items, item)
 			}
-		case "response.completed":
+		case "response.completed", "response.incomplete":
 			var out apiResponse
 			if err := json.Unmarshal(ev.Response, &out); err != nil {
-				return nil, fmt.Errorf("decode response.completed: %w", err)
+				return nil, fmt.Errorf("decode %s: %w", ev.Type, err)
 			}
 			completed = &out
 		case "response.failed", "error":

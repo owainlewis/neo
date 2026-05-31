@@ -255,6 +255,13 @@ func toInput(req llm.Request) []inputItem {
 		switch m.Role {
 		case llm.RoleAssistant:
 			var parts []contentPart
+			flushMessage := func() {
+				if len(parts) == 0 {
+					return
+				}
+				out = append(out, inputItem{Type: "message", Role: "assistant", Content: parts})
+				parts = nil
+			}
 			for _, b := range m.Content {
 				switch b.Type {
 				case "text":
@@ -262,6 +269,7 @@ func toInput(req llm.Request) []inputItem {
 						parts = append(parts, contentPart{Type: "output_text", Text: b.Text})
 					}
 				case "tool_use":
+					flushMessage()
 					args, _ := json.Marshal(b.Input)
 					out = append(out, inputItem{
 						Type:      "function_call",
@@ -271,13 +279,12 @@ func toInput(req llm.Request) []inputItem {
 					})
 				case "raw":
 					if len(b.Raw) > 0 {
+						flushMessage()
 						out = append(out, inputItem{Type: "raw", Raw: b.Raw})
 					}
 				}
 			}
-			if len(parts) > 0 {
-				out = append(out, inputItem{Type: "message", Role: "assistant", Content: parts})
-			}
+			flushMessage()
 
 		case llm.RoleUser, llm.RoleTool:
 			// A user message may carry tool_result blocks (the agent records tool
