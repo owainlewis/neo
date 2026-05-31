@@ -46,14 +46,9 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 	if model == "" {
 		model = DefaultModel
 	}
-	body, err := json.Marshal(apiRequest{
-		Model:           model,
-		Instructions:    systemText(req),
-		Input:           toInput(req),
-		Tools:           toAPITools(req.Tools),
-		MaxOutputTokens: req.MaxTokens,
-		Store:           false,
-	})
+	apiReq := buildAPIRequest(req, model, false, "", false)
+	debugJSON("request", apiReq)
+	body, err := json.Marshal(apiReq)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +90,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			continue
 		}
 		if status >= 400 {
+			debugHTTPResponse("openai", status, raw)
 			return nil, fmt.Errorf("openai %d: %s", status, string(raw))
 		}
 

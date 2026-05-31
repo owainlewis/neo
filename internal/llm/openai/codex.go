@@ -59,21 +59,9 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 	if model == "" {
 		model = DefaultCodexModel
 	}
-	// The Codex backend rejects store:true and requires a non-empty
-	// instructions string.
-	instructions := systemText(req)
-	if instructions == "" {
-		instructions = "You are a helpful assistant."
-	}
-	body, err := json.Marshal(apiRequest{
-		Model:        model,
-		Instructions: instructions,
-		Input:        toInput(req),
-		Tools:        toAPITools(req.Tools),
-		ToolChoice:   "auto",
-		Store:        false,
-		Stream:       true,
-	})
+	apiReq := buildAPIRequest(req, model, true, "auto", true)
+	debugJSON("codex request", apiReq)
+	body, err := json.Marshal(apiReq)
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +103,7 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 			continue
 		}
 		if status >= 400 {
+			debugHTTPResponse("openai-codex", status, raw)
 			return nil, fmt.Errorf("openai-codex %d: %s", status, string(raw))
 		}
 
