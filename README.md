@@ -210,6 +210,17 @@ internal/tools/         bash, read_file, write_file, edit_file implementations
 internal/tui/           Bubble Tea terminal UI
 ```
 
+## Developer Docs
+
+Developer docs live in `docs/developer/` and are generated from repository code and defaults:
+
+```bash
+go run ./cmd/neo-docs
+go run ./cmd/neo-docs --check
+```
+
+Neo is pointed at these docs through `AGENTS.md`, so local agent sessions can read the same developer reference humans use.
+
 ## Development
 
 [`just`](https://github.com/casey/just) is used as a task runner. All targets
