@@ -19,6 +19,18 @@ type ContentBlock struct {
 	ToolUseID string         `json:"tool_use_id,omitempty"`
 	Content   string         `json:"content,omitempty"`
 	IsError   bool           `json:"is_error,omitempty"`
+	// Source carries image data for blocks of Type "image". It maps to
+	// Anthropic's image source object (base64-encoded bytes + media type).
+	Source *ImageSource `json:"source,omitempty"`
+}
+
+// ImageSource is the payload for an image content block. Today only base64
+// inline data is supported (Type == "base64"); a URL variant can be added
+// later without touching callers.
+type ImageSource struct {
+	Type      string `json:"type"`       // "base64"
+	MediaType string `json:"media_type"` // e.g. "image/png"
+	Data      string `json:"data"`       // base64-encoded bytes
 }
 
 type Message struct {

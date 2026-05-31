@@ -1,6 +1,11 @@
 # neo default configuration.
 # Override by creating ./neo.yaml in a project, or ~/.neo/config.yaml globally.
 
+# LLM backend: "anthropic" (default) or "openai".
+# anthropic → requires ANTHROPIC_API_KEY
+# openai    → requires OPENAI_API_KEY
+provider: anthropic
+
 model: claude-opus-4-8
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag

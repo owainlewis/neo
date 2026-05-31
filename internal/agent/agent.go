@@ -69,10 +69,36 @@ func (a *Agent) SetEventHandler(fn func(Event)) {
 func (a *Agent) Transcript() []llm.Message { return cloneMessages(a.messages) }
 
 func (a *Agent) Send(ctx context.Context, userText string) (string, error) {
-	a.messages = append(a.messages, llm.Message{
-		Role:    llm.RoleUser,
-		Content: []llm.ContentBlock{{Type: "text", Text: userText}},
-	})
+	return a.SendWith(ctx, userText, nil)
+}
+
+// SendWith sends a user turn that may carry image attachments alongside the
+// text. Images are placed before the text block, which is how vision models
+// expect a "here's an image, now my question" message to be ordered. Paths
+// that can't be read are skipped with an inline note rather than aborting the
+// turn — attachments are best-effort.
+func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []string) (string, error) {
+	var content []llm.ContentBlock
+	var skipped []string
+	for _, p := range imagePaths {
+		blk, err := imageBlock(p)
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s (%v)", p, err))
+			continue
+		}
+		content = append(content, blk)
+	}
+	text := userText
+	if len(skipped) > 0 {
+		text = strings.TrimSpace(text + "\n\n[could not attach: " + strings.Join(skipped, "; ") + "]")
+	}
+	if text != "" {
+		content = append(content, llm.ContentBlock{Type: "text", Text: text})
+	}
+	if len(content) == 0 {
+		return "", nil
+	}
+	a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: content})
 	return a.run(ctx)
 }
 

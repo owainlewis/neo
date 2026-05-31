@@ -74,6 +74,51 @@ func TestLoad_RejectsInvalidYAML(t *testing.T) {
 	})
 }
 
+func TestLoad_DefaultsProviderToAnthropic(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Provider != "anthropic" {
+			t.Fatalf("expected default provider anthropic, got %q", cfg.Provider)
+		}
+	})
+}
+
+func TestLoad_OpenAIProviderGetsOpenAIDefaultModel(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: openai\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Provider != "openai" {
+			t.Fatalf("provider: got %q want openai", cfg.Provider)
+		}
+		if cfg.Model != defaultOpenAIModel {
+			t.Fatalf("model: got %q want %q", cfg.Model, defaultOpenAIModel)
+		}
+	})
+}
+
+func TestLoad_ExplicitModelOverridesProviderDefault(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: openai\nmodel: gpt-custom\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Model != "gpt-custom" {
+			t.Fatalf("model: got %q want gpt-custom", cfg.Model)
+		}
+	})
+}
+
 func TestFeatures_AgentsFileDefaultsOnWhenAbsent(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
