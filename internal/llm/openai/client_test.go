@@ -185,6 +185,33 @@ func TestToInput_ToolUseAndResult(t *testing.T) {
 	}
 }
 
+// TestToInput_EmptyToolOutputStillSerialized guards against the Responses API
+// 400 "Missing required parameter: 'input[N].output'": a tool that produces no
+// output must still emit an "output" field on its function_call_output item.
+func TestToInput_EmptyToolOutputStillSerialized(t *testing.T) {
+	req := llm.Request{Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call_1", Content: ""},
+		}},
+	}}
+
+	items := toInput(req)
+	if len(items) != 1 || items[0].Type != "function_call_output" {
+		t.Fatalf("want 1 function_call_output, got %+v", items)
+	}
+	b, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["output"]; !ok {
+		t.Fatalf("function_call_output must include 'output' even when empty; got %s", b)
+	}
+}
+
 func TestToInput_ImageBecomesInputImage(t *testing.T) {
 	req := llm.Request{
 		Messages: []llm.Message{

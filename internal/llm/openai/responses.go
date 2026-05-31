@@ -128,6 +128,18 @@ func (i inputItem) MarshalJSON() ([]byte, error) {
 		return i.Raw, nil
 	}
 	type alias inputItem
+	if i.Type == "function_call_output" {
+		// The Responses API requires `output` on every function_call_output
+		// item. The struct tag carries omitempty (so it stays absent on message
+		// and function_call items), but a tool that produces no output would
+		// then be dropped here and rejected with a 400
+		// (missing_required_parameter: input[N].output). Emit it explicitly —
+		// the shallower field shadows the embedded omitempty one.
+		return json.Marshal(struct {
+			alias
+			Output string `json:"output"`
+		}{alias(i), i.Output})
+	}
 	return json.Marshal(alias(i))
 }
 
