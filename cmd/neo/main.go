@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/auth"
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
@@ -54,6 +57,10 @@ func main() {
 			os.Exit(2)
 		}
 		resumeSession(ctx, os.Args[2])
+	case "login":
+		runLogin(ctx)
+	case "logout":
+		runLogout()
 	case "-h", "--help", "help":
 		printUsage()
 	default:
@@ -71,6 +78,8 @@ USAGE:
   neo chat           Interactive chat mode (explicit)
   neo sessions       List saved chat sessions
   neo resume <id>    Resume a saved chat session
+  neo login          Log in to an OpenAI ChatGPT/Codex subscription (OAuth)
+  neo logout         Remove stored subscription credentials
   neo help           Show this help
 
 CONFIG:
@@ -78,7 +87,12 @@ CONFIG:
   Select a backend with the "provider" key: "anthropic" (default) or "openai".
 
   ANTHROPIC_API_KEY    required when provider is "anthropic"
-  OPENAI_API_KEY       required when provider is "openai"`)
+  OPENAI_API_KEY       required when provider is "openai" with api_key auth
+
+  To use a ChatGPT subscription instead of an API key, set in neo.yaml:
+    provider: openai
+    openai_auth: subscription
+  then run "neo login".`)
 }
 
 func newRegistry() *tools.Registry {
@@ -139,7 +153,11 @@ func mustProvider(cfg *config.Config) llm.Provider {
 	)
 	switch cfg.Provider {
 	case "openai":
-		prov, err = openai.New()
+		if cfg.SubscriptionAuth() {
+			prov, err = newCodexProvider()
+		} else {
+			prov, err = openai.New()
+		}
 	case "anthropic", "":
 		prov, err = anthropic.New()
 	default:
@@ -151,6 +169,92 @@ func mustProvider(cfg *config.Config) llm.Provider {
 		os.Exit(1)
 	}
 	return prov
+}
+
+// newCodexProvider builds the ChatGPT/Codex subscription client from stored
+// OAuth credentials, erroring clearly if the user hasn't logged in.
+func newCodexProvider() (llm.Provider, error) {
+	store, err := auth.DefaultStore()
+	if err != nil {
+		return nil, err
+	}
+	if _, ok, err := store.Get(auth.ProviderOpenAICodex); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("not logged in to an OpenAI subscription: run `neo login`")
+	}
+	src := auth.NewTokenSource(store, auth.ProviderOpenAICodex)
+	return openai.NewCodex(codexCredentials{ts: src}), nil
+}
+
+// codexCredentials adapts auth.TokenSource to openai.CredentialSource.
+type codexCredentials struct{ ts *auth.TokenSource }
+
+func (c codexCredentials) Token(ctx context.Context) (accessToken, accountID string, err error) {
+	cr, err := c.ts.Token(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	return cr.AccessToken, cr.AccountID, nil
+}
+
+// runLogin performs the OpenAI subscription OAuth flow and stores the result.
+func runLogin(ctx context.Context) {
+	store, err := auth.DefaultStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "login: %v\n", err)
+		os.Exit(1)
+	}
+
+	creds, err := auth.LoginOpenAI(ctx, auth.LoginOptions{
+		OnAuthURL: func(url string) {
+			fmt.Println("Opening your browser to authorize neo with OpenAI.")
+			fmt.Println("If it doesn't open, visit this URL:")
+			fmt.Println("\n  " + url + "\n")
+			openBrowser(url)
+			fmt.Println("Waiting for authorization to complete…")
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "login failed: %v\n", err)
+		os.Exit(1)
+	}
+	if err := store.Set(auth.ProviderOpenAICodex, creds); err != nil {
+		fmt.Fprintf(os.Stderr, "save credentials: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Login complete. Credentials saved to " + store.Path() + ".")
+	fmt.Println("Set `provider: openai` and `openai_auth: subscription` in neo.yaml to use them.")
+}
+
+// runLogout removes stored subscription credentials.
+func runLogout() {
+	store, err := auth.DefaultStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logout: %v\n", err)
+		os.Exit(1)
+	}
+	if err := store.Delete(auth.ProviderOpenAICodex); err != nil {
+		fmt.Fprintf(os.Stderr, "logout: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Logged out of OpenAI subscription.")
+}
+
+// openBrowser best-effort opens url in the default browser. Failure is silent:
+// the URL is always printed as a fallback.
+func openBrowser(url string) {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+	case "windows":
+		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler"}
+	default:
+		cmd = "xdg-open"
+	}
+	_ = exec.Command(cmd, append(args, url)...).Start()
 }
 
 func runChat(ctx context.Context) {

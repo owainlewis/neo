@@ -93,17 +93,27 @@ auth is explicitly **out of scope** here and tracked separately (see NEO-3).
 
 ## NEO-3 — OpenAI OIDC / subscription auth (follow-up to NEO-2)
 
-**Status:** todo
+**Status:** done
 
-**Summary.** Support authenticating to OpenAI via an OIDC/OAuth flow so a
-ChatGPT subscription can be used instead of pay-per-token API credits.
+**Summary.** Authenticate to OpenAI via an OAuth/OIDC flow so a ChatGPT
+subscription can be used instead of pay-per-token API credits.
 
-**Motivation.** Reduce ongoing cost vs. API credits. Bigger than NEO-2: needs a
-browser-based auth flow, token storage, and refresh handling — none of which
-exists yet. Deliberately sequenced after NEO-2 proves the provider seam.
+**Delivered.**
+- `internal/auth`: authorization-code + PKCE login against `auth.openai.com`
+  (loopback callback on :1455), token refresh, JWT account-id extraction, and
+  `~/.neo/auth.json` credential storage (0600, atomic) with a refreshing
+  `TokenSource`.
+- `internal/llm/openai` migrated to the **Responses API** (Chat Completions
+  retired). The same translation drives two transports: the API-key `Client`
+  (`api.openai.com/v1/responses`) and the subscription `CodexClient`
+  (`chatgpt.com/backend-api/codex/responses`, OAuth + `chatgpt-account-id`
+  headers, SSE assembled into a blocking response).
+- CLI: `neo login` / `neo logout`; config `openai_auth: api_key|subscription`.
 
-**Scope (high level).**
-- A new auth flow (browser/device code), secure token storage, and refresh.
-- Wire the OpenAI provider to use the obtained token instead of `OPENAI_API_KEY`.
-
-**Notes.** Design ticket — scope to be refined once NEO-2 lands.
+**Caveats / follow-ups.**
+- The subscription path targets OpenAI's undocumented Codex backend with the
+  Codex client_id. It is unverified against the live service and may breach
+  OpenAI's ToS; treat as experimental. Default model `gpt-5-codex` is a guess —
+  override with `model:` if rejected.
+- Device-code (headless) login and force-refresh-on-401 are not implemented.
+- `auth.json` has no cross-process lock (fine for a single interactive CLI).
