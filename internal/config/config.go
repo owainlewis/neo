@@ -17,7 +17,9 @@ const (
 	userConfigDir     = ".neo"
 	userConfigName    = "config.yaml"
 
-	defaultModel = "claude-opus-4-8"
+	defaultModel       = "claude-opus-4-8"
+	defaultOpenAIModel = "gpt-4o"
+	defaultProvider    = "anthropic"
 )
 
 //go:embed defaults/neo.yaml
@@ -25,6 +27,8 @@ var embeddedConfigYAML []byte
 
 // Config is the parsed neo.yaml.
 type Config struct {
+	// Provider selects the LLM backend: "anthropic" (default) or "openai".
+	Provider string   `yaml:"provider"`
 	Model    string   `yaml:"model"`
 	Features Features `yaml:"features"`
 
@@ -103,10 +107,24 @@ func parseConfig(b []byte, source string) (*Config, error) {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", source, err)
 	}
+	if c.Provider == "" {
+		c.Provider = defaultProvider
+	}
 	if c.Model == "" {
-		c.Model = defaultModel
+		c.Model = defaultModelFor(c.Provider)
 	}
 	return &c, nil
+}
+
+// defaultModelFor returns the default model for a provider when the config
+// omits an explicit model.
+func defaultModelFor(provider string) string {
+	switch provider {
+	case "openai":
+		return defaultOpenAIModel
+	default:
+		return defaultModel
+	}
 }
 
 // Source describes where this Config was loaded from (a file path or

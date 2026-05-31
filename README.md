@@ -173,14 +173,15 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 **`neo.yaml` reference:**
 
 ```yaml
-# Model used by the agent. Default: claude-sonnet-4-6
-model: claude-sonnet-4-6
+# Model used by the agent. Default: claude-opus-4-8
+model: claude-opus-4-8
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.
 features:
   agents_file: true   # load AGENTS.md into the system prompt
   skills: true        # discover .neo/skills, advertise them, expand $name
+  prompt_caching: true # cache the static system prompt prefix
 ```
 
 ## Tools
@@ -220,9 +221,12 @@ just test         # go test ./...
 just test-verbose # go test -v ./...
 just install      # go install ./cmd/neo
 just fmt          # gofmt -w .
-just lint         # go vet ./...
+just lint         # go vet ./... && golangci-lint run
 just clean        # remove the ./neo binary
 ```
+
+Install [`golangci-lint`](https://golangci-lint.run/) to run `just lint`
+locally. CI runs the pinned linter version from `.github/workflows/ci.yml`.
 
 ## Releasing
 

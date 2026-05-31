@@ -57,6 +57,10 @@ will be revisited deliberately once the core agent is rock solid (see Later).
 - [x] **Prompt caching** — `cache_control` on the static system prompt; keep the
       dynamic sections (git, project context) separate to maximize cache hits.
 - [ ] **Second provider** — a non-Anthropic `Provider` to prove the seam holds.
+      *In progress: OpenAI (API key) — see `TICKETS.md` NEO-2. Subscription/OIDC
+      auth tracked separately as NEO-3.*
+- [ ] **`neo update`** — self-update the installed binary from GitHub Releases.
+      See `TICKETS.md` NEO-1.
 - [ ] **Model catalog** — context-window sizes and pricing to drive compaction
       thresholds and cost display.
 

@@ -41,11 +41,13 @@ var (
 			Background(lipgloss.Color("52")).
 			Padding(0, 1)
 
+	// styInputBar renders the chat input as a single solid-color block with
+	// no borders — matching the OpenAI Codex composer. The vertical padding
+	// keeps the one-row textarea from feeling cramped now that the framing
+	// borders are gone.
 	styInputBar = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderTop(true).
-			BorderBottom(true).
-			BorderForeground(colDim)
+			Background(colInputBg).
+			Padding(1, 1)
 
 	styFooter = lipgloss.NewStyle().
 			Foreground(colMuted)

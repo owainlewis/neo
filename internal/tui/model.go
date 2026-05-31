@@ -70,6 +70,11 @@ type model struct {
 	spin     spinner.Model
 	caption  string
 
+	// lastInputHeight is the textarea height the current layout was computed
+	// for. When the textarea grows/shrinks (DynamicHeight), this lets us
+	// detect the change and re-layout the viewport around it.
+	lastInputHeight int
+
 	blocks []block
 	md     *glamour.TermRenderer
 
@@ -113,12 +118,38 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	ta.Placeholder = defaultPlaceholder
 	ta.Prompt = "› "
 	ta.CharLimit = 0
+	// Let the textarea grow and shrink to fit its content. DynamicHeight
+	// accounts for soft-wrapped lines (a long unwrapped paragraph still
+	// expands), which a manual LineCount() height never could. The box stays
+	// between one row and inputMaxRows; past that it scrolls internally.
+	ta.DynamicHeight = true
+	ta.MinHeight = 1
+	ta.MaxHeight = inputMaxRows
 	ta.SetHeight(1)
 	ta.ShowLineNumbers = false
+	// Give the textarea the same solid background as its wrapping bar so the
+	// composer reads as one continuous block (Codex-style), with no seams
+	// between the textarea cells and the surrounding padding.
+	taStyles := ta.Styles()
+	for _, st := range []*textarea.StyleState{&taStyles.Focused, &taStyles.Blurred} {
+		st.Base = st.Base.Background(colInputBg)
+		st.Text = st.Text.Background(colInputBg)
+		st.Prompt = st.Prompt.Background(colInputBg)
+		st.Placeholder = st.Placeholder.Background(colInputBg)
+		st.CursorLine = st.CursorLine.Background(colInputBg)
+		st.EndOfBuffer = st.EndOfBuffer.Background(colInputBg)
+	}
+	ta.SetStyles(taStyles)
 	ta.Focus()
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
+	// Content is word-wrapped to the viewport width, so there is nothing to
+	// scroll to horizontally. A horizontal trackpad swipe emits a wheel-right
+	// (or shift+wheel) event that would otherwise slide the whole view
+	// sideways — which reads as a bug. Zeroing the horizontal step disables
+	// that motion while leaving vertical wheel scrolling intact.
+	vp.SetHorizontalStep(0)
 
 	sp := spinner.New()
 	sp.Spinner = statusSpinner
@@ -197,10 +228,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				break
 			}
+			rawInput := text
 			// Slash commands are parsed before the busy gate.
 			if strings.HasPrefix(text, "/") {
 				m.input.Reset()
-				m.resizeInput()
+				m.syncInputHeight()
 				m.handleSlashCommand(text)
 				break
 			}
@@ -209,8 +241,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.input.Reset()
-			m.resizeInput()
-			m.appendBlock(userBlock{text: text})
+			m.syncInputHeight()
+			// Pull any dragged/pasted image paths out of the input; they become
+			// attachments on the message, the rest stays as text.
+			text, images := extractImagePaths(text)
+			m.appendBlock(userBlock{text: rawInput})
+			if len(images) > 0 {
+				m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
+			}
 			// Expand any $name skill references: the user sees what they typed,
 			// the agent receives the expanded message.
 			sent, used := skills.Expand(text, m.skills)
@@ -221,13 +259,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.busySince = time.Now()
 			m.caption = randomCaption()
 			m.setDotColor(colDotThinking)
-			cmds = append(cmds, m.startSend(sent))
+			cmds = append(cmds, m.startSend(sent, images))
 		case "shift+enter", "alt+enter", "ctrl+j":
 			// Insert a newline. Most terminals don't distinguish shift+enter
 			// from enter without enhanced-key reporting; alt+enter and
 			// ctrl+j are the portable fallbacks.
 			m.input.InsertString("\n")
-			m.resizeInput()
+			m.syncInputHeight()
 		case "ctrl+l":
 			m.blocks = nil
 			m.refreshViewport()
@@ -235,7 +273,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
-			m.resizeInput()
+			m.syncInputHeight()
 		}
 
 	case agentEventMsg:
@@ -293,20 +331,26 @@ func (m *model) View() tea.View {
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		m.viewport.View(),
 		status,
+		"",
 		inputBar,
+		"",
 		footer,
 	)
 	return makeView(content)
 }
 
 // makeView wraps a rendered string with the v2 View settings we want for
-// every frame: alt screen + cell-motion mouse. KeyboardEnhancements defaults
-// to "basic key disambiguation", which gives shift+enter on terminals that
-// support the Kitty keyboard protocol (Kitty, Ghostty, WezTerm, recent iTerm2).
+// every frame: alt screen + cell-motion mouse, plus a request for keyboard
+// enhancements. ReportAlternateKeys asks terminals that speak the Kitty
+// keyboard protocol (Kitty, Ghostty, WezTerm, recent iTerm2) to disambiguate
+// shift+enter from a bare enter, which is what lets shift+enter insert a
+// newline there. On terminals without it, alt+enter / ctrl+j remain the
+// portable fallbacks.
 func makeView(content string) tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	v.KeyboardEnhancements.ReportAlternateKeys = true
 	return v
 }
 
@@ -315,7 +359,7 @@ func makeView(content string) tea.View {
 // shouldn't flicker numbers or trivia at the user.
 const elapsedThreshold = 3 * time.Second
 
-const defaultPlaceholder = "Ask neo anything…   ⌥↩ newline · ↩ send"
+const defaultPlaceholder = "Ask neo anything…   ↩ send"
 
 // handleSlashCommand parses slash commands. Called only when input begins
 // with '/'.
@@ -388,25 +432,20 @@ func (m *model) footerLine() string {
 // scrolls internally.
 const inputMaxRows = 8
 
-// resizeInput recomputes the textarea height from its current contents and
-// re-runs layout if the height changed.
-func (m *model) resizeInput() {
-	want := m.input.LineCount()
-	if want < 1 {
-		want = 1
-	}
-	if want > inputMaxRows {
-		want = inputMaxRows
-	}
-	if want != m.input.Height() {
-		m.input.SetHeight(want)
+// syncInputHeight re-runs layout when the textarea's (self-managed, soft-wrap
+// aware) height has changed since the last frame, so the viewport resizes to
+// make room. The textarea recalculates its own height on every edit because
+// DynamicHeight is enabled; we only react to the result.
+func (m *model) syncInputHeight() {
+	if m.input.Height() != m.lastInputHeight {
+		m.lastInputHeight = m.input.Height()
 		m.layout()
 	}
 }
 
 func (m *model) layout() {
-	inputHeight := m.input.Height() + 2 // textarea body + top/bottom border
-	chrome := inputHeight + 2           // status + footer lines
+	inputHeight := m.input.Height() + 2 // textarea body + top/bottom padding
+	chrome := inputHeight + 4           // status + footer lines + margin above/below input
 	vpH := m.height - chrome
 	if vpH < 3 {
 		vpH = 3
@@ -488,6 +527,8 @@ func (m *model) appendTranscript(messages []llm.Message) {
 					if strings.TrimSpace(block.Text) != "" {
 						textParts = append(textParts, block.Text)
 					}
+				case "image":
+					textParts = append(textParts, "[image]")
 				case "tool_result":
 					toolResults = append(toolResults, block)
 				}
@@ -514,11 +555,11 @@ func (m *model) appendTranscript(messages []llm.Message) {
 	m.refreshViewport()
 }
 
-func (m *model) startSend(text string) tea.Cmd {
+func (m *model) startSend(text string, images []string) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.sendCancel = cancel
 	return func() tea.Msg {
-		_, err := m.ag.Send(ctx, text)
+		_, err := m.ag.SendWith(ctx, text, images)
 		if m.afterSend != nil {
 			if saveErr := m.afterSend(); saveErr != nil && err == nil {
 				err = saveErr
@@ -526,6 +567,16 @@ func (m *model) startSend(text string) tea.Cmd {
 		}
 		return sendResultMsg{err: err}
 	}
+}
+
+// shortPaths renders attachment paths as just their base names for the inline
+// notice, so a long absolute path doesn't blow out the line.
+func shortPaths(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = filepath.Base(p)
+	}
+	return out
 }
 
 func gitBranch() string {

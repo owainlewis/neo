@@ -15,6 +15,7 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
+	"github.com/owainlewis/neo/internal/llm/openai"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
@@ -74,8 +75,10 @@ USAGE:
 
 CONFIG:
   Reads neo.yaml (cwd) → ~/.neo/config.yaml → embedded defaults.
+  Select a backend with the "provider" key: "anthropic" (default) or "openai".
 
-  ANTHROPIC_API_KEY    required`)
+  ANTHROPIC_API_KEY    required when provider is "anthropic"
+  OPENAI_API_KEY       required when provider is "openai"`)
 }
 
 func newRegistry() *tools.Registry {
@@ -129,8 +132,20 @@ func mustConfig() *config.Config {
 	return cfg
 }
 
-func mustProvider() *anthropic.Client {
-	prov, err := anthropic.New()
+func mustProvider(cfg *config.Config) llm.Provider {
+	var (
+		prov llm.Provider
+		err  error
+	)
+	switch cfg.Provider {
+	case "openai":
+		prov, err = openai.New()
+	case "anthropic", "":
+		prov, err = anthropic.New()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\" or \"openai\")\n", cfg.Provider)
+		os.Exit(1)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -174,7 +189,7 @@ func restoreSessionCWD(cwd string) {
 
 func runChatSession(ctx context.Context, store *session.Store, sess *session.Session) {
 	cfg := mustConfig()
-	prov := mustProvider()
+	prov := mustProvider(cfg)
 	reg := newRegistry()
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
