@@ -48,7 +48,12 @@ type apiRequest struct {
 // Completions, tool calls and their outputs are top-level items, not fields
 // nested inside a message — hence the discriminated shape.
 type inputItem struct {
-	Type string `json:"type"` // "message" | "function_call" | "function_call_output"
+	Type string `json:"type"` // "message" | "function_call" | "function_call_output" | provider-specific
+
+	// Raw is an opaque provider-specific Responses item (for example,
+	// reasoning). When present, it is marshaled verbatim so stateless
+	// conversations can replay items the API requires but neo does not interpret.
+	Raw json.RawMessage `json:"-"`
 
 	// type == "message"
 	Role    string        `json:"role,omitempty"` // user | assistant
@@ -72,6 +77,14 @@ type contentPart struct {
 	ImageURL string `json:"image_url,omitempty"` // input_image: a data: URL
 }
 
+func (i inputItem) MarshalJSON() ([]byte, error) {
+	if len(i.Raw) > 0 {
+		return i.Raw, nil
+	}
+	type alias inputItem
+	return json.Marshal(alias(i))
+}
+
 // apiTool is a Responses tool. Note the flat shape (name/description/parameters
 // at the top level), unlike Chat Completions which nests them under "function".
 type apiTool struct {
@@ -92,6 +105,34 @@ type apiResponse struct {
 	Error             *responseError `json:"error,omitempty"`
 }
 
+func (r *apiResponse) UnmarshalJSON(data []byte) error {
+	type wire struct {
+		Status            string            `json:"status"`
+		Output            []json.RawMessage `json:"output"`
+		IncompleteDetails *incomplete       `json:"incomplete_details,omitempty"`
+		Usage             *responseUsage    `json:"usage,omitempty"`
+		Error             *responseError    `json:"error,omitempty"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	r.Status = w.Status
+	r.IncompleteDetails = w.IncompleteDetails
+	r.Usage = w.Usage
+	r.Error = w.Error
+	r.Output = make([]outputItem, 0, len(w.Output))
+	for _, raw := range w.Output {
+		var item outputItem
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return err
+		}
+		item.Raw = append(item.Raw[:0], raw...)
+		r.Output = append(r.Output, item)
+	}
+	return nil
+}
+
 type incomplete struct {
 	Reason string `json:"reason"`
 }
@@ -110,8 +151,9 @@ type responseUsage struct {
 
 // outputItem is one entry in the response `output` array.
 type outputItem struct {
-	Type    string `json:"type"` // message | function_call | reasoning | ...
-	Role    string `json:"role"`
+	Type    string          `json:"type"` // message | function_call | reasoning | ...
+	Raw     json.RawMessage `json:"-"`
+	Role    string          `json:"role"`
 	Content []struct {
 		Type string `json:"type"` // output_text
 		Text string `json:"text"`
@@ -169,6 +211,10 @@ func toInput(req llm.Request) []inputItem {
 						Name:      b.Name,
 						Arguments: string(args),
 					})
+				case "raw":
+					if len(b.Raw) > 0 {
+						out = append(out, inputItem{Type: "raw", Raw: b.Raw})
+					}
 				}
 			}
 			if len(parts) > 0 {
@@ -259,9 +305,14 @@ func toResponse(out apiResponse) (*llm.Response, error) {
 				Name:  item.Name,
 				Input: input,
 			})
+		case "reasoning":
+			if len(item.Raw) > 0 {
+				content = append(content, llm.ContentBlock{Type: "raw", Raw: item.Raw})
+			}
 		}
-		// "reasoning" and other item types are ignored: neo presents blocking
-		// results and does not replay encrypted reasoning across turns.
+		// Other item types are ignored: neo only understands text and tools, plus
+		// opaque reasoning items that must be replayed for stateless Responses API
+		// conversations on reasoning models.
 	}
 
 	return &llm.Response{

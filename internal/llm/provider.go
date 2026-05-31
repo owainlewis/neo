@@ -1,6 +1,9 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 type Role string
 
@@ -19,6 +22,9 @@ type ContentBlock struct {
 	ToolUseID string         `json:"tool_use_id,omitempty"`
 	Content   string         `json:"content,omitempty"`
 	IsError   bool           `json:"is_error,omitempty"`
+	// Raw preserves provider-specific content blocks that must be replayed in
+	// later turns but are otherwise opaque to the core agent loop.
+	Raw json.RawMessage `json:"raw,omitempty"`
 	// Source carries image data for blocks of Type "image". It maps to
 	// Anthropic's image source object (base64-encoded bytes + media type).
 	Source *ImageSource `json:"source,omitempty"`

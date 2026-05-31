@@ -104,6 +104,61 @@ func TestComplete_ToolCallRoundTrip(t *testing.T) {
 	}
 }
 
+func TestToInput_ReplaysRawReasoningBeforeToolResult(t *testing.T) {
+	reasoning := json.RawMessage(`{"type":"reasoning","id":"rs_1","encrypted_content":"secret"}`)
+	req := llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+				{Type: "raw", Raw: reasoning},
+				{Type: "tool_use", ID: "call_1", Name: "bash", Input: map[string]any{"cmd": "ls"}},
+			}},
+			{Role: llm.RoleUser, Content: []llm.ContentBlock{
+				{Type: "tool_result", ToolUseID: "call_1", Content: "file.txt"},
+			}},
+		},
+	}
+
+	body, err := json.Marshal(apiRequest{Model: "m", Input: toInput(req), Store: false})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	var got struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if len(got.Input) != 3 {
+		t.Fatalf("expected 3 input items, got %d: %s", len(got.Input), body)
+	}
+	if string(got.Input[0]) != string(reasoning) {
+		t.Fatalf("reasoning item was not replayed verbatim:\n got %s\nwant %s", got.Input[0], reasoning)
+	}
+}
+
+func TestToResponse_PreservesReasoningItems(t *testing.T) {
+	raw := []byte(`{"status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"secret"},{"type":"function_call","call_id":"call_1","name":"bash","arguments":"{\"cmd\":\"ls\"}"}]}`)
+	var out apiResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	resp, err := toResponse(out)
+	if err != nil {
+		t.Fatalf("toResponse: %v", err)
+	}
+	if len(resp.Content) != 2 {
+		t.Fatalf("expected reasoning + tool use, got %+v", resp.Content)
+	}
+	if resp.Content[0].Type != "raw" || string(resp.Content[0].Raw) != `{"type":"reasoning","id":"rs_1","encrypted_content":"secret"}` {
+		t.Fatalf("reasoning not preserved: %+v", resp.Content[0])
+	}
+	if resp.Content[1].Type != "tool_use" || resp.Content[1].ID != "call_1" {
+		t.Fatalf("tool call not preserved: %+v", resp.Content[1])
+	}
+}
+
 func TestToInput_ToolUseAndResult(t *testing.T) {
 	req := llm.Request{
 		Messages: []llm.Message{
