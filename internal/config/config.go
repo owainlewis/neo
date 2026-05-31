@@ -19,7 +19,12 @@ const (
 
 	defaultModel       = "claude-opus-4-8"
 	defaultOpenAIModel = "gpt-4o"
+	defaultCodexModel  = "gpt-5-codex"
 	defaultProvider    = "anthropic"
+
+	// OpenAI auth modes (the openai_auth config key).
+	OpenAIAuthAPIKey       = "api_key"
+	OpenAIAuthSubscription = "subscription"
 )
 
 //go:embed defaults/neo.yaml
@@ -28,9 +33,13 @@ var embeddedConfigYAML []byte
 // Config is the parsed neo.yaml.
 type Config struct {
 	// Provider selects the LLM backend: "anthropic" (default) or "openai".
-	Provider string   `yaml:"provider"`
-	Model    string   `yaml:"model"`
-	Features Features `yaml:"features"`
+	Provider string `yaml:"provider"`
+	// OpenAIAuth selects how the "openai" provider authenticates: "api_key"
+	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex OAuth via
+	// `neo login`). Ignored for other providers.
+	OpenAIAuth string   `yaml:"openai_auth"`
+	Model      string   `yaml:"model"`
+	Features   Features `yaml:"features"`
 
 	// source records where this config was loaded from (a file path or
 	// "embedded"); surfaced in diagnostics via Source().
@@ -110,17 +119,29 @@ func parseConfig(b []byte, source string) (*Config, error) {
 	if c.Provider == "" {
 		c.Provider = defaultProvider
 	}
+	if c.Provider == "openai" && c.OpenAIAuth == "" {
+		c.OpenAIAuth = OpenAIAuthAPIKey
+	}
 	if c.Model == "" {
-		c.Model = defaultModelFor(c.Provider)
+		c.Model = defaultModelFor(c.Provider, c.OpenAIAuth)
 	}
 	return &c, nil
 }
 
-// defaultModelFor returns the default model for a provider when the config
-// omits an explicit model.
-func defaultModelFor(provider string) string {
+// SubscriptionAuth reports whether the openai provider should authenticate via
+// a ChatGPT/Codex subscription rather than an API key.
+func (c *Config) SubscriptionAuth() bool {
+	return c.Provider == "openai" && c.OpenAIAuth == OpenAIAuthSubscription
+}
+
+// defaultModelFor returns the default model when the config omits an explicit
+// one, accounting for the openai subscription backend's distinct model ids.
+func defaultModelFor(provider, openAIAuth string) string {
 	switch provider {
 	case "openai":
+		if openAIAuth == OpenAIAuthSubscription {
+			return defaultCodexModel
+		}
 		return defaultOpenAIModel
 	default:
 		return defaultModel

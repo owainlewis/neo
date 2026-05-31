@@ -105,6 +105,40 @@ func TestLoad_OpenAIProviderGetsOpenAIDefaultModel(t *testing.T) {
 	})
 }
 
+func TestLoad_OpenAIDefaultsToAPIKeyAuth(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: openai\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.OpenAIAuth != OpenAIAuthAPIKey {
+			t.Fatalf("openai_auth: got %q want api_key", cfg.OpenAIAuth)
+		}
+		if cfg.SubscriptionAuth() {
+			t.Fatal("api_key auth must not report SubscriptionAuth")
+		}
+	})
+}
+
+func TestLoad_OpenAISubscriptionGetsCodexModel(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: openai\nopenai_auth: subscription\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if !cfg.SubscriptionAuth() {
+			t.Fatal("expected SubscriptionAuth to be true")
+		}
+		if cfg.Model != defaultCodexModel {
+			t.Fatalf("model: got %q want %q", cfg.Model, defaultCodexModel)
+		}
+	})
+}
+
 func TestLoad_ExplicitModelOverridesProviderDefault(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
