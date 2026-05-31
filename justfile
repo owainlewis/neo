@@ -41,9 +41,10 @@ clean:
 fmt:
     gofmt -w .
 
-# Run go vet
+# Run static checks
 lint:
     go vet ./...
+    golangci-lint run
 
 # Print the version that would be stamped (for debugging)
 print-version:
