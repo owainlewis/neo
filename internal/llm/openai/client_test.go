@@ -90,6 +90,9 @@ func TestComplete_ToolCallRoundTrip(t *testing.T) {
 	if captured.Store {
 		t.Fatalf("store must be false")
 	}
+	if len(captured.Include) != 1 || captured.Include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("encrypted reasoning include missing: %+v", captured.Include)
+	}
 
 	// Response translation: function_call -> tool_use, keyed by call_id.
 	if resp.StopReason != "tool_use" {
@@ -134,6 +137,31 @@ func TestToInput_ReplaysRawReasoningBeforeToolResult(t *testing.T) {
 	}
 	if string(got.Input[0]) != string(reasoning) {
 		t.Fatalf("reasoning item was not replayed verbatim:\n got %s\nwant %s", got.Input[0], reasoning)
+	}
+}
+
+func TestToInput_SkipsUnencryptedReasoning(t *testing.T) {
+	req := llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":"rs_legacy"}`)},
+				{Type: "tool_use", ID: "call_1", Name: "bash", Input: map[string]any{"cmd": "ls"}},
+			}},
+			{Role: llm.RoleUser, Content: []llm.ContentBlock{
+				{Type: "tool_result", ToolUseID: "call_1", Content: "file.txt"},
+			}},
+		},
+	}
+
+	items := toInput(req)
+	if len(items) != 2 {
+		t.Fatalf("expected legacy reasoning to be skipped, got %d items: %+v", len(items), items)
+	}
+	if items[0].Type != "function_call" || items[0].CallID != "call_1" {
+		t.Fatalf("tool call should remain after skipping reasoning: %+v", items[0])
+	}
+	if items[1].Type != "function_call_output" || items[1].CallID != "call_1" {
+		t.Fatalf("tool result should remain after skipping reasoning: %+v", items[1])
 	}
 }
 

@@ -41,6 +41,7 @@ type apiRequest struct {
 	Tools           []apiTool   `json:"tools,omitempty"`
 	ToolChoice      string      `json:"tool_choice,omitempty"`
 	MaxOutputTokens int         `json:"max_output_tokens,omitempty"`
+	Include         []string    `json:"include,omitempty"`
 	Store           bool        `json:"store"`
 	Stream          bool        `json:"stream,omitempty"`
 }
@@ -85,6 +86,7 @@ func buildAPIRequest(req llm.Request, model string, stream bool, toolChoice stri
 		Tools:           toAPITools(req.Tools),
 		ToolChoice:      toolChoice,
 		MaxOutputTokens: req.MaxTokens,
+		Include:         []string{"reasoning.encrypted_content"},
 		Store:           false,
 		Stream:          stream,
 	}
@@ -141,6 +143,20 @@ func (i inputItem) MarshalJSON() ([]byte, error) {
 		}{alias(i), i.Output})
 	}
 	return json.Marshal(alias(i))
+}
+
+func replayableRawItem(raw json.RawMessage) bool {
+	var meta struct {
+		Type             string `json:"type"`
+		EncryptedContent string `json:"encrypted_content"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return true
+	}
+	if meta.Type != "reasoning" {
+		return true
+	}
+	return meta.EncryptedContent != ""
 }
 
 // apiTool is a Responses tool. Note the flat shape (name/description/parameters
@@ -278,7 +294,7 @@ func toInput(req llm.Request) []inputItem {
 						Arguments: string(args),
 					})
 				case "raw":
-					if len(b.Raw) > 0 {
+					if len(b.Raw) > 0 && replayableRawItem(b.Raw) {
 						flushMessage()
 						out = append(out, inputItem{Type: "raw", Raw: b.Raw})
 					}
