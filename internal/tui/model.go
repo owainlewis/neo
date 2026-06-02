@@ -69,6 +69,7 @@ type model struct {
 	input    textarea.Model
 	spin     spinner.Model
 	caption  string
+	picker   commandPicker
 
 	// lastInputHeight is the textarea height the current layout was computed
 	// for. When the textarea grows/shrinks (DynamicHeight), this lets us
@@ -219,6 +220,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "esc":
+			if m.picker.visible {
+				m.dismissSlashPicker()
+				m.layout()
+				break
+			}
 			// Soft interrupt: cancel the in-flight turn without quitting.
 			if m.busy && m.sendCancel != nil {
 				m.sendCancel()
@@ -228,10 +234,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				break
 			}
+			if m.picker.visible && m.acceptSlashPicker(false) {
+				m.syncInputHeight()
+				m.layout()
+				break
+			}
 			rawInput := text
 			// Slash commands are parsed before the busy gate.
 			if strings.HasPrefix(text, "/") {
 				m.input.Reset()
+				m.hideSlashPicker()
+				m.layout()
 				m.syncInputHeight()
 				m.handleSlashCommand(text)
 				break
@@ -241,6 +254,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.input.Reset()
+			m.hideSlashPicker()
+			m.layout()
 			m.syncInputHeight()
 			// Pull any dragged/pasted image paths out of the input; they become
 			// attachments on the message, the rest stays as text.
@@ -265,6 +280,38 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// from enter without enhanced-key reporting; alt+enter and
 			// ctrl+j are the portable fallbacks.
 			m.input.InsertString("\n")
+			m.updateSlashPicker()
+			m.syncInputHeight()
+		case "up":
+			if m.picker.visible {
+				m.moveSlashPickerSelection(-1)
+				break
+			}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			cmds = append(cmds, cmd)
+			m.updateSlashPicker()
+			m.syncInputHeight()
+		case "down":
+			if m.picker.visible {
+				m.moveSlashPickerSelection(1)
+				break
+			}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			cmds = append(cmds, cmd)
+			m.updateSlashPicker()
+			m.syncInputHeight()
+		case "tab":
+			if m.picker.visible && m.acceptSlashPicker(true) {
+				m.syncInputHeight()
+				m.layout()
+				break
+			}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			cmds = append(cmds, cmd)
+			m.updateSlashPicker()
 			m.syncInputHeight()
 		case "ctrl+l":
 			m.blocks = nil
@@ -273,6 +320,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
+			m.updateSlashPicker()
 			m.syncInputHeight()
 		}
 
@@ -326,16 +374,21 @@ func (m *model) View() tea.View {
 
 	status := m.statusLine()
 	footer := m.footerLine()
+	picker := m.slashPickerView()
 	inputBar := styInputBar.Width(m.width).Render(m.input.View())
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
+	parts := []string{
 		m.viewport.View(),
 		status,
 		"",
 		inputBar,
-		"",
-		footer,
-	)
+	}
+	if picker != "" {
+		parts = append(parts, picker)
+	}
+	parts = append(parts, "", footer)
+
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return makeView(content)
 }
 
@@ -445,7 +498,11 @@ func (m *model) syncInputHeight() {
 
 func (m *model) layout() {
 	inputHeight := m.input.Height() + 2 // textarea body + top/bottom padding
-	chrome := inputHeight + 4           // status + footer lines + margin above/below input
+	pickerHeight := 0
+	if m.picker.visible && len(m.picker.matches) > 0 {
+		pickerHeight = len(m.picker.matches) + 1
+	}
+	chrome := inputHeight + pickerHeight + 4 // status + footer lines + margin above/below input
 	vpH := m.height - chrome
 	if vpH < 3 {
 		vpH = 3
