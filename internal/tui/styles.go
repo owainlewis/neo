@@ -49,6 +49,16 @@ var (
 			Background(colInputBg).
 			Padding(1, 1)
 
+	styPicker = lipgloss.NewStyle().
+			Padding(0, 1)
+
+	styPickerSelected = lipgloss.NewStyle().
+				Foreground(colTool).
+				Bold(true)
+
+	styPickerCommand = lipgloss.NewStyle().
+				Bold(true)
+
 	styFooter = lipgloss.NewStyle().
 			Foreground(colMuted)
 )

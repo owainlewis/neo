@@ -10,10 +10,12 @@ import (
 // helpBlock renders the available slash commands and key bindings.
 type helpBlock struct{}
 
-var slashCommands = []struct {
+type slashCommand struct {
 	cmd  string
 	desc string
-}{
+}
+
+var slashCommands = []slashCommand{
 	{"/help", "show this list"},
 }
 
