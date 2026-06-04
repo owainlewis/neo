@@ -341,7 +341,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendCancel()
 			m.sendCancel = nil
 		}
-		if msg.err != nil && msg.err != context.Canceled && !errors.Is(msg.err, agent.ErrMaxTurns) {
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) && !errors.Is(msg.err, agent.ErrMaxTurns) {
 			m.appendBlock(errorBlock{err: msg.err})
 		}
 
