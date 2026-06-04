@@ -148,9 +148,11 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`cmd/neo/`" + ` | CLI entry point, command dispatch, chat session startup. |
 | ` + "`cmd/neo-docs/`" + ` | Deterministic developer documentation generator. |
 | ` + "`internal/agent/`" + ` | Core agent loop, transcript state, event model, tool-use continuation. |
+| ` + "`internal/auth/`" + ` | OpenAI ChatGPT/Codex OAuth login, token refresh, and stored subscription credentials. |
 | ` + "`internal/config/`" + ` | Config discovery, defaults, and feature flags. |
 | ` + "`internal/llm/`" + ` | Provider-neutral request/response types and system prompt blocks. |
 | ` + "`internal/llm/anthropic/`" + ` | Anthropic provider adapter. |
+| ` + "`internal/llm/openai/`" + ` | OpenAI provider adapters for API-key Responses API calls and ChatGPT/Codex subscription calls. |
 | ` + "`internal/projectctx/`" + ` | AGENTS.md discovery and prompt augmentation. |
 | ` + "`internal/session/`" + ` | File-backed session metadata and transcripts. |
 | ` + "`internal/skills/`" + ` | Skill discovery, catalog rendering, and $name expansion. |
@@ -161,11 +163,12 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 ## Chat Startup Flow
 
 1. ` + "`cmd/neo`" + ` loads config.
-2. The CLI creates or loads a session from ` + "`internal/session`" + `.
-3. Skills and AGENTS.md context are discovered when enabled.
-4. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
-5. ` + "`agent.New`" + ` receives provider, tools, system prompt, and optional restored messages.
-6. ` + "`tui.Run`" + ` owns user interaction and saves the transcript after each send.
+2. ` + "`mustProvider`" + ` selects Anthropic or OpenAI. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored OAuth credentials.
+3. The CLI creates or loads a session from ` + "`internal/session`" + `.
+4. Skills and AGENTS.md context are discovered when enabled.
+5. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
+6. ` + "`agent.New`" + ` receives provider, tools, system prompt, and optional restored messages.
+7. ` + "`tui.Run`" + ` owns user interaction and saves the transcript after each send.
 
 ## Agent Loop Contract
 
@@ -184,15 +187,21 @@ func cliPage() string {
 | ` + "`neo chat`" + ` | Open interactive chat mode explicitly. |
 | ` + "`neo sessions`" + ` | List saved chat sessions. |
 | ` + "`neo resume <id>`" + ` | Resume a saved chat session. |
+| ` + "`neo login`" + ` | Log in to an OpenAI ChatGPT/Codex subscription with OAuth. |
+| ` + "`neo logout`" + ` | Remove stored OpenAI subscription credentials. |
 | ` + "`neo help`" + ` | Print usage. |
 
 ## Environment
 
-` + "`ANTHROPIC_API_KEY`" + ` is required by the Anthropic provider.
+- ` + "`ANTHROPIC_API_KEY`" + ` is required when ` + "`provider: anthropic`" + `.
+- ` + "`OPENAI_API_KEY`" + ` is required when ` + "`provider: openai`" + ` uses ` + "`openai_auth: api_key`" + `.
+- ` + "`openai_auth: subscription`" + ` uses stored ChatGPT/Codex OAuth credentials created by ` + "`neo login`" + ` instead of an API key.
 
 ## Runtime Notes
 
 - ` + "`neo`" + ` with no subcommand defaults to chat.
+- ` + "`neo login`" + ` opens an OpenAI authorization URL, receives the loopback callback, and stores refreshable subscription credentials in ` + "`~/.neo/auth.json`" + ` with file permissions intended to protect secrets.
+- ` + "`neo logout`" + ` deletes the stored OpenAI subscription credential entry.
 - Resuming a session attempts to change into the saved session cwd. If unavailable, Neo warns and stays in the current directory.
 - Session saves happen after each user turn through the TUI ` + "`WithAfterSend`" + ` callback.
 `
@@ -214,6 +223,16 @@ First hit wins. Config files are not merged.
 ` + "```yaml" + `
 ` + strings.TrimSpace(configYAML) + `
 ` + "```" + `
+
+## Provider Selection
+
+| Config | Auth source | Provider adapter |
+| --- | --- | --- |
+| ` + "`provider: anthropic`" + ` | ` + "`ANTHROPIC_API_KEY`" + ` | ` + "`internal/llm/anthropic`" + ` |
+| ` + "`provider: openai`" + ` with ` + "`openai_auth: api_key`" + ` | ` + "`OPENAI_API_KEY`" + ` | ` + "`internal/llm/openai.Client`" + ` |
+| ` + "`provider: openai`" + ` with ` + "`openai_auth: subscription`" + ` | ChatGPT/Codex OAuth credentials from ` + "`~/.neo/auth.json`" + ` | ` + "`internal/llm/openai.CodexClient`" + ` |
+
+Subscription credentials are created with ` + "`neo login`" + ` and removed with ` + "`neo logout`" + `. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 
 ## Feature Flags
 
