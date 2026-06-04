@@ -36,6 +36,16 @@ features:
   prompt_caching: true # cache_control the static system prompt prefix to cut input cost
 ```
 
+## Provider Selection
+
+| Config | Auth source | Provider adapter |
+| --- | --- | --- |
+| `provider: anthropic` | `ANTHROPIC_API_KEY` | `internal/llm/anthropic` |
+| `provider: openai` with `openai_auth: api_key` | `OPENAI_API_KEY` | `internal/llm/openai.Client` |
+| `provider: openai` with `openai_auth: subscription` | ChatGPT/Codex OAuth credentials from `~/.neo/auth.json` | `internal/llm/openai.CodexClient` |
+
+Subscription credentials are created with `neo login` and removed with `neo logout`. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
+
 ## Feature Flags
 
 Each feature flag is tri-state in Go: absent means use the built-in default, while explicit `false` disables that capability.

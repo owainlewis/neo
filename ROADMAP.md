@@ -28,6 +28,8 @@ will be revisited deliberately once the core agent is rock solid (see Later).
       writes, strict single-match edits, per-step tool whitelisting.
 - [x] **Anthropic provider** — `Provider` interface with one implementation.
       Exponential backoff + jitter on 429/5xx, respects `Retry-After` (cap 30s).
+- [x] **OpenAI provider** — API-key Responses API adapter plus experimental
+      ChatGPT/Codex subscription auth via `neo login` / `neo logout`.
 - [x] **Config** — `neo.yaml` → `~/.neo/config.yaml` → embedded default, with
       tri-state feature flags for layered capabilities.
 - [x] **AGENTS.md loading** — `internal/projectctx` discovers project + global
@@ -56,9 +58,6 @@ will be revisited deliberately once the core agent is rock solid (see Later).
 
 - [x] **Prompt caching** — `cache_control` on the static system prompt; keep the
       dynamic sections (git, project context) separate to maximize cache hits.
-- [ ] **Second provider** — a non-Anthropic `Provider` to prove the seam holds.
-      *In progress: OpenAI (API key) — see `TICKETS.md` NEO-2. Subscription/OIDC
-      auth tracked separately as NEO-3.*
 - [ ] **`neo update`** — self-update the installed binary from GitHub Releases.
       See `TICKETS.md` NEO-1.
 - [ ] **Model catalog** — context-window sizes and pricing to drive compaction

@@ -51,23 +51,24 @@ discoverable command and keeps users current.
 
 ## NEO-2 — OpenAI provider (API key)
 
-**Status:** in-progress
+**Status:** done
 
 **Summary.** Add a second `llm.Provider` implementation backed by the OpenAI API
 (API-key auth) to prove the provider seam holds and to give users an alternative
 to Anthropic API credits.
 
-**Motivation.** The roadmap's "Second provider" item. The `llm.Provider`
-interface (`internal/llm/provider.go`) is already provider-agnostic; this ticket
-exercises that seam with a real second implementation. OIDC / subscription-based
-auth is explicitly **out of scope** here and tracked separately (see NEO-3).
+**Motivation.** This delivered the roadmap's second provider item. The
+`llm.Provider` interface (`internal/llm/provider.go`) is already
+provider-agnostic; this ticket exercises that seam with a real second
+implementation. OIDC / subscription-based auth was explicitly **out of scope**
+here and delivered separately in NEO-3.
 
-**Scope.**
+**Delivered.**
 - New package `internal/llm/openai` with a `Client` implementing
   `llm.Provider` (`Name()` + `Complete()`).
-- Translate `llm.Request` → OpenAI Chat Completions (or Responses) request and
+- Translate `llm.Request` → OpenAI Responses API requests and
   the response back into `llm.Response`, including:
-  - system prompt (flatten `SystemBlocks` since OpenAI has no cache breakpoints),
+  - system prompt (flatten `SystemBlocks` for OpenAI),
   - multi-turn messages with tool calls (`tool_use` / `tool_result` mapping),
   - tool specs (`ToolSpec` → OpenAI `tools` / `function` schema),
   - token usage accounting into `llm.Usage` (cache fields zero).
