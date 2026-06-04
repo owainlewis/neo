@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image/color"
 	"os"
@@ -340,7 +341,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendCancel()
 			m.sendCancel = nil
 		}
-		if msg.err != nil && msg.err != context.Canceled {
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) && !errors.Is(msg.err, agent.ErrMaxTurns) {
 			m.appendBlock(errorBlock{err: msg.err})
 		}
 
@@ -567,6 +568,8 @@ func (m *model) handleEvent(e agent.Event) {
 		m.currentTool = nil
 	case agent.EventError:
 		m.appendBlock(errorBlock{err: e.Err})
+	case agent.EventMaxTurnsReached:
+		m.appendBlock(maxTurnsBlock{limit: e.MaxTurns})
 	case agent.EventDone:
 		// handled when sendResultMsg arrives
 	}

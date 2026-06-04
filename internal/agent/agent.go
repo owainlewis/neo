@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,20 +13,24 @@ import (
 type EventKind string
 
 const (
-	EventAssistantText EventKind = "assistant_text"
-	EventToolCall      EventKind = "tool_call"
-	EventToolResult    EventKind = "tool_result"
-	EventDone          EventKind = "done"
-	EventError         EventKind = "error"
+	EventAssistantText   EventKind = "assistant_text"
+	EventToolCall        EventKind = "tool_call"
+	EventToolResult      EventKind = "tool_result"
+	EventDone            EventKind = "done"
+	EventError           EventKind = "error"
+	EventMaxTurnsReached EventKind = "max_turns_reached"
 )
 
+var ErrMaxTurns = errors.New("max turns reached")
+
 type Event struct {
-	Kind    EventKind
-	Text    string
-	Name    string
-	Args    map[string]any
-	IsError bool // set on EventToolResult when the tool returned an error
-	Err     error
+	Kind     EventKind
+	Text     string
+	Name     string
+	Args     map[string]any
+	MaxTurns int
+	IsError  bool // set on EventToolResult when the tool returned an error
+	Err      error
 }
 
 type Config struct {
@@ -155,7 +160,8 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			return strings.TrimSpace(finalText.String()), nil
 		}
 	}
-	return strings.TrimSpace(finalText.String()), fmt.Errorf("max turns reached")
+	a.emit(Event{Kind: EventMaxTurnsReached, MaxTurns: a.cfg.MaxTurns, Err: ErrMaxTurns})
+	return strings.TrimSpace(finalText.String()), ErrMaxTurns
 }
 
 func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) (string, bool) {

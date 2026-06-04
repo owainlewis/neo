@@ -27,3 +27,10 @@ func TestTextBlockRenderTrimsMarkdownEdgeNewlines(t *testing.T) {
 		t.Fatalf("rendered text missing content: %q", out)
 	}
 }
+
+func TestMaxTurnsBlockRenderShowsLimitAndContinuationHint(t *testing.T) {
+	out := plain(maxTurnsBlock{limit: 50}.render(80, nil))
+	if want := "hit turn limit (50). Reply to continue."; !strings.Contains(out, want) {
+		t.Fatalf("rendered block missing %q: %q", want, out)
+	}
+}
