@@ -160,6 +160,12 @@ func (EditFile) Run(ctx context.Context, input map[string]any) (string, error) {
 // atomicWrite writes content via a sibling temp file + rename, so a crash
 // mid-write cannot leave a half-written file at path.
 func atomicWrite(path string, content []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -184,7 +190,7 @@ func atomicWrite(path string, content []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
+	if err := os.Chmod(tmpName, mode); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpName, path); err != nil {
