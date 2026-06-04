@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -127,6 +128,57 @@ func TestAgent_ProviderErrorLeavesTranscriptClean(t *testing.T) {
 		t.Fatal("expected error from provider")
 	}
 	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_MaxTurnsReturnsSentinelWithPartialText(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		textAndToolUse("first partial", "call_1"),
+		textAndToolUse("second partial", "call_2"),
+	}}
+	var events []Event
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(echoTool{}),
+		MaxTurns: 2,
+		OnEvent: func(e Event) {
+			events = append(events, e)
+		},
+	})
+
+	out, err := ag.Send(context.Background(), "hi")
+	if !errors.Is(err, ErrMaxTurns) {
+		t.Fatalf("expected ErrMaxTurns, got %v", err)
+	}
+	if out != "first partial\nsecond partial" {
+		t.Fatalf("expected accumulated partial text, got %q", out)
+	}
+	if got := len(prov.Calls); got != 2 {
+		t.Fatalf("provider calls = %d, want 2", got)
+	}
+	if !sawMaxTurnsEvent(events, 2) {
+		t.Fatalf("missing max-turns event in %#v", events)
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func textAndToolUse(text, id string) llm.Response {
+	return llm.Response{
+		Content: []llm.ContentBlock{
+			{Type: "text", Text: text},
+			{Type: "tool_use", ID: id, Name: "echo", Input: map[string]any{"text": "again"}},
+		},
+		StopReason: "tool_use",
+	}
+}
+
+func sawMaxTurnsEvent(events []Event, limit int) bool {
+	for _, event := range events {
+		if event.Kind == EventMaxTurnsReached && event.MaxTurns == limit && errors.Is(event.Err, ErrMaxTurns) {
+			return true
+		}
+	}
+	return false
 }
 
 func assertToolUseResultsPaired(t *testing.T, msgs []llm.Message) {

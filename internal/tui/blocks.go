@@ -108,6 +108,16 @@ func (b errorBlock) render(width int, _ *glamour.TermRenderer) string {
 	return styErr.Render("! " + b.err.Error())
 }
 
+type maxTurnsBlock struct{ limit int }
+
+func (b maxTurnsBlock) render(width int, _ *glamour.TermRenderer) string {
+	msg := "hit turn limit. Reply to continue."
+	if b.limit > 0 {
+		msg = fmt.Sprintf("hit turn limit (%d). Reply to continue.", b.limit)
+	}
+	return styCardWarn.Width(width - 2).Render(msg)
+}
+
 // toolCardContent returns a header line and an optional body for the tool card.
 func toolCardContent(name string, args map[string]any) (string, string) {
 	switch name {
