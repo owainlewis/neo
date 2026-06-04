@@ -27,7 +27,14 @@ top as independent, feature-flagged modules.
 
 ## Quick Start
 
-**Prerequisites:** An [Anthropic API key](https://console.anthropic.com/).
+**Prerequisites:** Choose one model backend:
+
+- Anthropic: create an [Anthropic API key](https://console.anthropic.com/) and
+  set `ANTHROPIC_API_KEY`.
+- OpenAI API key: create an [OpenAI API key](https://platform.openai.com/api-keys),
+  set `provider: openai`, and set `OPENAI_API_KEY`.
+- OpenAI subscription: set `provider: openai` and
+  `openai_auth: subscription`, then run `neo login`.
 
 ### One-line install (recommended)
 
@@ -67,6 +74,11 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ./neo                               # opens the chat TUI (default)
 ```
 
+For OpenAI API-key auth, create `neo.yaml` with `provider: openai` and set
+`OPENAI_API_KEY`. For OpenAI subscription auth, create `neo.yaml` with
+`provider: openai` and `openai_auth: subscription`, then run `./neo login`
+before starting chat.
+
 `just build` stamps the current git description into the binary as the
 version shown on the splash screen (use `just print-version` to preview).
 
@@ -91,6 +103,10 @@ neo help
 # Saved sessions
 neo sessions
 neo resume <session-id>
+
+# OpenAI subscription auth
+neo login
+neo logout
 ```
 
 ### Commands
@@ -100,6 +116,8 @@ neo resume <session-id>
 | `neo` / `neo chat` | Open the interactive terminal coding agent |
 | `neo sessions` | List saved chat sessions |
 | `neo resume <id>` | Resume a saved chat session |
+| `neo login` | Log in to an OpenAI ChatGPT/Codex subscription |
+| `neo logout` | Remove stored OpenAI subscription credentials |
 | `neo help` | Show CLI help |
 
 ## Sessions
@@ -164,16 +182,55 @@ Neo looks for a config file in this order:
 2. `~/.neo/config.yaml` — user config
 3. Embedded defaults — no file required to get started
 
-The only required environment variable is `ANTHROPIC_API_KEY`.
+Neo defaults to Anthropic. Use `provider: openai` to switch to OpenAI.
+
+Anthropic setup:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
+OpenAI API-key setup:
+
+```yaml
+provider: openai
+openai_auth: api_key
+```
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+OpenAI subscription setup:
+
+```yaml
+provider: openai
+openai_auth: subscription
+```
+
+```bash
+neo login
+```
+
+Use `neo logout` to remove stored subscription credentials.
+
 **`neo.yaml` reference:**
 
 ```yaml
-# Model used by the agent. Default: claude-opus-4-8
+# LLM backend: "anthropic" (default) or "openai".
+# anthropic -> requires ANTHROPIC_API_KEY
+# openai    -> uses the Responses API; auth via openai_auth.
+provider: anthropic
+
+# How the "openai" provider authenticates:
+#   api_key      -> uses OPENAI_API_KEY (default)
+#   subscription -> uses a ChatGPT/Codex subscription via OAuth; run `neo login`
+openai_auth: api_key
+
+# Model used by the agent. Defaults by provider/auth mode:
+#   anthropic                -> claude-opus-4-8
+#   openai + api_key         -> gpt-4o
+#   openai + subscription    -> gpt-5-codex
 model: claude-opus-4-8
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
@@ -200,9 +257,10 @@ The agent has four built-in tools:
 ```text
 cmd/neo/                CLI entry point and command dispatch
 internal/agent/         Core agent loop and event model
+internal/auth/          OpenAI subscription OAuth and credential storage
 internal/config/        Config loading and feature flags
 internal/config/defaults/   Embedded neo.yaml
-internal/llm/           Provider interface + Anthropic client
+internal/llm/           Provider interface + Anthropic and OpenAI adapters
 internal/projectctx/    AGENTS.md discovery and system-prompt injection
 internal/session/       Saved session metadata and transcripts
 internal/skills/        skill discovery, catalog, and $name expansion
