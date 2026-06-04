@@ -80,12 +80,44 @@ func TestWriteFile_CreatesAndIsAtomic(t *testing.T) {
 	if string(b) != "hello" {
 		t.Fatalf("got %q", string(b))
 	}
+	if got := fileMode(t, path); got != 0o644 {
+		t.Fatalf("mode = %v, want %v", got, os.FileMode(0o644))
+	}
 	// No leftover temp files in the target directory.
 	entries, _ := os.ReadDir(filepath.Dir(path))
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), ".neo-write-") {
 			t.Fatalf("leftover temp file: %s", e.Name())
 		}
+	}
+}
+
+func TestWriteFile_PreservesExistingMode(t *testing.T) {
+	tests := []struct {
+		name string
+		mode os.FileMode
+	}{
+		{name: "executable", mode: 0o755},
+		{name: "private", mode: 0o600},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "f.txt")
+			writeFileWithMode(t, path, []byte("old"), tt.mode)
+
+			if _, err := (WriteFile{}).Run(context.Background(), map[string]any{
+				"path":    path,
+				"content": "new",
+			}); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			if got := fileMode(t, path); got != tt.mode {
+				t.Fatalf("mode = %v, want %v", got, tt.mode)
+			}
+		})
 	}
 }
 
@@ -104,6 +136,36 @@ func TestEditFile_UniqueMatch(t *testing.T) {
 	b, _ := os.ReadFile(path)
 	if string(b) != "alpha BRAVO charlie" {
 		t.Fatalf("got %q", string(b))
+	}
+}
+
+func TestEditFile_PreservesExistingMode(t *testing.T) {
+	tests := []struct {
+		name string
+		mode os.FileMode
+	}{
+		{name: "executable", mode: 0o755},
+		{name: "private", mode: 0o600},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "f.txt")
+			writeFileWithMode(t, path, []byte("alpha bravo charlie"), tt.mode)
+
+			if _, err := (EditFile{}).Run(context.Background(), map[string]any{
+				"path":       path,
+				"old_string": "bravo",
+				"new_string": "BRAVO",
+			}); err != nil {
+				t.Fatalf("edit: %v", err)
+			}
+
+			if got := fileMode(t, path); got != tt.mode {
+				t.Fatalf("mode = %v, want %v", got, tt.mode)
+			}
+		})
 	}
 }
 
@@ -140,4 +202,23 @@ func TestEditFile_MissingMatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when old_string is absent")
 	}
+}
+
+func writeFileWithMode(t *testing.T, path string, content []byte, mode os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, content, mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func fileMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Mode().Perm()
 }
