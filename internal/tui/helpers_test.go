@@ -5,6 +5,10 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
+
+	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/llm/llmtest"
+	"github.com/owainlewis/neo/internal/tools"
 )
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -20,12 +24,14 @@ func makeTestModel() *model {
 	ta.Focus()
 	ta.SetWidth(78)
 	return &model{
-		width:    80,
-		height:   24,
-		input:    ta,
-		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
-		modelTag: "test",
-		cwd:      "~",
-		branch:   "main",
+		width:          80,
+		height:         24,
+		ag:             agent.New(agent.Config{Model: "test", Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(tools.ReadFile{})}),
+		input:          ta,
+		viewport:       viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
+		modelTag:       "test",
+		cwd:            "~",
+		branch:         "main",
+		permissionMode: "ask",
 	}
 }

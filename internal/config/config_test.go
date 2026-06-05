@@ -226,3 +226,45 @@ func TestFeatures_PromptCachingDefaultsOnExplicitFalseDisables(t *testing.T) {
 		}
 	})
 }
+
+func TestPermissions_DefaultsToAsk(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Permissions.Mode != PermissionModeAsk {
+			t.Fatalf("permissions.mode = %q, want %q", cfg.Permissions.Mode, PermissionModeAsk)
+		}
+	})
+}
+
+func TestPermissions_AcceptsKnownModes(t *testing.T) {
+	for _, mode := range []string{PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly} {
+		t.Run(mode, func(t *testing.T) {
+			withTempDir(t, func(dir string) {
+				t.Setenv("HOME", dir)
+				writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\npermissions:\n  mode: "+mode+"\n")
+				cfg, err := Load()
+				if err != nil {
+					t.Fatalf("load: %v", err)
+				}
+				if cfg.Permissions.Mode != mode {
+					t.Fatalf("permissions.mode = %q, want %q", cfg.Permissions.Mode, mode)
+				}
+			})
+		})
+	}
+}
+
+func TestPermissions_RejectsUnknownMode(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\npermissions:\n  mode: nope\n")
+		if _, err := Load(); err == nil {
+			t.Fatal("expected invalid permissions.mode to fail")
+		}
+	})
+}

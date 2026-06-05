@@ -24,13 +24,18 @@ import (
 )
 
 type Options struct {
-	AfterSend func() error
+	AfterSend      func() error
+	PermissionMode string
 }
 
 type Option func(*Options)
 
 func WithAfterSend(fn func() error) Option {
 	return func(opts *Options) { opts.AfterSend = fn }
+}
+
+func WithPermissionMode(mode string) Option {
+	return func(opts *Options) { opts.PermissionMode = mode }
 }
 
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
@@ -49,12 +54,31 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 	// Pipe agent events directly into the Bubble Tea program. This avoids a
 	// hand-rolled channel pump and the back-pressure that came with it.
 	ag.SetEventHandler(func(e agent.Event) { p.Send(agentEventMsg{ev: e}) })
+	ag.SetApprover(func(ctx context.Context, req agent.ApprovalRequest) (bool, error) {
+		reply := make(chan bool, 1)
+		p.Send(approvalRequestMsg{req: req, reply: reply})
+		select {
+		case ok := <-reply:
+			return ok, nil
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	})
 	_, err = p.Run()
 	return err
 }
 
 type sendResultMsg struct{ err error }
 type agentEventMsg struct{ ev agent.Event }
+type approvalRequestMsg struct {
+	req   agent.ApprovalRequest
+	reply chan bool
+}
+
+type approvalState struct {
+	req   agent.ApprovalRequest
+	reply chan bool
+}
 
 type model struct {
 	ctx      context.Context
@@ -83,6 +107,7 @@ type model struct {
 	busy        bool
 	busySince   time.Time
 	currentTool *toolCallBlock
+	approval    *approvalState
 	quitting    bool
 
 	// cancel for the currently in-flight Send, if any.
@@ -96,7 +121,8 @@ type model struct {
 	// skills drives $name expansion of the user's input before it's sent.
 	skills []skills.Skill
 
-	afterSend func() error
+	afterSend      func() error
+	permissionMode string
 }
 
 func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
@@ -169,19 +195,20 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		version = "dev"
 	}
 	m := &model{
-		ctx:         ctx,
-		ag:          ag,
-		modelTag:    modelTag,
-		mdStyleName: styleName,
-		cwd:         cwd,
-		branch:      branch,
-		viewport:    vp,
-		input:       ta,
-		spin:        sp,
-		caption:     randomCaption(),
-		md:          md,
-		skills:      sk,
-		afterSend:   opts.AfterSend,
+		ctx:            ctx,
+		ag:             ag,
+		modelTag:       modelTag,
+		mdStyleName:    styleName,
+		cwd:            cwd,
+		branch:         branch,
+		viewport:       vp,
+		input:          ta,
+		spin:           sp,
+		caption:        randomCaption(),
+		md:             md,
+		skills:         sk,
+		afterSend:      opts.AfterSend,
+		permissionMode: opts.PermissionMode,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -213,6 +240,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 
 	case tea.KeyMsg:
+		if m.approval != nil {
+			switch msg.String() {
+			case "ctrl+c", "ctrl+d":
+				m.finishApproval(false)
+				if m.sendCancel != nil {
+					m.sendCancel()
+				}
+				m.quitting = true
+				return m, tea.Quit
+			case "y", "Y":
+				m.finishApproval(true)
+			case "n", "N", "esc":
+				m.finishApproval(false)
+			}
+			break
+		}
 		switch msg.String() {
 		case "ctrl+c", "ctrl+d":
 			if m.sendCancel != nil {
@@ -334,6 +377,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setDotColor(colDotThinking)
 		}
 
+	case approvalRequestMsg:
+		m.approval = &approvalState{req: msg.req, reply: msg.reply}
+		m.appendBlock(approvalBlock{req: msg.req})
+
 	case sendResultMsg:
 		m.busy = false
 		m.currentTool = nil
@@ -420,12 +467,59 @@ const defaultPlaceholder = "Ask neo anything…   ↩ send"
 func (m *model) handleSlashCommand(line string) {
 	parts := strings.Fields(line)
 	cmd := parts[0]
+	if m.busy && slashCommandRequiresIdle(cmd) {
+		m.appendBlock(errorBlock{err: fmt.Errorf("%s is unavailable while a turn is running", cmd)})
+		return
+	}
 	switch cmd {
 	case "/help":
 		m.appendBlock(helpBlock{})
+	case "/tools":
+		m.appendBlock(toolsBlock{specs: m.ag.ToolSpecs()})
+	case "/permissions":
+		mode := m.permissionMode
+		if mode == "" {
+			mode = "ask"
+		}
+		m.appendBlock(noticeBlock{text: "permissions: " + mode})
+	case "/tokens":
+		m.appendBlock(tokensBlock{usage: m.ag.Usage()})
+	case "/model":
+		m.appendBlock(noticeBlock{text: "model: " + m.modelTag})
+	case "/clear":
+		m.ag.Clear()
+		m.blocks = nil
+		m.refreshViewport()
+		if m.afterSend != nil {
+			if err := m.afterSend(); err != nil {
+				m.appendBlock(errorBlock{err: err})
+			}
+		}
 	default:
 		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: %s — try /help", cmd)})
 	}
+}
+
+func slashCommandRequiresIdle(cmd string) bool {
+	switch cmd {
+	case "/clear", "/tokens":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *model) finishApproval(ok bool) {
+	if m.approval == nil {
+		return
+	}
+	m.approval.reply <- ok
+	if ok {
+		m.appendBlock(noticeBlock{text: "approved " + m.approval.req.ToolName})
+	} else {
+		m.appendBlock(noticeBlock{text: "denied " + m.approval.req.ToolName})
+	}
+	m.approval = nil
 }
 
 // setDotColor swaps the spinner's foreground so the pulsing dot reflects

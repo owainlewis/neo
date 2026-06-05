@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/owainlewis/neo/internal/agent"
 )
 
 func TestHelpBlock_ListsHelpCommandAndKeys(t *testing.T) {
@@ -37,6 +40,114 @@ func TestSlashCommand_UnknownSuggestsHelp(t *testing.T) {
 	}
 	if !strings.Contains(eb.err.Error(), "/help") {
 		t.Fatalf("error should suggest /help, got %v", eb.err)
+	}
+}
+
+func TestSlashCommand_ToolsPermissionsTokensModelAndClear(t *testing.T) {
+	for _, tc := range []struct {
+		cmd  string
+		want string
+	}{
+		{"/tools", "read_file"},
+		{"/permissions", "permissions: ask"},
+		{"/tokens", "input: 0"},
+		{"/model", "model: test"},
+	} {
+		t.Run(tc.cmd, func(t *testing.T) {
+			m := makeTestModel()
+			m.handleSlashCommand(tc.cmd)
+			out := plain(m.blocks[0].render(80, nil))
+			if !strings.Contains(out, tc.want) {
+				t.Fatalf("%s output missing %q: %s", tc.cmd, tc.want, out)
+			}
+		})
+	}
+
+	m := makeTestModel()
+	m.blocks = append(m.blocks, noticeBlock{text: "x"})
+	m.handleSlashCommand("/clear")
+	if len(m.blocks) != 0 {
+		t.Fatalf("/clear left %d blocks", len(m.blocks))
+	}
+}
+
+func TestSlashCommand_ClearSavesSession(t *testing.T) {
+	m := makeTestModel()
+	calls := 0
+	m.afterSend = func() error {
+		calls++
+		return nil
+	}
+
+	m.handleSlashCommand("/clear")
+
+	if calls != 1 {
+		t.Fatalf("afterSend calls = %d, want 1", calls)
+	}
+}
+
+func TestSlashCommand_ClearShowsSaveError(t *testing.T) {
+	m := makeTestModel()
+	m.afterSend = func() error {
+		return fmt.Errorf("save failed")
+	}
+
+	m.handleSlashCommand("/clear")
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("expected save error block, got %d blocks", len(m.blocks))
+	}
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "save failed") {
+		t.Fatalf("unexpected error: %v", eb.err)
+	}
+}
+
+func TestSlashCommand_StatefulCommandsRequireIdle(t *testing.T) {
+	for _, cmd := range []string{"/clear", "/tokens"} {
+		t.Run(cmd, func(t *testing.T) {
+			m := makeTestModel()
+			m.busy = true
+			m.blocks = append(m.blocks, noticeBlock{text: "keep"})
+
+			m.handleSlashCommand(cmd)
+
+			if len(m.blocks) != 2 {
+				t.Fatalf("expected original block plus error, got %d", len(m.blocks))
+			}
+			if _, ok := m.blocks[0].(noticeBlock); !ok {
+				t.Fatalf("first block changed to %T", m.blocks[0])
+			}
+			eb, ok := m.blocks[1].(errorBlock)
+			if !ok {
+				t.Fatalf("expected errorBlock, got %T", m.blocks[1])
+			}
+			if !strings.Contains(eb.err.Error(), "while a turn is running") {
+				t.Fatalf("unexpected error: %v", eb.err)
+			}
+		})
+	}
+}
+
+func TestApprovalPromptRepliesFromKeypress(t *testing.T) {
+	m := makeTestModel()
+	reply := make(chan bool, 1)
+	m.Update(approvalRequestMsg{
+		req:   agent.ApprovalRequest{ToolName: "bash", Preview: "preview"},
+		reply: reply,
+	})
+	if m.approval == nil {
+		t.Fatal("expected pending approval")
+	}
+	m.Update(keyPress('y'))
+	if got := <-reply; !got {
+		t.Fatal("expected approval reply true")
+	}
+	if m.approval != nil {
+		t.Fatal("expected approval to clear")
 	}
 }
 
@@ -236,7 +347,7 @@ func TestSlashPicker_RendersBelowInput(t *testing.T) {
 
 	out := plain(m.View().Content)
 	inputIndex := strings.Index(out, "/")
-	pickerIndex := strings.Index(out, "→ help")
+	pickerIndex := strings.Index(out, "→ clear")
 	if inputIndex == -1 || pickerIndex == -1 {
 		t.Fatalf("expected input and picker in view: %s", out)
 	}

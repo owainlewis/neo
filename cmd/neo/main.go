@@ -19,11 +19,13 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/llm/openai"
+	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/tui"
+	"github.com/owainlewis/neo/internal/workspace"
 )
 
 // Version is overridable at build time via -ldflags "-X main.Version=...".
@@ -95,12 +97,14 @@ CONFIG:
   then run "neo login".`)
 }
 
-func newRegistry() *tools.Registry {
+func newRegistry(cwd, root string) *tools.Registry {
 	return tools.NewRegistry(
-		tools.Bash{Timeout: 2 * time.Minute},
+		tools.Bash{Timeout: 2 * time.Minute, CWD: cwd},
 		tools.ReadFile{},
 		tools.WriteFile{},
 		tools.EditFile{},
+		tools.Grep{Root: root},
+		tools.Glob{Root: root},
 	)
 }
 
@@ -294,9 +298,10 @@ func restoreSessionCWD(cwd string) {
 func runChatSession(ctx context.Context, store *session.Store, sess *session.Session) {
 	cfg := mustConfig()
 	prov := mustProvider(cfg)
-	reg := newRegistry()
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
+	root := workspace.Root(cwd)
+	reg := newRegistry(cwd, root)
 
 	if sess == nil {
 		var err error
@@ -322,6 +327,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		SystemBlocks: systemBlocks,
 		Provider:     prov,
 		Tools:        reg,
+		Policy:       permission.New(cfg.Permissions.Mode, root),
 		Messages:     sess.Messages,
 	})
 
@@ -332,7 +338,10 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		return store.Save(ctx, sess)
 	}
 
-	if err := tui.Run(ctx, ag, cfg.Model, Version, sk, tui.WithAfterSend(saveSession)); err != nil {
+	if err := tui.Run(ctx, ag, cfg.Model, Version, sk,
+		tui.WithAfterSend(saveSession),
+		tui.WithPermissionMode(cfg.Permissions.Mode),
+	); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

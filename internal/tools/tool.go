@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/owainlewis/neo/internal/llm"
 )
@@ -31,11 +32,21 @@ func (r *Registry) Get(name string) (Tool, bool) {
 }
 
 func (r *Registry) Specs() []llm.ToolSpec {
-	out := make([]llm.ToolSpec, 0, len(r.tools))
-	for _, t := range r.tools {
-		out = append(out, t.Spec())
+	names := r.Names()
+	out := make([]llm.ToolSpec, 0, len(names))
+	for _, name := range names {
+		out = append(out, r.tools[name].Spec())
 	}
 	return out
+}
+
+func (r *Registry) Names() []string {
+	names := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (r *Registry) Filter(names []string) *Registry {

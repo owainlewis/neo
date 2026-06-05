@@ -53,3 +53,44 @@ func TestRoot_FallsBackToCwdWhenNoRepo(t *testing.T) {
 		t.Fatalf("Root = %q, want cwd %q", got, abs)
 	}
 }
+
+func TestResolveWithinRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveWithin(root, filepath.Join(root, "link", "secret.txt")); err == nil {
+		t.Fatal("expected symlink escape to be rejected")
+	}
+}
+
+func TestResolveWithinRejectsNewFileUnderSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveWithin(root, filepath.Join(root, "link", "new.txt")); err == nil {
+		t.Fatal("expected new file under symlink escape to be rejected")
+	}
+}
+
+func TestResolveWithinAllowsMissingPathUnderRoot(t *testing.T) {
+	root := t.TempDir()
+	got, err := ResolveWithin(root, filepath.Join(root, "new", "file.txt"))
+	if err != nil {
+		t.Fatalf("ResolveWithin: %v", err)
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(realRoot, "new", "file.txt")
+	if got != want {
+		t.Fatalf("ResolveWithin = %q, want %q", got, want)
+	}
+}

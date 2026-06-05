@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
+	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -162,6 +165,116 @@ func TestAgent_MaxTurnsReturnsSentinelWithPartialText(t *testing.T) {
 	assertToolUseResultsPaired(t, ag.Transcript())
 }
 
+func TestAgent_ApprovalAllowsTool(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "pong"}),
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(echoTool{}),
+		Policy:   permission.New("ask", "."),
+		Approve: func(context.Context, ApprovalRequest) (bool, error) {
+			return true, nil
+		},
+	})
+	out, err := ag.Send(context.Background(), "ping")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if out != "done" {
+		t.Fatalf("out = %q", out)
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_ApprovalDenialBecomesToolError(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "pong"}),
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(echoTool{}),
+		Policy:   permission.New("ask", "."),
+		Approve: func(context.Context, ApprovalRequest) (bool, error) {
+			return false, nil
+		},
+	})
+	if _, err := ag.Send(context.Background(), "ping"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	msgs := ag.Transcript()
+	result := msgs[2].Content[0]
+	if !result.IsError || !strings.Contains(result.Content, "denied") {
+		t.Fatalf("tool result = %+v, want denial error", result)
+	}
+}
+
+func TestAgent_MissingApproverDeniesAskedTool(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "pong"}),
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(echoTool{}),
+		Policy:   permission.New("ask", "."),
+	})
+	if _, err := ag.Send(context.Background(), "ping"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	msgs := ag.Transcript()
+	result := msgs[2].Content[0]
+	if !result.IsError || !strings.Contains(result.Content, "no approver") {
+		t.Fatalf("tool result = %+v, want missing approver error", result)
+	}
+}
+
+func TestAgent_AccumulatesUsage(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{Content: []llm.ContentBlock{{Type: "text", Text: "one"}}, StopReason: "end_turn", Usage: llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}},
+	}}
+	ag := newTestAgent(t, prov)
+	if _, err := ag.Send(context.Background(), "hi"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	want := llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}
+	if got := ag.Usage(); got != want {
+		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+}
+
+func TestAgent_CancelledProviderReturnsContextCanceled(t *testing.T) {
+	ag := newTestAgent(t, cancelProvider{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ag.Send(ctx, "hi")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestAgent_CompactorRunsBeforeProvider(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("ok")}}
+	comp := &countingCompactor{}
+	ag := New(Config{
+		Model:     "test-model",
+		Provider:  prov,
+		Tools:     tools.NewRegistry(),
+		Compactor: comp,
+	})
+	if _, err := ag.Send(context.Background(), "hi"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if comp.calls != 1 {
+		t.Fatalf("compactor calls = %d, want 1", comp.calls)
+	}
+}
+
 func textAndToolUse(text, id string) llm.Response {
 	return llm.Response{
 		Content: []llm.ContentBlock{
@@ -201,4 +314,24 @@ func assertToolUseResultsPaired(t *testing.T, msgs []llm.Message) {
 		}
 		t.Fatalf("transcript has unmatched tool_use IDs: %s", strings.Join(ids, ","))
 	}
+}
+
+type cancelProvider struct{}
+
+func (cancelProvider) Name() string { return "cancel" }
+func (cancelProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	return nil, ctx.Err()
+}
+
+type countingCompactor struct {
+	compact.NoCompaction
+	calls int
+}
+
+func (c *countingCompactor) Compact(ctx context.Context, messages []llm.Message) ([]llm.Message, error) {
+	c.calls++
+	if len(messages) == 0 {
+		return nil, fmt.Errorf("expected user message before compaction")
+	}
+	return messages, nil
 }

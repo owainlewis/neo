@@ -8,6 +8,8 @@ Neo exposes a small built-in tool surface to the model.
 | --- | --- |
 | `bash` | Run a shell command via /bin/bash -lc. Returns combined stdout+stderr. Use for git, tests, builds, file inspection beyond Read. |
 | `edit_file` | Replace exactly one occurrence of old_string with new_string in a file. Fails if old_string is missing or appears more than once. |
+| `glob` | Find files under the workspace root using a glob pattern. Supports ** for recursive matches. |
+| `grep` | Search text files under the workspace with a regular expression. Returns file:line matches with optional context. |
 | `read_file` | Read a file from disk. Returns up to ~256KB. Use offset/limit (1-indexed line numbers) to page through larger files. |
 | `write_file` | Write content to a file, creating parent directories. Overwrites if exists. |
 
@@ -53,6 +55,64 @@ Replace exactly one occurrence of old_string with new_string in a file. Fails if
     "path",
     "old_string",
     "new_string"
+  ],
+  "type": "object"
+}
+```
+
+### `glob`
+
+Find files under the workspace root using a glob pattern. Supports ** for recursive matches.
+
+```json
+{
+  "properties": {
+    "max_matches": {
+      "description": "Maximum paths to return (optional, default 200)",
+      "type": "integer"
+    },
+    "path": {
+      "description": "Directory under the workspace root to search from (optional)",
+      "type": "string"
+    },
+    "pattern": {
+      "description": "Glob pattern such as **/*.go",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pattern"
+  ],
+  "type": "object"
+}
+```
+
+### `grep`
+
+Search text files under the workspace with a regular expression. Returns file:line matches with optional context.
+
+```json
+{
+  "properties": {
+    "context_lines": {
+      "description": "Number of context lines before and after each match (optional)",
+      "type": "integer"
+    },
+    "max_matches": {
+      "description": "Maximum matches to return (optional, default 200)",
+      "type": "integer"
+    },
+    "path": {
+      "description": "File or directory under the workspace root (optional)",
+      "type": "string"
+    },
+    "pattern": {
+      "description": "Regular expression to search for",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pattern"
   ],
   "type": "object"
 }

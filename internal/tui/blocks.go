@@ -7,6 +7,9 @@ import (
 
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/llm"
 )
 
 // block is one rendered unit in the scrollback.
@@ -118,6 +121,49 @@ func (b maxTurnsBlock) render(width int, _ *glamour.TermRenderer) string {
 	return styCardWarn.Width(width - 2).Render(msg)
 }
 
+type toolsBlock struct {
+	specs []llm.ToolSpec
+}
+
+func (b toolsBlock) render(width int, _ *glamour.TermRenderer) string {
+	var sb strings.Builder
+	sb.WriteString(styAccent.Render("tools") + "\n")
+	for _, spec := range b.specs {
+		sb.WriteString(fmt.Sprintf("  %s  %s\n", styTool.Render(padRight(spec.Name, 12)), styMuted.Render(spec.Description)))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+type tokensBlock struct {
+	usage llm.Usage
+}
+
+func (b tokensBlock) render(width int, _ *glamour.TermRenderer) string {
+	lines := []string{
+		fmt.Sprintf("input: %d", b.usage.InputTokens),
+		fmt.Sprintf("output: %d", b.usage.OutputTokens),
+		fmt.Sprintf("cache write: %d", b.usage.CacheCreationTokens),
+		fmt.Sprintf("cache read: %d", b.usage.CacheReadTokens),
+	}
+	return styCardResult.Width(width - 2).Render(strings.Join(lines, "\n"))
+}
+
+type approvalBlock struct {
+	req agent.ApprovalRequest
+}
+
+func (b approvalBlock) render(width int, _ *glamour.TermRenderer) string {
+	var sb strings.Builder
+	sb.WriteString("approve ")
+	sb.WriteString(b.req.ToolName)
+	sb.WriteString("?  y / n")
+	if b.req.Preview != "" {
+		sb.WriteString("\n")
+		sb.WriteString(strings.TrimRight(b.req.Preview, "\n"))
+	}
+	return styCardWarn.Width(width - 2).Render(sb.String())
+}
+
 // toolCardContent returns a header line and an optional body for the tool card.
 func toolCardContent(name string, args map[string]any) (string, string) {
 	switch name {
@@ -132,6 +178,14 @@ func toolCardContent(name string, args map[string]any) (string, string) {
 		return "write " + stringArg(args, "path"), fmt.Sprintf("%d lines", lines)
 	case "edit_file":
 		return "edit " + stringArg(args, "path"), ""
+	case "grep":
+		target := stringArg(args, "path")
+		if target == "" {
+			target = "."
+		}
+		return "grep " + truncate(oneLine(stringArg(args, "pattern")), 120), target
+	case "glob":
+		return "glob " + truncate(oneLine(stringArg(args, "pattern")), 120), stringArg(args, "path")
 	}
 	for k, v := range args {
 		if s, ok := v.(string); ok {
