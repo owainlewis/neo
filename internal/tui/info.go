@@ -16,7 +16,12 @@ type slashCommand struct {
 }
 
 var slashCommands = []slashCommand{
+	{"/clear", "clear the current transcript"},
 	{"/help", "show this list"},
+	{"/model", "show the current model"},
+	{"/permissions", "show permission mode"},
+	{"/tokens", "show token usage"},
+	{"/tools", "list available tools"},
 }
 
 var keyBindings = []struct {

@@ -12,6 +12,7 @@ import (
 
 type Bash struct {
 	Timeout time.Duration
+	CWD     string
 }
 
 func (Bash) Name() string { return "bash" }
@@ -43,6 +44,9 @@ func (b Bash) Run(ctx context.Context, input map[string]any) (string, error) {
 	defer cancel()
 
 	c := exec.CommandContext(ctx, "/bin/bash", "-c", cmd)
+	if b.CWD != "" {
+		c.Dir = b.CWD
+	}
 	var buf bytes.Buffer
 	c.Stdout = &buf
 	c.Stderr = &buf

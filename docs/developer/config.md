@@ -28,6 +28,13 @@ provider: anthropic
 
 model: claude-opus-4-8
 
+# Tool permission mode:
+#   ask      → allow read/search, ask before bash and file mutations (default)
+#   trusted  → allow built-in tools, while still denying file paths outside repo
+#   readonly → allow read/search only
+permissions:
+  mode: ask
+
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.
 features:
@@ -55,3 +62,13 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | `agents_file` | `true` | Load AGENTS.md into the chat system prompt. |
 | `skills` | `true` | Discover skills and expand $name references. |
 | `prompt_caching` | `true` | Mark the stable system prompt prefix as cacheable when the provider supports it. |
+
+## Permissions
+
+`permissions.mode` defaults to `ask`.
+
+| Mode | Effect |
+| --- | --- |
+| `ask` | Allow read/search tools inside the repo root; ask before bash and file mutations. |
+| `trusted` | Allow built-in tools, while still denying path-shaped file tools outside the repo root. |
+| `readonly` | Allow read/search tools only; deny bash and file mutations. |

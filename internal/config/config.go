@@ -25,6 +25,10 @@ const (
 	// OpenAI auth modes (the openai_auth config key).
 	OpenAIAuthAPIKey       = "api_key"
 	OpenAIAuthSubscription = "subscription"
+
+	PermissionModeAsk      = "ask"
+	PermissionModeTrusted  = "trusted"
+	PermissionModeReadonly = "readonly"
 )
 
 //go:embed defaults/neo.yaml
@@ -37,13 +41,19 @@ type Config struct {
 	// OpenAIAuth selects how the "openai" provider authenticates: "api_key"
 	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex OAuth via
 	// `neo login`). Ignored for other providers.
-	OpenAIAuth string   `yaml:"openai_auth"`
-	Model      string   `yaml:"model"`
-	Features   Features `yaml:"features"`
+	OpenAIAuth  string      `yaml:"openai_auth"`
+	Model       string      `yaml:"model"`
+	Features    Features    `yaml:"features"`
+	Permissions Permissions `yaml:"permissions"`
 
 	// source records where this config was loaded from (a file path or
 	// "embedded"); surfaced in diagnostics via Source().
 	source string
+}
+
+// Permissions configures how Neo gates tool calls before they run.
+type Permissions struct {
+	Mode string `yaml:"mode"`
 }
 
 // Features toggles optional, layered capabilities. The core agent loop is never
@@ -124,6 +134,14 @@ func parseConfig(b []byte, source string) (*Config, error) {
 	}
 	if c.Model == "" {
 		c.Model = defaultModelFor(c.Provider, c.OpenAIAuth)
+	}
+	if c.Permissions.Mode == "" {
+		c.Permissions.Mode = PermissionModeAsk
+	}
+	switch c.Permissions.Mode {
+	case PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly:
+	default:
+		return nil, fmt.Errorf("%s: permissions.mode must be one of %q, %q, %q", source, PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly)
 	}
 	return &c, nil
 }

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -33,6 +35,13 @@ type Event struct {
 	Err      error
 }
 
+type ApprovalRequest struct {
+	ToolName string
+	Args     map[string]any
+	Reason   string
+	Preview  string
+}
+
 type Config struct {
 	Model string
 	// System is the flattened system prompt. SystemBlocks, when set, carries the
@@ -42,6 +51,9 @@ type Config struct {
 	SystemBlocks []llm.SystemBlock
 	Provider     llm.Provider
 	Tools        *tools.Registry
+	Policy       permission.Policy
+	Compactor    compact.Compactor
+	Approve      func(context.Context, ApprovalRequest) (bool, error)
 	MaxTurns     int
 	OnEvent      func(Event)
 	Messages     []llm.Message
@@ -50,11 +62,18 @@ type Config struct {
 type Agent struct {
 	cfg      Config
 	messages []llm.Message
+	usage    llm.Usage
 }
 
 func New(cfg Config) *Agent {
 	if cfg.MaxTurns == 0 {
 		cfg.MaxTurns = 50
+	}
+	if cfg.Tools == nil {
+		cfg.Tools = tools.NewRegistry()
+	}
+	if cfg.Compactor == nil {
+		cfg.Compactor = compact.NoCompaction{}
 	}
 	return &Agent{cfg: cfg, messages: cloneMessages(cfg.Messages)}
 }
@@ -71,7 +90,23 @@ func (a *Agent) SetEventHandler(fn func(Event)) {
 	a.cfg.OnEvent = fn
 }
 
+func (a *Agent) SetApprover(fn func(context.Context, ApprovalRequest) (bool, error)) {
+	a.cfg.Approve = fn
+}
+
 func (a *Agent) Transcript() []llm.Message { return cloneMessages(a.messages) }
+
+func (a *Agent) Clear() {
+	a.messages = nil
+}
+
+func (a *Agent) ToolSpecs() []llm.ToolSpec {
+	return a.cfg.Tools.Specs()
+}
+
+func (a *Agent) Usage() llm.Usage {
+	return a.usage
+}
 
 func (a *Agent) Send(ctx context.Context, userText string) (string, error) {
 	return a.SendWith(ctx, userText, nil)
@@ -110,6 +145,12 @@ func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []stri
 func (a *Agent) run(ctx context.Context) (string, error) {
 	var finalText strings.Builder
 	for turn := 0; turn < a.cfg.MaxTurns; turn++ {
+		compacted, err := a.cfg.Compactor.Compact(ctx, a.messages)
+		if err != nil {
+			a.emit(Event{Kind: EventError, Err: err})
+			return "", err
+		}
+		a.messages = compacted
 		resp, err := a.cfg.Provider.Complete(ctx, llm.Request{
 			Model:        a.cfg.Model,
 			System:       a.cfg.System,
@@ -121,6 +162,7 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			a.emit(Event{Kind: EventError, Err: err})
 			return "", err
 		}
+		a.usage = addUsage(a.usage, resp.Usage)
 
 		// Build the assistant message and any matching tool_results, but do not
 		// commit either to the transcript until both are ready. This guarantees
@@ -169,11 +211,46 @@ func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) 
 	if !ok {
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
+	if a.cfg.Policy != nil {
+		decision := a.cfg.Policy.Decide(ctx, permission.Request{ToolName: name, Args: input})
+		switch decision.Decision {
+		case permission.Deny:
+			if decision.Reason == "" {
+				decision.Reason = "permission policy denied this tool call"
+			}
+			return decision.Reason, true
+		case permission.Ask:
+			if a.cfg.Approve == nil {
+				return "permission approval required but no approver is configured", true
+			}
+			approved, err := a.cfg.Approve(ctx, ApprovalRequest{
+				ToolName: name,
+				Args:     cloneInput(input),
+				Reason:   decision.Reason,
+				Preview:  Preview(name, input),
+			})
+			if err != nil {
+				return fmt.Sprintf("approval error: %v", err), true
+			}
+			if !approved {
+				return "user denied this tool call", true
+			}
+		}
+	}
 	out, err := t.Run(ctx, input)
 	if err != nil {
 		return fmt.Sprintf("error: %v\n%s", err, out), true
 	}
 	return out, false
+}
+
+func addUsage(a, b llm.Usage) llm.Usage {
+	return llm.Usage{
+		InputTokens:         a.InputTokens + b.InputTokens,
+		OutputTokens:        a.OutputTokens + b.OutputTokens,
+		CacheCreationTokens: a.CacheCreationTokens + b.CacheCreationTokens,
+		CacheReadTokens:     a.CacheReadTokens + b.CacheReadTokens,
+	}
 }
 
 func cloneMessages(in []llm.Message) []llm.Message {

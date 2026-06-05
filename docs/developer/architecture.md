@@ -12,10 +12,12 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `cmd/neo-docs/` | Deterministic developer documentation generator. |
 | `internal/agent/` | Core agent loop, transcript state, event model, tool-use continuation. |
 | `internal/auth/` | OpenAI ChatGPT/Codex OAuth login, token refresh, and stored subscription credentials. |
+| `internal/compact/` | Compaction interface, no-op default, and safe split helpers for future strategies. |
 | `internal/config/` | Config discovery, defaults, and feature flags. |
 | `internal/llm/` | Provider-neutral request/response types and system prompt blocks. |
 | `internal/llm/anthropic/` | Anthropic provider adapter. |
 | `internal/llm/openai/` | OpenAI provider adapters for API-key Responses API calls and ChatGPT/Codex subscription calls. |
+| `internal/permission/` | Tool-call permission policy and workspace path boundary checks. |
 | `internal/projectctx/` | AGENTS.md discovery and prompt augmentation. |
 | `internal/session/` | File-backed session metadata and transcripts. |
 | `internal/skills/` | Skill discovery, catalog rendering, and $name expansion. |
@@ -30,7 +32,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 3. The CLI creates or loads a session from `internal/session`.
 4. Skills and AGENTS.md context are discovered when enabled.
 5. `chatSystem` builds both flattened and segmented system prompts.
-6. `agent.New` receives provider, tools, system prompt, and optional restored messages.
+6. `agent.New` receives provider, tools, permission policy, system prompt, and optional restored messages.
 7. `tui.Run` owns user interaction and saves the transcript after each send.
 
 ## Agent Loop Contract

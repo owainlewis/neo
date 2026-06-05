@@ -56,6 +56,10 @@ func toolVerb(name string, args map[string]any) string {
 		return "writing " + shortPath(stringArg(args, "path"))
 	case "edit_file":
 		return "editing " + shortPath(stringArg(args, "path"))
+	case "grep":
+		return "searching " + truncate(oneLine(stringArg(args, "pattern")), 60)
+	case "glob":
+		return "matching " + truncate(oneLine(stringArg(args, "pattern")), 60)
 	}
 	return name
 }
