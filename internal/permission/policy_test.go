@@ -52,3 +52,21 @@ func TestWorkspacePolicyRelativePathUsesProcessCWD(t *testing.T) {
 		t.Fatalf("decision = %v, reason %q", got.Decision, got.Reason)
 	}
 }
+
+func TestWorkspacePolicyDeniesSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	got := New("trusted", root).Decide(context.Background(), Request{
+		ToolName: "read_file",
+		Args:     map[string]any{"path": filepath.Join(root, "link", "secret.txt")},
+	})
+	if got.Decision != Deny {
+		t.Fatalf("decision = %v, want Deny", got.Decision)
+	}
+}

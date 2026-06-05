@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/workspace"
 )
 
 const defaultSearchMax = 200
@@ -191,30 +192,7 @@ func (g Glob) Run(ctx context.Context, input map[string]any) (string, error) {
 var errStopWalk = fmt.Errorf("stop walk")
 
 func scopedPath(root, path string) (string, error) {
-	if root == "" {
-		root = "."
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	if path == "" {
-		path = absRoot
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(absRoot, path)
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	absRoot = filepath.Clean(absRoot)
-	abs = filepath.Clean(abs)
-	rel, err := filepath.Rel(absRoot, abs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q is outside workspace root %s", path, absRoot)
-	}
-	return abs, nil
+	return workspace.ResolveWithin(root, path)
 }
 
 func filesUnder(path string) ([]string, error) {

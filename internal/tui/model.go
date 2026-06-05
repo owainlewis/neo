@@ -490,6 +490,11 @@ func (m *model) handleSlashCommand(line string) {
 		m.ag.Clear()
 		m.blocks = nil
 		m.refreshViewport()
+		if m.afterSend != nil {
+			if err := m.afterSend(); err != nil {
+				m.appendBlock(errorBlock{err: err})
+			}
+		}
 	default:
 		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: %s — try /help", cmd)})
 	}

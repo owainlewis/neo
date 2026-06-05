@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -67,6 +68,41 @@ func TestSlashCommand_ToolsPermissionsTokensModelAndClear(t *testing.T) {
 	m.handleSlashCommand("/clear")
 	if len(m.blocks) != 0 {
 		t.Fatalf("/clear left %d blocks", len(m.blocks))
+	}
+}
+
+func TestSlashCommand_ClearSavesSession(t *testing.T) {
+	m := makeTestModel()
+	calls := 0
+	m.afterSend = func() error {
+		calls++
+		return nil
+	}
+
+	m.handleSlashCommand("/clear")
+
+	if calls != 1 {
+		t.Fatalf("afterSend calls = %d, want 1", calls)
+	}
+}
+
+func TestSlashCommand_ClearShowsSaveError(t *testing.T) {
+	m := makeTestModel()
+	m.afterSend = func() error {
+		return fmt.Errorf("save failed")
+	}
+
+	m.handleSlashCommand("/clear")
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("expected save error block, got %d blocks", len(m.blocks))
+	}
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "save failed") {
+		t.Fatalf("unexpected error: %v", eb.err)
 	}
 }
 

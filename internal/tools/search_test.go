@@ -74,6 +74,27 @@ func TestGlobSupportsDoubleStarAndScopesToRoot(t *testing.T) {
 	}
 }
 
+func TestSearchToolsRejectSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeSearchFile(t, filepath.Join(outside, "secret.txt"), "needle")
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Grep{Root: root}).Run(context.Background(), map[string]any{
+		"pattern": "needle",
+		"path":    filepath.Join(root, "link", "secret.txt"),
+	}); err == nil {
+		t.Fatal("expected grep symlink escape error")
+	}
+	if _, err := (Glob{Root: root}).Run(context.Background(), map[string]any{
+		"pattern": "*",
+		"path":    filepath.Join(root, "link"),
+	}); err == nil {
+		t.Fatal("expected glob symlink escape error")
+	}
+}
+
 func writeSearchFile(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

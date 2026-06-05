@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/owainlewis/neo/internal/workspace"
 )
 
 type Decision int
@@ -90,27 +92,8 @@ func (p WorkspacePolicy) pathDenial(req Request) string {
 }
 
 func (p WorkspacePolicy) contains(path string) bool {
-	root := p.Root
-	if root == "" {
-		return true
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	root = filepath.Clean(root)
-	abs = filepath.Clean(abs)
-	if abs == root {
-		return true
-	}
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	_, err := workspace.ResolveWithin(p.Root, path)
+	return err == nil
 }
 
 func pathKeys(tool string) []string {
