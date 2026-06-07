@@ -339,10 +339,7 @@ func modelChoices(cfg *config.Config) []tui.ModelChoice {
 	case "openai":
 		if cfg.SubscriptionAuth() {
 			return []tui.ModelChoice{
-				{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "Coding model for long-horizon agentic tasks"},
-				{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex", Description: "Coding model optimized for agentic coding"},
-				{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex mini", Description: "Smaller Codex model for lower-cost coding tasks"},
-				{ID: "gpt-5-codex", Name: "GPT-5 Codex", Description: "Codex-optimized GPT-5 model"},
+				{ID: "gpt-5-codex", Name: "GPT-5 Codex", Description: "Supported ChatGPT/Codex subscription model"},
 			}
 		}
 		return []tui.ModelChoice{
@@ -351,9 +348,6 @@ func modelChoices(cfg *config.Config) []tui.ModelChoice {
 			{ID: "gpt-5", Name: "GPT-5", Description: "Previous GPT-5 reasoning model"},
 			{ID: "gpt-5-mini", Name: "GPT-5 mini", Description: "Faster, lower-cost GPT-5 model"},
 			{ID: "gpt-5-nano", Name: "GPT-5 nano", Description: "Smallest GPT-5 model"},
-			{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "Coding model for long-horizon agentic tasks"},
-			{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex", Description: "Coding model optimized for agentic coding"},
-			{ID: "gpt-5-codex", Name: "GPT-5 Codex", Description: "Codex-optimized GPT-5 model"},
 			{ID: "gpt-4.1", Name: "GPT-4.1", Description: "Non-reasoning model for general coding tasks"},
 			{ID: "gpt-4o", Name: "GPT-4o", Description: "Fast multimodal GPT-4o model"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},

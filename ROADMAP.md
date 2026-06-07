@@ -41,16 +41,30 @@ will be revisited deliberately once the core agent is rock solid (see Later).
       future layer.)
 - [x] **TUI** — Bubble Tea v2 chat (blocking + spinner, no streaming by design),
       splash screen.
+- [x] **Search tools** — `grep` and `glob` let the model inspect repositories
+      without shelling out for common search operations.
+- [x] **Permission policy** — `ask`, `trusted`, and `readonly` modes gate tools
+      while keeping path-shaped tools inside the workspace.
+- [x] **Slash-command observability** — `/help`, `/tools`, `/permissions`,
+      `/tokens`, `/model`, `/sessions`, and `/clear` expose session state.
+- [x] **Session and model browsers** — `/sessions` resumes current-cwd sessions
+      in the TUI, and `/model` switches the active model from a provider-aware
+      picker.
+- [x] **Teaching guides** — generated `docs/developer/guides/` pages explain the
+      core concepts in problem/solution form.
 
 ## Next: core robustness
 
-- [ ] **Grep tool** — content search with context lines. The most-used tool in
-      any coding agent; today the model shells out to `bash grep`.
-- [ ] **Glob tool** — fast file pattern matching (`**/*.go`). Avoids `bash find`.
+- [ ] **Roadmap and ticket hygiene** — keep `ROADMAP.md`, `TICKETS.md`, and the
+      generated teaching guides aligned with the live code.
 - [ ] **Git context** — snapshot `git status`, branch, and recent log into the
       prompt at session start.
-- [ ] **Cancellation** — Ctrl+C / Esc cancels the current turn gracefully through
-      tool execution, not just at the TUI layer.
+- [ ] **Permissions picker** — make `/permissions` selectable like `/model`,
+      with session-local mode changes and clear safety notes.
+- [ ] **Session search** — add saved-session search as the first useful form of
+      episodic memory.
+- [ ] **Memory stub** — add an experimental, disabled-by-default `/memory`
+      surface before implementing project memory.
 - [ ] **Context compaction** — token-aware summarization at a threshold, cutting
       only at valid points (never mid-tool-result).
 
@@ -58,8 +72,12 @@ will be revisited deliberately once the core agent is rock solid (see Later).
 
 - [x] **Prompt caching** — `cache_control` on the static system prompt; keep the
       dynamic sections (git, project context) separate to maximize cache hits.
+- [ ] **Docs freshness automation** — fail PRs when generated docs/guides are out
+      of date, while preserving the main-branch auto-update workflow.
 - [ ] **`neo update`** — self-update the installed binary from GitHub Releases.
       See `TICKETS.md` NEO-1.
+- [ ] **Release automation** — replace manual tag pushes with a release PR/tag
+      flow so changes are regularly shipped.
 - [ ] **Model catalog** — context-window sizes and pricing to drive compaction
       thresholds and cost display.
 
