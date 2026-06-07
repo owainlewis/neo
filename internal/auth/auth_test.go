@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -24,20 +22,6 @@ func craftJWT(accountID string) string {
 	return header + "." + base64.RawURLEncoding.EncodeToString(payload) + ".sig"
 }
 
-func TestGeneratePKCE_ChallengeMatchesVerifier(t *testing.T) {
-	p, err := generatePKCE()
-	if err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-	sum := sha256.Sum256([]byte(p.Verifier))
-	if want := base64.RawURLEncoding.EncodeToString(sum[:]); p.Challenge != want {
-		t.Fatalf("challenge mismatch: got %q want %q", p.Challenge, want)
-	}
-	if p.Verifier == "" || strings.ContainsAny(p.Verifier, "+/=") {
-		t.Fatalf("verifier not base64url: %q", p.Verifier)
-	}
-}
-
 func TestAccountIDFromToken(t *testing.T) {
 	got, err := accountIDFromToken(craftJWT("acct_42"))
 	if err != nil {
@@ -49,27 +33,6 @@ func TestAccountIDFromToken(t *testing.T) {
 
 	if _, err := accountIDFromToken("not-a-jwt"); err == nil {
 		t.Fatal("expected error for non-JWT")
-	}
-}
-
-func TestBuildAuthorizeURL(t *testing.T) {
-	u := buildAuthorizeURL("chal", "st")
-	parsed, err := url.Parse(u)
-	if err != nil {
-		t.Fatalf("unparseable: %v", err)
-	}
-	q := parsed.Query()
-	for k, want := range map[string]string{
-		"response_type":         "code",
-		"client_id":             openAIClientID,
-		"code_challenge":        "chal",
-		"code_challenge_method": "S256",
-		"state":                 "st",
-		"scope":                 openAIScope,
-	} {
-		if q.Get(k) != want {
-			t.Errorf("param %s: got %q want %q", k, q.Get(k), want)
-		}
 	}
 }
 
@@ -90,7 +53,7 @@ func TestExchangeAndRefresh(t *testing.T) {
 	openAITokenURL = srv.URL
 	defer func() { openAITokenURL = old }()
 
-	creds, err := exchangeCode(context.Background(), srv.Client(), "the-code", "the-verifier")
+	creds, err := exchangeCode(context.Background(), srv.Client(), "the-code", "the-verifier", "https://auth.openai.test/deviceauth/callback")
 	if err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
@@ -99,6 +62,9 @@ func TestExchangeAndRefresh(t *testing.T) {
 	}
 	if lastForm.Get("grant_type") != "authorization_code" || lastForm.Get("code") != "the-code" {
 		t.Fatalf("bad exchange form: %v", lastForm)
+	}
+	if lastForm.Get("redirect_uri") != "https://auth.openai.test/deviceauth/callback" {
+		t.Fatalf("bad redirect_uri: %v", lastForm)
 	}
 	if creds.Expired(0) {
 		t.Fatal("freshly issued token should not be expired")
@@ -120,6 +86,130 @@ func TestExchangeAndRefresh(t *testing.T) {
 	}
 	if refreshed.RefreshToken != "refresh_old" {
 		t.Fatalf("refresh token should be preserved, got %q", refreshed.RefreshToken)
+	}
+}
+
+func TestLoginOpenAI_DeviceCodeFlow(t *testing.T) {
+	var sawUserCodeRequest, sawPoll, sawTokenExchange bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/usercode":
+			sawUserCodeRequest = true
+			var req map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode usercode request: %v", err)
+			}
+			if req["client_id"] != openAIClientID {
+				t.Fatalf("client_id: got %q want %q", req["client_id"], openAIClientID)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"device_auth_id": "device_1",
+				"user_code":      "ABCD-1234",
+				"interval":       "1",
+			})
+		case "/poll":
+			sawPoll = true
+			var req map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode poll request: %v", err)
+			}
+			if req["device_auth_id"] != "device_1" || req["user_code"] != "ABCD-1234" {
+				t.Fatalf("bad poll request: %v", req)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"authorization_code": "auth_code",
+				"code_verifier":      "verifier_1",
+			})
+		case "/token":
+			sawTokenExchange = true
+			_ = r.ParseForm()
+			if r.PostForm.Get("grant_type") != "authorization_code" ||
+				r.PostForm.Get("code") != "auth_code" ||
+				r.PostForm.Get("code_verifier") != "verifier_1" ||
+				r.PostForm.Get("redirect_uri") != "https://auth.openai.test/deviceauth/callback" {
+				t.Fatalf("bad token exchange form: %v", r.PostForm)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  craftJWT("acct_device"),
+				"refresh_token": "refresh_device",
+				"expires_in":    3600,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	oldUserCodeURL := openAIUserCodeURL
+	oldDeviceTokenURL := openAIDeviceTokenURL
+	oldVerifyURL := openAIDeviceVerifyURL
+	oldRedirect := openAIDeviceRedirect
+	oldTokenURL := openAITokenURL
+	openAIUserCodeURL = srv.URL + "/usercode"
+	openAIDeviceTokenURL = srv.URL + "/poll"
+	openAIDeviceVerifyURL = "https://auth.openai.test/codex/device"
+	openAIDeviceRedirect = "https://auth.openai.test/deviceauth/callback"
+	openAITokenURL = srv.URL + "/token"
+	defer func() {
+		openAIUserCodeURL = oldUserCodeURL
+		openAIDeviceTokenURL = oldDeviceTokenURL
+		openAIDeviceVerifyURL = oldVerifyURL
+		openAIDeviceRedirect = oldRedirect
+		openAITokenURL = oldTokenURL
+	}()
+
+	var gotURL, gotCode string
+	creds, err := LoginOpenAI(context.Background(), LoginOptions{
+		HTTPClient: srv.Client(),
+		Timeout:    time.Second,
+		OnDeviceCode: func(url, code string) {
+			gotURL = url
+			gotCode = code
+		},
+	})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if creds.AccountID != "acct_device" || creds.RefreshToken != "refresh_device" {
+		t.Fatalf("bad creds: %+v", creds)
+	}
+	if gotURL != "https://auth.openai.test/codex/device" || gotCode != "ABCD-1234" {
+		t.Fatalf("bad device prompt: url=%q code=%q", gotURL, gotCode)
+	}
+	if !sawUserCodeRequest || !sawPoll || !sawTokenExchange {
+		t.Fatalf("missing request: usercode=%v poll=%v token=%v", sawUserCodeRequest, sawPoll, sawTokenExchange)
+	}
+}
+
+func TestPollDeviceCode_WaitsWhilePending(t *testing.T) {
+	var polls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		polls++
+		if polls == 1 {
+			http.Error(w, "pending", http.StatusForbidden)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"authorization_code": "auth_code",
+			"code_verifier":      "verifier_1",
+		})
+	}))
+	defer srv.Close()
+
+	oldDeviceTokenURL := openAIDeviceTokenURL
+	openAIDeviceTokenURL = srv.URL
+	defer func() { openAIDeviceTokenURL = oldDeviceTokenURL }()
+
+	got, err := pollDeviceCode(context.Background(), srv.Client(), deviceCode{
+		DeviceAuthID: "device_1",
+		UserCode:     "ABCD-1234",
+		Interval:     time.Millisecond,
+	}, time.Second)
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if got.AuthorizationCode != "auth_code" || polls != 2 {
+		t.Fatalf("bad poll result: got=%+v polls=%d", got, polls)
 	}
 }
 

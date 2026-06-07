@@ -150,7 +150,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`cmd/neo/`" + ` | CLI entry point, command dispatch, chat session startup. |
 | ` + "`cmd/neo-docs/`" + ` | Deterministic developer documentation generator. |
 | ` + "`internal/agent/`" + ` | Core agent loop, transcript state, event model, tool-use continuation. |
-| ` + "`internal/auth/`" + ` | OpenAI ChatGPT/Codex OAuth login, token refresh, and stored subscription credentials. |
+| ` + "`internal/auth/`" + ` | OpenAI ChatGPT/Codex device-code login, token refresh, and stored subscription credentials. |
 | ` + "`internal/compact/`" + ` | Compaction interface, no-op default, and safe split helpers for future strategies. |
 | ` + "`internal/config/`" + ` | Config discovery, defaults, and feature flags. |
 | ` + "`internal/llm/`" + ` | Provider-neutral request/response types and system prompt blocks. |
@@ -167,7 +167,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 ## Chat Startup Flow
 
 1. ` + "`cmd/neo`" + ` loads config.
-2. ` + "`mustProvider`" + ` selects Anthropic or OpenAI. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored OAuth credentials.
+2. ` + "`mustProvider`" + ` selects Anthropic or OpenAI. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
 3. The CLI creates or loads a session from ` + "`internal/session`" + `.
 4. Skills and AGENTS.md context are discovered when enabled.
 5. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
@@ -191,7 +191,7 @@ func cliPage() string {
 | ` + "`neo chat`" + ` | Open interactive chat mode explicitly. |
 | ` + "`neo sessions`" + ` | List saved chat sessions. |
 | ` + "`neo resume <id>`" + ` | Resume a saved chat session. |
-| ` + "`neo login`" + ` | Log in to an OpenAI ChatGPT/Codex subscription with OAuth. |
+| ` + "`neo login`" + ` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
 | ` + "`neo logout`" + ` | Remove stored OpenAI subscription credentials. |
 | ` + "`neo help`" + ` | Print usage. |
 
@@ -199,12 +199,12 @@ func cliPage() string {
 
 - ` + "`ANTHROPIC_API_KEY`" + ` is required when ` + "`provider: anthropic`" + `.
 - ` + "`OPENAI_API_KEY`" + ` is required when ` + "`provider: openai`" + ` uses ` + "`openai_auth: api_key`" + `.
-- ` + "`openai_auth: subscription`" + ` uses stored ChatGPT/Codex OAuth credentials created by ` + "`neo login`" + ` instead of an API key.
+- ` + "`openai_auth: subscription`" + ` uses stored ChatGPT/Codex device-code credentials created by ` + "`neo login`" + ` instead of an API key.
 
 ## Runtime Notes
 
 - ` + "`neo`" + ` with no subcommand defaults to chat.
-- ` + "`neo login`" + ` opens an OpenAI authorization URL, receives the loopback callback, and stores refreshable subscription credentials in ` + "`~/.neo/auth.json`" + ` with file permissions intended to protect secrets.
+- ` + "`neo login`" + ` prints the OpenAI Codex device-code URL and one-time code, then stores refreshable subscription credentials in ` + "`~/.neo/auth.json`" + ` with file permissions intended to protect secrets.
 - ` + "`neo logout`" + ` deletes the stored OpenAI subscription credential entry.
 - Resuming a session attempts to change into the saved session cwd. If unavailable, Neo warns and stays in the current directory.
 - Session saves happen after each user turn through the TUI ` + "`WithAfterSend`" + ` callback.
@@ -234,7 +234,7 @@ First hit wins. Config files are not merged.
 | --- | --- | --- |
 | ` + "`provider: anthropic`" + ` | ` + "`ANTHROPIC_API_KEY`" + ` | ` + "`internal/llm/anthropic`" + ` |
 | ` + "`provider: openai`" + ` with ` + "`openai_auth: api_key`" + ` | ` + "`OPENAI_API_KEY`" + ` | ` + "`internal/llm/openai.Client`" + ` |
-| ` + "`provider: openai`" + ` with ` + "`openai_auth: subscription`" + ` | ChatGPT/Codex OAuth credentials from ` + "`~/.neo/auth.json`" + ` | ` + "`internal/llm/openai.CodexClient`" + ` |
+| ` + "`provider: openai`" + ` with ` + "`openai_auth: subscription`" + ` | ChatGPT/Codex device-code credentials from ` + "`~/.neo/auth.json`" + ` | ` + "`internal/llm/openai.CodexClient`" + ` |
 
 Subscription credentials are created with ` + "`neo login`" + ` and removed with ` + "`neo logout`" + `. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 

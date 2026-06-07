@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
-	"runtime"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -80,7 +78,7 @@ USAGE:
   neo chat           Interactive chat mode (explicit)
   neo sessions       List saved chat sessions
   neo resume <id>    Resume a saved chat session
-  neo login          Log in to an OpenAI ChatGPT/Codex subscription (OAuth)
+  neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials
   neo help           Show this help
 
@@ -176,7 +174,7 @@ func mustProvider(cfg *config.Config) llm.Provider {
 }
 
 // newCodexProvider builds the ChatGPT/Codex subscription client from stored
-// OAuth credentials, erroring clearly if the user hasn't logged in.
+// device-code credentials, erroring clearly if the user hasn't logged in.
 func newCodexProvider() (llm.Provider, error) {
 	store, err := auth.DefaultStore()
 	if err != nil {
@@ -202,7 +200,8 @@ func (c codexCredentials) Token(ctx context.Context) (accessToken, accountID str
 	return cr.AccessToken, cr.AccountID, nil
 }
 
-// runLogin performs the OpenAI subscription OAuth flow and stores the result.
+// runLogin performs the OpenAI subscription device-code flow and stores the
+// result.
 func runLogin(ctx context.Context) {
 	store, err := auth.DefaultStore()
 	if err != nil {
@@ -211,12 +210,12 @@ func runLogin(ctx context.Context) {
 	}
 
 	creds, err := auth.LoginOpenAI(ctx, auth.LoginOptions{
-		OnAuthURL: func(url string) {
-			fmt.Println("Opening your browser to authorize neo with OpenAI.")
-			fmt.Println("If it doesn't open, visit this URL:")
-			fmt.Println("\n  " + url + "\n")
-			openBrowser(url)
-			fmt.Println("Waiting for authorization to complete…")
+		OnDeviceCode: func(url, code string) {
+			fmt.Println("Log in to OpenAI with this device code:")
+			fmt.Println("\n  " + url)
+			fmt.Println("  Code: " + code + "\n")
+			fmt.Println("The code expires after 15 minutes. Never share it.")
+			fmt.Println("Waiting for authorization to complete...")
 		},
 	})
 	if err != nil {
@@ -243,22 +242,6 @@ func runLogout() {
 		os.Exit(1)
 	}
 	fmt.Println("Logged out of OpenAI subscription.")
-}
-
-// openBrowser best-effort opens url in the default browser. Failure is silent:
-// the URL is always printed as a fallback.
-func openBrowser(url string) {
-	var cmd string
-	var args []string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-	case "windows":
-		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler"}
-	default:
-		cmd = "xdg-open"
-	}
-	_ = exec.Command(cmd, append(args, url)...).Start()
 }
 
 func runChat(ctx context.Context) {

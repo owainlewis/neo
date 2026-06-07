@@ -8,7 +8,7 @@ provider: anthropic
 
 # How the "openai" provider authenticates (ignored for other providers):
 #   api_key      → uses OPENAI_API_KEY (default)
-#   subscription → uses a ChatGPT/Codex subscription via OAuth; run `neo login`
+#   subscription → uses a ChatGPT/Codex subscription via device-code auth; run `neo login`
 # openai_auth: api_key
 
 model: claude-opus-4-8

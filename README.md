@@ -34,7 +34,8 @@ top as independent, feature-flagged modules.
 - OpenAI API key: create an [OpenAI API key](https://platform.openai.com/api-keys),
   set `provider: openai`, and set `OPENAI_API_KEY`.
 - OpenAI subscription: set `provider: openai` and
-  `openai_auth: subscription`, then run `neo login`.
+  `openai_auth: subscription`, then run `neo login` and enter the printed
+  device code in your browser.
 
 ### One-line install (recommended)
 
@@ -224,7 +225,7 @@ provider: anthropic
 
 # How the "openai" provider authenticates:
 #   api_key      -> uses OPENAI_API_KEY (default)
-#   subscription -> uses a ChatGPT/Codex subscription via OAuth; run `neo login`
+#   subscription -> uses a ChatGPT/Codex subscription via device-code auth; run `neo login`
 openai_auth: api_key
 
 # Model used by the agent. Defaults by provider/auth mode:
@@ -257,7 +258,7 @@ The agent has four built-in tools:
 ```text
 cmd/neo/                CLI entry point and command dispatch
 internal/agent/         Core agent loop and event model
-internal/auth/          OpenAI subscription OAuth and credential storage
+internal/auth/          OpenAI subscription device-code auth and credential storage
 internal/config/        Config loading and feature flags
 internal/config/defaults/   Embedded neo.yaml
 internal/llm/           Provider interface + Anthropic and OpenAI adapters

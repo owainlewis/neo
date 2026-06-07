@@ -23,7 +23,7 @@ provider: anthropic
 
 # How the "openai" provider authenticates (ignored for other providers):
 #   api_key      → uses OPENAI_API_KEY (default)
-#   subscription → uses a ChatGPT/Codex subscription via OAuth; run `neo login`
+#   subscription → uses a ChatGPT/Codex subscription via device-code auth; run `neo login`
 # openai_auth: api_key
 
 model: claude-opus-4-8
@@ -49,7 +49,7 @@ features:
 | --- | --- | --- |
 | `provider: anthropic` | `ANTHROPIC_API_KEY` | `internal/llm/anthropic` |
 | `provider: openai` with `openai_auth: api_key` | `OPENAI_API_KEY` | `internal/llm/openai.Client` |
-| `provider: openai` with `openai_auth: subscription` | ChatGPT/Codex OAuth credentials from `~/.neo/auth.json` | `internal/llm/openai.CodexClient` |
+| `provider: openai` with `openai_auth: subscription` | ChatGPT/Codex device-code credentials from `~/.neo/auth.json` | `internal/llm/openai.CodexClient` |
 
 Subscription credentials are created with `neo login` and removed with `neo logout`. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 

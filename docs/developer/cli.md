@@ -10,7 +10,7 @@
 | `neo chat` | Open interactive chat mode explicitly. |
 | `neo sessions` | List saved chat sessions. |
 | `neo resume <id>` | Resume a saved chat session. |
-| `neo login` | Log in to an OpenAI ChatGPT/Codex subscription with OAuth. |
+| `neo login` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
 | `neo logout` | Remove stored OpenAI subscription credentials. |
 | `neo help` | Print usage. |
 
@@ -18,12 +18,12 @@
 
 - `ANTHROPIC_API_KEY` is required when `provider: anthropic`.
 - `OPENAI_API_KEY` is required when `provider: openai` uses `openai_auth: api_key`.
-- `openai_auth: subscription` uses stored ChatGPT/Codex OAuth credentials created by `neo login` instead of an API key.
+- `openai_auth: subscription` uses stored ChatGPT/Codex device-code credentials created by `neo login` instead of an API key.
 
 ## Runtime Notes
 
 - `neo` with no subcommand defaults to chat.
-- `neo login` opens an OpenAI authorization URL, receives the loopback callback, and stores refreshable subscription credentials in `~/.neo/auth.json` with file permissions intended to protect secrets.
+- `neo login` prints the OpenAI Codex device-code URL and one-time code, then stores refreshable subscription credentials in `~/.neo/auth.json` with file permissions intended to protect secrets.
 - `neo logout` deletes the stored OpenAI subscription credential entry.
 - Resuming a session attempts to change into the saved session cwd. If unavailable, Neo warns and stays in the current directory.
 - Session saves happen after each user turn through the TUI `WithAfterSend` callback.

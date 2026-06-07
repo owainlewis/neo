@@ -96,13 +96,13 @@ here and delivered separately in NEO-3.
 
 **Status:** done
 
-**Summary.** Authenticate to OpenAI via an OAuth/OIDC flow so a ChatGPT
-subscription can be used instead of pay-per-token API credits.
+**Summary.** Authenticate to OpenAI via the Codex device-code flow so a
+ChatGPT subscription can be used instead of pay-per-token API credits.
 
 **Delivered.**
-- `internal/auth`: authorization-code + PKCE login against `auth.openai.com`
-  (loopback callback on :1455), token refresh, JWT account-id extraction, and
-  `~/.neo/auth.json` credential storage (0600, atomic) with a refreshing
+- `internal/auth`: Codex device-code login against `auth.openai.com`, token
+  refresh, JWT account-id extraction, and `~/.neo/auth.json` credential storage
+  (0600, atomic) with a refreshing
   `TokenSource`.
 - `internal/llm/openai` migrated to the **Responses API** (Chat Completions
   retired). The same translation drives two transports: the API-key `Client`
@@ -116,5 +116,5 @@ subscription can be used instead of pay-per-token API credits.
   Codex client_id. It is unverified against the live service and may breach
   OpenAI's ToS; treat as experimental. Default model `gpt-5-codex` is a guess —
   override with `model:` if rejected.
-- Device-code (headless) login and force-refresh-on-401 are not implemented.
+- Force-refresh-on-401 is not implemented.
 - `auth.json` has no cross-process lock (fine for a single interactive CLI).

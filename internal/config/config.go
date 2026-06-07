@@ -39,8 +39,8 @@ type Config struct {
 	// Provider selects the LLM backend: "anthropic" (default) or "openai".
 	Provider string `yaml:"provider"`
 	// OpenAIAuth selects how the "openai" provider authenticates: "api_key"
-	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex OAuth via
-	// `neo login`). Ignored for other providers.
+	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex
+	// device-code credentials via `neo login`). Ignored for other providers.
 	OpenAIAuth  string      `yaml:"openai_auth"`
 	Model       string      `yaml:"model"`
 	Features    Features    `yaml:"features"`

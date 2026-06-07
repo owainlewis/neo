@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// Store persists OAuth credentials to a JSON file (default ~/.neo/auth.json),
+// Store persists subscription credentials to a JSON file (default ~/.neo/auth.json),
 // keyed by provider id. The file holds bearer/refresh tokens, so it is written
 // with 0600 permissions. Each mutation does a read-modify-write with an atomic
 // rename; there is no cross-process lock, which is sufficient for a single

@@ -1,14 +1,15 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,14 +18,11 @@ import (
 // subscription credentials are stored.
 const ProviderOpenAICodex = "openai-codex"
 
-// OpenAI OAuth constants. The client ID and endpoints match the public Codex
-// CLI flow; the subscription backend only accepts tokens minted this way.
+// OpenAI device-code constants. The client ID and endpoints match the public
+// Codex CLI flow; the subscription backend only accepts tokens minted this way.
 const (
 	openAIClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	openAIAuthBase = "https://auth.openai.com"
-	openAIRedirect = "http://localhost:1455/auth/callback"
-	openAIScope    = "openid profile email offline_access"
-	callbackAddr   = "127.0.0.1:1455"
 
 	// jwtAuthClaim is the namespaced claim in the access token that carries the
 	// ChatGPT account id required by the subscription backend.
@@ -32,13 +30,17 @@ const (
 )
 
 // Endpoints are package vars (not consts) so tests can point the flow at a
-// local httptest server.
+// local httptest server and shorten the polling timeout.
 var (
-	openAIAuthorizeURL = openAIAuthBase + "/oauth/authorize"
-	openAITokenURL     = openAIAuthBase + "/oauth/token"
+	openAIUserCodeURL        = openAIAuthBase + "/api/accounts/deviceauth/usercode"
+	openAIDeviceTokenURL     = openAIAuthBase + "/api/accounts/deviceauth/token"
+	openAIDeviceVerifyURL    = openAIAuthBase + "/codex/device"
+	openAIDeviceRedirect     = openAIAuthBase + "/deviceauth/callback"
+	openAITokenURL           = openAIAuthBase + "/oauth/token"
+	defaultDevicePollTimeout = 15 * time.Minute
 )
 
-// Credentials is a stored OAuth token set for one provider.
+// Credentials is a stored token set for one provider.
 type Credentials struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
@@ -57,62 +59,34 @@ func (c Credentials) Expired(skew time.Duration) bool {
 
 // LoginOptions configures the interactive OpenAI login flow.
 type LoginOptions struct {
-	// OnAuthURL is invoked once with the URL the user must visit to authorize.
-	// Callers typically open it in a browser and also print it as a fallback.
-	OnAuthURL func(url string)
+	// OnDeviceCode is invoked once with the URL and code the user must enter in
+	// a browser to authorize.
+	OnDeviceCode func(verificationURL, userCode string)
 	// HTTPClient overrides the client used for token exchange (tests).
 	HTTPClient *http.Client
-	// Timeout bounds the wait for the browser callback (default 5 minutes).
+	// Timeout bounds the wait for device-code approval (default 15 minutes).
 	Timeout time.Duration
 }
 
-// LoginOpenAI runs the authorization-code + PKCE flow against auth.openai.com,
-// serving the redirect on a loopback port, and returns the resulting
-// credentials. It blocks until the callback arrives, ctx is cancelled, or the
-// timeout elapses.
+// LoginOpenAI runs the Codex device-code flow against auth.openai.com and
+// returns the resulting credentials. It blocks until the browser approval is
+// completed, ctx is cancelled, or the timeout elapses.
 func LoginOpenAI(ctx context.Context, opts LoginOptions) (Credentials, error) {
-	p, err := generatePKCE()
+	httpc := httpClient(opts.HTTPClient)
+	code, err := requestDeviceCode(ctx, httpc)
 	if err != nil {
 		return Credentials{}, err
 	}
-	state, err := randomState()
+	if opts.OnDeviceCode != nil {
+		opts.OnDeviceCode(code.VerificationURL, code.UserCode)
+	}
+
+	approved, err := pollDeviceCode(ctx, httpc, code, opts.Timeout)
 	if err != nil {
 		return Credentials{}, err
 	}
 
-	authURL := buildAuthorizeURL(p.Challenge, state)
-
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-	srv, err := startCallbackServer(state, codeCh, errCh)
-	if err != nil {
-		return Credentials{}, err
-	}
-	defer srv.Close()
-
-	if opts.OnAuthURL != nil {
-		opts.OnAuthURL(authURL)
-	}
-
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = 5 * time.Minute
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	var code string
-	select {
-	case code = <-codeCh:
-	case err := <-errCh:
-		return Credentials{}, err
-	case <-ctx.Done():
-		return Credentials{}, ctx.Err()
-	case <-timer.C:
-		return Credentials{}, fmt.Errorf("login timed out after %s", timeout)
-	}
-
-	return exchangeCode(ctx, httpClient(opts.HTTPClient), code, p.Verifier)
+	return exchangeCode(ctx, httpc, approved.AuthorizationCode, approved.CodeVerifier, openAIDeviceRedirect)
 }
 
 // RefreshOpenAI exchanges a refresh token for a fresh credential set.
@@ -133,31 +107,145 @@ func RefreshOpenAI(ctx context.Context, httpc *http.Client, refreshToken string)
 	return creds, nil
 }
 
-func buildAuthorizeURL(challenge, state string) string {
-	q := url.Values{
-		"response_type":              {"code"},
-		"client_id":                  {openAIClientID},
-		"redirect_uri":               {openAIRedirect},
-		"scope":                      {openAIScope},
-		"code_challenge":             {challenge},
-		"code_challenge_method":      {"S256"},
-		"state":                      {state},
-		"id_token_add_organizations": {"true"},
-		"codex_cli_simplified_flow":  {"true"},
-		"originator":                 {"neo"},
-	}
-	return openAIAuthorizeURL + "?" + q.Encode()
-}
-
-func exchangeCode(ctx context.Context, httpc *http.Client, code, verifier string) (Credentials, error) {
+func exchangeCode(ctx context.Context, httpc *http.Client, code, verifier, redirectURI string) (Credentials, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {openAIClientID},
 		"code":          {code},
 		"code_verifier": {verifier},
-		"redirect_uri":  {openAIRedirect},
+		"redirect_uri":  {redirectURI},
 	}
 	return postToken(ctx, httpc, form)
+}
+
+type deviceCode struct {
+	VerificationURL string
+	UserCode        string
+	DeviceAuthID    string
+	Interval        time.Duration
+}
+
+type deviceToken struct {
+	AuthorizationCode string
+	CodeVerifier      string
+}
+
+func requestDeviceCode(ctx context.Context, httpc *http.Client) (deviceCode, error) {
+	var out struct {
+		DeviceAuthID string       `json:"device_auth_id"`
+		UserCode     string       `json:"user_code"`
+		Usercode     string       `json:"usercode"`
+		Interval     pollInterval `json:"interval"`
+	}
+	if err := postJSON(ctx, httpc, openAIUserCodeURL, map[string]string{
+		"client_id": openAIClientID,
+	}, &out); err != nil {
+		return deviceCode{}, err
+	}
+	userCode := out.UserCode
+	if userCode == "" {
+		userCode = out.Usercode
+	}
+	if out.DeviceAuthID == "" || userCode == "" {
+		return deviceCode{}, fmt.Errorf("device-code response missing device_auth_id or user_code")
+	}
+	interval := time.Duration(out.Interval) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	return deviceCode{
+		VerificationURL: openAIDeviceVerifyURL,
+		UserCode:        userCode,
+		DeviceAuthID:    out.DeviceAuthID,
+		Interval:        interval,
+	}, nil
+}
+
+func pollDeviceCode(ctx context.Context, httpc *http.Client, code deviceCode, timeout time.Duration) (deviceToken, error) {
+	if timeout <= 0 {
+		timeout = defaultDevicePollTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		token, pending, err := pollDeviceToken(ctx, httpc, code)
+		if err != nil {
+			return deviceToken{}, err
+		}
+		if !pending {
+			return token, nil
+		}
+
+		timer := time.NewTimer(code.Interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return deviceToken{}, fmt.Errorf("device-code login timed out after %s", timeout)
+		case <-timer.C:
+		}
+	}
+}
+
+func pollDeviceToken(ctx context.Context, httpc *http.Client, code deviceCode) (deviceToken, bool, error) {
+	var out struct {
+		AuthorizationCode string `json:"authorization_code"`
+		CodeVerifier      string `json:"code_verifier"`
+	}
+	status, body, err := postJSONRaw(ctx, httpc, openAIDeviceTokenURL, map[string]string{
+		"device_auth_id": code.DeviceAuthID,
+		"user_code":      code.UserCode,
+	})
+	if err != nil {
+		return deviceToken{}, false, err
+	}
+	if status == http.StatusForbidden || status == http.StatusNotFound {
+		return deviceToken{}, true, nil
+	}
+	if status >= 400 {
+		return deviceToken{}, false, fmt.Errorf("device-code token endpoint %d: %s", status, string(body))
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return deviceToken{}, false, fmt.Errorf("decode device-code token response: %w (body: %s)", err, string(body))
+	}
+	if out.AuthorizationCode == "" || out.CodeVerifier == "" {
+		return deviceToken{}, false, fmt.Errorf("device-code token response missing authorization_code or code_verifier: %s", string(body))
+	}
+	return deviceToken{AuthorizationCode: out.AuthorizationCode, CodeVerifier: out.CodeVerifier}, false, nil
+}
+
+func postJSON(ctx context.Context, httpc *http.Client, endpoint string, in any, out any) error {
+	status, body, err := postJSONRaw(ctx, httpc, endpoint, in)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("device-code endpoint %d: %s", status, string(body))
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("decode device-code response: %w (body: %s)", err, string(body))
+	}
+	return nil
+}
+
+func postJSONRaw(ctx context.Context, httpc *http.Client, endpoint string, in any) (int, []byte, error) {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return 0, nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, raw, nil
 }
 
 func postToken(ctx context.Context, httpc *http.Client, form url.Values) (Credentials, error) {
@@ -227,53 +315,6 @@ func accountIDFromToken(token string) (string, error) {
 	return claims.Auth.ChatGPTAccountID, nil
 }
 
-// callbackServer is the loopback HTTP server that captures the OAuth redirect.
-type callbackServer struct {
-	ln  net.Listener
-	srv *http.Server
-}
-
-func (s *callbackServer) Close() { _ = s.srv.Close() }
-
-func startCallbackServer(state string, codeCh chan<- string, errCh chan<- error) (*callbackServer, error) {
-	ln, err := net.Listen("tcp", callbackAddr)
-	if err != nil {
-		return nil, fmt.Errorf("listen on %s for OAuth callback: %w", callbackAddr, err)
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/callback", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if q.Get("state") != state {
-			http.Error(w, "state mismatch", http.StatusBadRequest)
-			select {
-			case errCh <- fmt.Errorf("oauth state mismatch"):
-			default:
-			}
-			return
-		}
-		code := q.Get("code")
-		if code == "" {
-			http.Error(w, "missing code", http.StatusBadRequest)
-			select {
-			case errCh <- fmt.Errorf("oauth callback missing code"):
-			default:
-			}
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, callbackSuccessHTML)
-		select {
-		case codeCh <- code:
-		default:
-		}
-	})
-
-	srv := &http.Server{Handler: mux}
-	go func() { _ = srv.Serve(ln) }()
-	return &callbackServer{ln: ln, srv: srv}, nil
-}
-
 func httpClient(c *http.Client) *http.Client {
 	if c != nil {
 		return c
@@ -281,6 +322,27 @@ func httpClient(c *http.Client) *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }
 
-const callbackSuccessHTML = `<!doctype html><html><head><meta charset="utf-8"><title>neo</title></head>
-<body style="font-family:system-ui;max-width:32rem;margin:5rem auto;text-align:center">
-<h1>Login complete</h1><p>You can close this window and return to neo.</p></body></html>`
+type pollInterval int
+
+func (p *pollInterval) UnmarshalJSON(b []byte) error {
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		*p = pollInterval(n)
+		return nil
+	}
+
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	if strings.TrimSpace(s) == "" {
+		*p = 0
+		return nil
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return err
+	}
+	*p = pollInterval(parsed)
+	return nil
+}
