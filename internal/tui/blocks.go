@@ -159,9 +159,26 @@ func (b approvalBlock) render(width int, _ *glamour.TermRenderer) string {
 	sb.WriteString("?  y / n")
 	if b.req.Preview != "" {
 		sb.WriteString("\n")
-		sb.WriteString(strings.TrimRight(b.req.Preview, "\n"))
+		sb.WriteString(trimApprovalPreview(b.req.Preview))
 	}
 	return styCardWarn.Width(width - 2).Render(sb.String())
+}
+
+const approvalPreviewMaxLines = 18
+
+func trimApprovalPreview(preview string) string {
+	preview = strings.TrimRight(preview, "\n")
+	if preview == "" {
+		return ""
+	}
+	lines := strings.Split(preview, "\n")
+	if len(lines) <= approvalPreviewMaxLines {
+		return preview
+	}
+	hidden := len(lines) - approvalPreviewMaxLines
+	kept := append([]string(nil), lines[:approvalPreviewMaxLines]...)
+	kept = append(kept, fmt.Sprintf("... %d more lines hidden. Approve to apply the full change.", hidden))
+	return strings.Join(kept, "\n")
 }
 
 // toolCardContent returns a header line and an optional body for the tool card.
