@@ -9,6 +9,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
+	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -28,7 +29,7 @@ func makeTestModel() *model {
 		ctx:            context.Background(),
 		width:          80,
 		height:         24,
-		ag:             agent.New(agent.Config{Model: "test", Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(tools.ReadFile{})}),
+		ag:             agent.New(agent.Config{Model: "test", Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(tools.ReadFile{}), Policy: permission.New("ask", ".")}),
 		input:          ta,
 		viewport:       viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		modelTag:       "test",

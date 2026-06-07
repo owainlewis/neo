@@ -105,6 +105,24 @@ func (a *Agent) SetModel(model string) {
 	a.cfg.Model = strings.TrimSpace(model)
 }
 
+func (a *Agent) SetPermissionMode(mode string) error {
+	switch permission.Mode(mode) {
+	case permission.ModeAsk, permission.ModeTrusted, permission.ModeReadonly:
+	default:
+		return fmt.Errorf("unknown permission mode: %s", mode)
+	}
+	switch p := a.cfg.Policy.(type) {
+	case permission.WorkspacePolicy:
+		p.Mode = permission.Mode(mode)
+		a.cfg.Policy = p
+	case *permission.WorkspacePolicy:
+		p.Mode = permission.Mode(mode)
+	default:
+		return fmt.Errorf("permission policy does not support runtime mode changes")
+	}
+	return nil
+}
+
 func (a *Agent) ReplaceTranscript(messages []llm.Message) {
 	a.messages = cloneMessages(messages)
 	a.usage = llm.Usage{}

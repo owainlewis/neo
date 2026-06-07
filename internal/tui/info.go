@@ -19,7 +19,7 @@ var slashCommands = []slashCommand{
 	{"/clear", "clear the current transcript"},
 	{"/help", "show this list"},
 	{"/model", "select the active model"},
-	{"/permissions", "show permission mode"},
+	{"/permissions", "select permission mode"},
 	{"/sessions", "resume a saved session"},
 	{"/tokens", "show token usage"},
 	{"/tools", "list available tools"},
