@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/owainlewis/neo/internal/atomicfile"
 	"github.com/owainlewis/neo/internal/llm"
 )
 
@@ -157,45 +157,6 @@ func (EditFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	return fmt.Sprintf("edited %s", path), nil
 }
 
-// atomicWrite writes content via a sibling temp file + rename, so a crash
-// mid-write cannot leave a half-written file at path.
 func atomicWrite(path string, content []byte) error {
-	mode := os.FileMode(0o644)
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".neo-write-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if _, err := tmp.Write(content); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, mode); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
+	return atomicfile.WritePreserveMode(path, content, 0o644, 0o755)
 }
