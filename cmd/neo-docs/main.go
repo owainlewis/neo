@@ -63,6 +63,15 @@ func buildPages() ([]page, error) {
 		{Path: filepath.Join("docs", "developer", "sessions.md"), Content: sessionsPage()},
 		{Path: filepath.Join("docs", "developer", "tools.md"), Content: toolsPage(specs)},
 		{Path: filepath.Join("docs", "developer", "prompt-caching.md"), Content: promptCachingPage()},
+		{Path: filepath.Join("docs", "developer", "guides", "index.md"), Content: guidesIndexPage()},
+		{Path: filepath.Join("docs", "developer", "guides", "agent-loop.md"), Content: agentLoopGuidePage()},
+		{Path: filepath.Join("docs", "developer", "guides", "system-prompt.md"), Content: systemPromptGuidePage()},
+		{Path: filepath.Join("docs", "developer", "guides", "tools.md"), Content: toolsGuidePage()},
+		{Path: filepath.Join("docs", "developer", "guides", "permissions.md"), Content: permissionsGuidePage()},
+		{Path: filepath.Join("docs", "developer", "guides", "providers.md"), Content: providersGuidePage()},
+		{Path: filepath.Join("docs", "developer", "guides", "sessions.md"), Content: sessionsGuidePage()},
+		{Path: filepath.Join("docs", "developer", "guides", "compaction.md"), Content: compactionGuidePage()},
+		{Path: filepath.Join("docs", "developer", "guides", "memory.md"), Content: memoryGuidePage()},
 	}, nil
 }
 
@@ -123,6 +132,7 @@ Start here when changing Neo:
 - [Sessions](sessions.md) documents persisted conversations and gateway mapping.
 - [Tools](tools.md) documents the built-in tool surface.
 - [Prompt caching](prompt-caching.md) documents structured system prompt blocks.
+- [Teaching guides](guides/index.md) explain the core ideas in plain language.
 
 Regenerate:
 
@@ -340,6 +350,557 @@ The flattened ` + "`Request.System`" + ` string remains available for providers 
 2. Dynamic AGENTS.md project context. This block is not marked cacheable.
 
 The goal is to cache stable instructions without letting changing project context evict that prefix.
+`
+}
+
+func guidesIndexPage() string {
+	return generatedHeader + `# Teaching Guides
+
+These guides explain Neo's core features in plain language. The reference docs say what exists; these guides explain why it exists, how it works, and how to change it safely.
+
+## Guides
+
+| Guide | What it explains |
+| --- | --- |
+| [Agent loop](agent-loop.md) | How one user message becomes model calls, tool calls, and a final answer. |
+| [System prompt](system-prompt.md) | What instructions Neo gives the model and how project context is added. |
+| [Tools](tools.md) | How Neo lets the model read files, search, run commands, and edit. |
+| [Permissions](permissions.md) | Why approvals exist and how ` + "`ask`" + `, ` + "`trusted`" + `, and ` + "`readonly`" + ` work. |
+| [Providers](providers.md) | How Anthropic, OpenAI API-key auth, and OpenAI subscription auth plug in. |
+| [Sessions](sessions.md) | How Neo saves and resumes conversations. |
+| [Compaction](compaction.md) | Why long chats need context management and what Neo has today. |
+| [Memory](memory.md) | What memory means for a coding agent and what should stay out of scope. |
+
+## How To Read These
+
+Each guide uses the same shape:
+
+1. The simple idea.
+2. The problem it solves.
+3. How Neo implements it today.
+4. How to customize or extend it.
+5. What to be careful about.
+`
+}
+
+func agentLoopGuidePage() string {
+	return generatedHeader + `# Agent Loop
+
+## The Simple Idea
+
+The agent loop is Neo's heartbeat. A user sends a message, the model answers, Neo runs any requested tools, then the model continues until it has a final answer.
+
+Think of it like:
+
+1. User asks for work.
+2. Model decides what to do.
+3. Neo runs tools the model asked for.
+4. Tool results go back to the model.
+5. Repeat until the model is done.
+
+## The Problem
+
+Coding agents need more than one model response. A model might first need to inspect files, then run a command, then edit a file, then run tests. That means one user turn can contain several model/tool steps.
+
+The tricky part is preserving the transcript correctly. If the model asks for a tool, the next provider request must include the matching tool result. Splitting those apart can break provider APIs and confuse the model.
+
+## How Neo Solves It
+
+The core loop lives in ` + "`internal/agent`" + `. It is deliberately policy-free:
+
+- It stores messages.
+- It calls an ` + "`llm.Provider`" + `.
+- It emits events for the TUI.
+- It runs injected tools.
+- It appends tool results before continuing.
+
+It does not know about coding style, AGENTS.md, skills, permissions, or the terminal UI. Those are layered around it.
+
+## The Important Invariant
+
+Every assistant ` + "`tool_use`" + ` must be followed by a matching user ` + "`tool_result`" + ` before the transcript is sent back to the provider.
+
+Neo builds the assistant message and tool results together before committing them to the transcript. That keeps the conversation valid even when a tool fails.
+
+## How To Extend It
+
+Add behavior around the loop, not inside it, unless the behavior is truly provider/tool-turn mechanics.
+
+Good extensions:
+
+- Add a new tool to ` + "`internal/tools`" + ` and inject it through the registry.
+- Add a new provider that implements ` + "`llm.Provider`" + `.
+- Add prompt context before constructing the agent.
+- Add a compactor through the ` + "`compact.Compactor`" + ` interface.
+
+Risky extensions:
+
+- Teaching the loop about project files.
+- Putting UI behavior in the loop.
+- Making the loop decide permissions itself.
+
+## Where To Look
+
+- ` + "`internal/agent/agent.go`" + `: the loop and event model.
+- ` + "`internal/llm/provider.go`" + `: provider-neutral message and tool types.
+- ` + "`internal/tools/`" + `: built-in tools the loop can run.
+`
+}
+
+func systemPromptGuidePage() string {
+	return generatedHeader + `# System Prompt
+
+## The Simple Idea
+
+The system prompt is the agent's instruction sheet. It tells the model what Neo is, what behavior to prefer, and what extra project context is available.
+
+If the user message is the task, the system prompt is the job description.
+
+## The Problem
+
+A coding agent needs stable instructions, but it also needs local context. Some context is almost always the same, such as "prefer small verified changes." Other context changes by project, such as AGENTS.md files or available skills.
+
+If all of that is mashed into one giant string, it is harder to understand, harder to cache, and harder to customize.
+
+## How Neo Solves It
+
+Neo builds the prompt in ordered blocks:
+
+1. A stable base prompt plus the skill catalog.
+2. Dynamic project instructions from AGENTS.md files.
+
+The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use ` + "`llm.SystemBlock`" + ` values instead.
+
+## What Goes Where
+
+| Source | Purpose |
+| --- | --- |
+| Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. |
+| Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked. |
+| AGENTS.md | Project or user instructions that should guide work in this repo. |
+| Future memory | Learned project facts or conventions, if the experimental memory feature is added. |
+
+## How To Customize It
+
+Use AGENTS.md for durable project instructions. For example:
+
+` + "```md" + `
+Read docs/developer/index.md before making changes.
+Do not edit generated docs by hand.
+Run go test ./... after Go changes.
+` + "```" + `
+
+Use skills for reusable workflows that should only apply when requested, such as review or commit behavior.
+
+Change the base prompt only when the default personality or operating rules of Neo itself should change.
+
+## What To Be Careful About
+
+Always-loaded prompt text costs tokens every turn. Keep stable instructions short. Put big or optional workflows in skills, tools, or searchable history instead of stuffing them into the system prompt.
+
+## Where To Look
+
+- ` + "`cmd/neo/main.go`" + `: chat startup and prompt assembly.
+- ` + "`internal/projectctx`" + `: AGENTS.md discovery and rendering.
+- ` + "`internal/skills`" + `: skill catalog and expansion.
+- ` + "`internal/llm/provider.go`" + `: ` + "`SystemBlock`" + `.
+`
+}
+
+func toolsGuidePage() string {
+	return generatedHeader + `# Tools
+
+## The Simple Idea
+
+Tools are the agent's hands. The model can think and write text, but tools let it inspect the repo, run commands, and change files.
+
+## The Problem
+
+A model cannot directly read your filesystem or run tests. Without tools, it has to guess. With tools, it can inspect reality before acting.
+
+The danger is that tools have side effects. A shell command or file write can change the machine, so tools must be small, inspectable, and permissioned.
+
+## How Neo Solves It
+
+Neo exposes a small built-in tool surface:
+
+- ` + "`read_file`" + `: read files.
+- ` + "`grep`" + `: search file contents.
+- ` + "`glob`" + `: find files by pattern.
+- ` + "`bash`" + `: run shell commands.
+- ` + "`write_file`" + `: overwrite or create files.
+- ` + "`edit_file`" + `: replace one exact string.
+
+Each tool implements the same interface:
+
+` + "```go" + `
+type Tool interface {
+    Name() string
+    Spec() llm.ToolSpec
+    Run(ctx context.Context, input map[string]any) (string, error)
+}
+` + "```" + `
+
+The model sees tool specs. Neo runs the tool and feeds the result back into the conversation.
+
+## Why The Tool Surface Is Small
+
+Small tools are easier to trust and easier to teach. For example, ` + "`edit_file`" + ` replaces exactly one occurrence. If the target text is missing or appears more than once, it fails instead of guessing.
+
+That makes failures useful: the model can inspect again and try a safer edit.
+
+## How To Add A Tool
+
+1. Add a type in ` + "`internal/tools`" + `.
+2. Implement ` + "`Name`" + `, ` + "`Spec`" + `, and ` + "`Run`" + `.
+3. Register it in ` + "`cmd/neo/main.go`" + `.
+4. Add tests for success, bad input, and edge cases.
+5. Update docs by running ` + "`go run ./cmd/neo-docs`" + `.
+
+## What To Be Careful About
+
+- Treat errors as data. Return useful output when a tool fails.
+- Keep file tools inside the workspace boundary.
+- Prefer structured tools over shell commands for common operations.
+- Do not make one giant tool that does everything.
+
+## Where To Look
+
+- ` + "`internal/tools/tool.go`" + `: tool interface and registry.
+- ` + "`internal/tools/fs.go`" + `: file tools.
+- ` + "`internal/tools/search.go`" + `: grep and glob.
+- ` + "`internal/tools/bash.go`" + `: shell execution.
+`
+}
+
+func permissionsGuidePage() string {
+	return generatedHeader + `# Permissions
+
+## The Simple Idea
+
+Permissions decide whether a tool call runs immediately, asks the user, or is denied.
+
+Think of it as the safety latch between "the model wants to do this" and "Neo actually does it."
+
+## The Problem
+
+Coding agents need powerful tools. They may run shell commands or edit files. That is useful, but it also means a bad tool call can make a mess.
+
+Approvals keep the user in control, especially for side effects.
+
+## How Neo Solves It
+
+Neo has three permission modes:
+
+| Mode | What happens |
+| --- | --- |
+| ` + "`ask`" + ` | Read/search tools run automatically. Bash and file mutations ask first. |
+| ` + "`trusted`" + ` | Built-in tools run without approval prompts. Workspace path checks still apply. |
+| ` + "`readonly`" + ` | Read/search tools run. Bash and file mutations are denied. |
+
+Configure it in ` + "`neo.yaml`" + `:
+
+` + "```yaml" + `
+permissions:
+  mode: ask
+` + "```" + `
+
+To turn approval prompts off:
+
+` + "```yaml" + `
+permissions:
+  mode: trusted
+` + "```" + `
+
+## Workspace Boundaries
+
+For path-shaped tools, Neo checks that paths stay inside the workspace root. This still matters in ` + "`trusted`" + ` mode.
+
+The point of ` + "`trusted`" + ` is to stop asking for every mutation, not to let the agent write anywhere on the machine.
+
+## Approval Previews
+
+When a write or edit asks for approval, Neo shows a preview. Long previews are truncated in the TUI so the approval question stays visible.
+
+The preview is there to answer: "what am I about to allow?"
+
+## How To Extend It
+
+The policy interface is small:
+
+` + "```go" + `
+type Policy interface {
+    Decide(ctx context.Context, req Request) Result
+}
+` + "```" + `
+
+Future policies could add per-tool rules, command allowlists, or stronger sandboxing without changing the core agent loop.
+
+## Where To Look
+
+- ` + "`internal/permission/policy.go`" + `: permission modes and path checks.
+- ` + "`internal/agent/agent.go`" + `: approval hook.
+- ` + "`internal/tui/blocks.go`" + `: approval rendering.
+- ` + "`internal/agent/preview.go`" + `: write/edit previews.
+`
+}
+
+func providersGuidePage() string {
+	return generatedHeader + `# Providers
+
+## The Simple Idea
+
+A provider is the adapter between Neo and a model API. Neo speaks its own small internal language; providers translate that into Anthropic or OpenAI requests.
+
+## The Problem
+
+Different model APIs use different request shapes, response shapes, tool-call formats, auth methods, retry behavior, and token accounting.
+
+Neo should not bake any one provider into the agent loop.
+
+## How Neo Solves It
+
+Neo defines one provider interface:
+
+` + "```go" + `
+type Provider interface {
+    Name() string
+    Complete(ctx context.Context, req Request) (*Response, error)
+}
+` + "```" + `
+
+The core loop sends an ` + "`llm.Request`" + `. The provider returns an ` + "`llm.Response`" + `. Everything provider-specific stays behind the adapter.
+
+## Current Providers
+
+| Provider config | Auth | Adapter |
+| --- | --- | --- |
+| ` + "`provider: anthropic`" + ` | ` + "`ANTHROPIC_API_KEY`" + ` | ` + "`internal/llm/anthropic`" + ` |
+| ` + "`provider: openai`" + ` + ` + "`openai_auth: api_key`" + ` | ` + "`OPENAI_API_KEY`" + ` | ` + "`internal/llm/openai.Client`" + ` |
+| ` + "`provider: openai`" + ` + ` + "`openai_auth: subscription`" + ` | ` + "`neo login`" + ` device-code credentials | ` + "`internal/llm/openai.CodexClient`" + ` |
+
+## How Models Are Chosen
+
+The config ` + "`model`" + ` value is passed through to the provider. If omitted, Neo chooses a provider-aware default.
+
+In the TUI, ` + "`/model`" + ` opens a model picker. It changes the active model for the current session and saves that session metadata.
+
+## What To Be Careful About
+
+- Provider adapters should translate, not decide product behavior.
+- Retry and response parsing belong in provider packages.
+- The core agent loop should not care whether a response came from Anthropic or OpenAI.
+- Subscription/Codex auth is experimental and should be documented carefully.
+
+## Where To Look
+
+- ` + "`internal/llm/provider.go`" + `: provider-neutral types.
+- ` + "`internal/llm/anthropic`" + `: Anthropic adapter.
+- ` + "`internal/llm/openai`" + `: OpenAI adapters.
+- ` + "`internal/auth`" + `: subscription credential storage and refresh.
+- ` + "`cmd/neo/main.go`" + `: provider selection.
+`
+}
+
+func sessionsGuidePage() string {
+	return generatedHeader + `# Sessions
+
+## The Simple Idea
+
+A session is a saved conversation. It lets Neo stop and later continue with the same transcript.
+
+In Codex terms, it is close to a thread.
+
+## The Problem
+
+Coding work often takes more than one terminal run. Without sessions, every restart loses the transcript, tool results, model choice, cwd, and title.
+
+Neo needs a durable place to store that conversation.
+
+## How Neo Solves It
+
+Neo stores sessions under ` + "`~/.neo/sessions/`" + `:
+
+- ` + "`index.json`" + `: metadata for listing.
+- ` + "`<session-id>.json`" + `: full transcript and metadata.
+
+The TUI saves after each user turn. Resuming a session restores the old messages into the agent.
+
+## Ways To Resume
+
+From the shell:
+
+` + "```bash" + `
+neo sessions
+neo resume <session-id>
+` + "```" + `
+
+Inside the TUI:
+
+` + "```text" + `
+/sessions
+` + "```" + `
+
+The TUI browser supports search, arrow-key navigation, cwd/all filtering, and enter-to-resume.
+
+## Why CWD Matters
+
+Tools and permissions are bound to the workspace when the TUI starts. For that reason, the in-TUI browser only resumes sessions from the current cwd. Cross-project sessions should be resumed from the shell with ` + "`neo resume <id>`" + ` so Neo can restore the saved cwd before creating tools.
+
+## Future Memory Connection
+
+Session search is a natural form of episodic memory: "what happened before?" Neo already saves transcripts, so a future memory search can query these sessions.
+
+## Where To Look
+
+- ` + "`internal/session/session.go`" + `: file-backed session store.
+- ` + "`cmd/neo/main.go`" + `: create, list, resume, and save wiring.
+- ` + "`internal/tui/sessions.go`" + `: in-TUI session browser.
+`
+}
+
+func compactionGuidePage() string {
+	return generatedHeader + `# Compaction
+
+## The Simple Idea
+
+Compaction is how an agent keeps a long conversation small enough to fit in the model's context window.
+
+If the transcript is a backpack, compaction is repacking it so the important things still fit.
+
+## The Problem
+
+Every model has a context limit. Long coding sessions can accumulate user messages, assistant messages, tool calls, tool results, diffs, test output, and screenshots.
+
+If the transcript gets too large, the next provider call may fail or become wastefully expensive.
+
+## How Neo Solves It Today
+
+Neo has the seam but not an aggressive strategy yet:
+
+- ` + "`compact.Compactor`" + ` is the interface.
+- ` + "`NoCompaction`" + ` is the default.
+- ` + "`SafeSplitPoint`" + ` helps future strategies avoid invalid transcript cuts.
+
+The important safety rule is: never keep a ` + "`tool_result`" + ` without its matching ` + "`tool_use`" + `.
+
+## Strategy Options
+
+| Strategy | Idea | Status |
+| --- | --- | --- |
+| No compaction | Keep the transcript as-is. | Current default. |
+| Sliding window | Keep only the most recent safe chunk. | Future. |
+| Summarize old turns | Replace older conversation with a summary. | Future. |
+| Token-budget compaction | Compact only when near a model's context limit. | Future, needs model catalog. |
+
+## What Good Compaction Preserves
+
+Good compaction keeps:
+
+- the user's goal,
+- decisions already made,
+- files changed,
+- commands run,
+- unresolved errors,
+- enough recent context for the model to continue.
+
+It can drop:
+
+- repeated logs,
+- obsolete exploration,
+- huge tool outputs once summarized,
+- details that no longer affect the task.
+
+## Where To Look
+
+- ` + "`internal/compact/compact.go`" + `: compactor interface and safe split helper.
+- ` + "`internal/agent/agent.go`" + `: compactor call before provider calls.
+`
+}
+
+func memoryGuidePage() string {
+	return generatedHeader + `# Memory
+
+## The Simple Idea
+
+Memory is what an agent carries across sessions.
+
+For Neo, memory should stay narrow: useful project context for a coding agent, not broad personal-assistant memory.
+
+## The Problem
+
+Coding agents repeatedly rediscover the same project facts:
+
+- generated docs must be updated through a generator,
+- tests run with a specific command,
+- a provider path is experimental,
+- a design decision was made last week.
+
+If those lessons are not saved somewhere, the agent starts cold each time.
+
+## Three Kinds Of Memory
+
+| Type | Meaning | Coding-agent example |
+| --- | --- | --- |
+| Episodic | What happened. | "Last session we decided not to add broad assistant memory." |
+| Semantic | What is true. | "This repo is a Go CLI/TUI project." |
+| Procedural | How to do things. | "Run ` + "`go test ./...`" + ` after Go changes." |
+
+A simple shorthand: episodic is the diary, semantic is the facts, procedural is the playbook.
+
+## What Neo Has Today
+
+Neo does not yet have a first-class memory feature.
+
+It already has pieces that look memory-adjacent:
+
+- AGENTS.md loading for explicit project instructions.
+- Skills for reusable procedures invoked by name.
+- Sessions for saved episodic history.
+
+Those are useful, but they are not the same as learned memory.
+
+## A Minimal Neo Memory Design
+
+For a coding agent, the smallest useful memory feature would be:
+
+- ` + "`.neo/MEMORY.md`" + ` for project-specific learned facts and conventions.
+- ` + "`/memory`" + ` to show loaded memory.
+- ` + "`/memory add <text>`" + ` to append a memory, with user control.
+- ` + "`/memory search <query>`" + ` to search project memory plus saved sessions.
+
+Memory should be experimental and off by default at first.
+
+## AGENTS.md vs MEMORY.md
+
+AGENTS.md is instruction. It says how the agent should behave in this repo.
+
+MEMORY.md would be learned context. It says what the agent or team learned while working.
+
+Examples:
+
+` + "```md" + `
+# AGENTS.md
+- Read docs/developer/index.md before changing Neo.
+- Do not edit generated docs by hand.
+
+# MEMORY.md
+- 2026-06: We decided memory should stay project-specific and experimental.
+- The /sessions browser only resumes sessions from the current cwd.
+` + "```" + `
+
+## What To Be Careful About
+
+- Memory is prompt text, so it is a security surface.
+- Always-loaded memory costs tokens every turn.
+- Bad memory is worse than no memory.
+- Session search should retrieve history on demand, not stuff every old conversation into context.
+
+## Where To Look
+
+- ` + "`internal/projectctx`" + `: current AGENTS.md context loading.
+- ` + "`internal/session`" + `: saved conversation history.
+- ` + "`internal/skills`" + `: reusable procedural instructions.
 `
 }
 

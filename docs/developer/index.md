@@ -12,6 +12,7 @@ Start here when changing Neo:
 - [Sessions](sessions.md) documents persisted conversations and gateway mapping.
 - [Tools](tools.md) documents the built-in tool surface.
 - [Prompt caching](prompt-caching.md) documents structured system prompt blocks.
+- [Teaching guides](guides/index.md) explain the core ideas in plain language.
 
 Regenerate:
 

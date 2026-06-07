@@ -66,3 +66,59 @@ func TestSessionsPageDocumentsTUIBrowser(t *testing.T) {
 		}
 	}
 }
+
+func TestIndexLinksTeachingGuides(t *testing.T) {
+	page := indexPage()
+
+	if !strings.Contains(page, "[Teaching guides](guides/index.md)") {
+		t.Fatalf("index page missing teaching guides link")
+	}
+}
+
+func TestTeachingGuidesCoverCoreFeatures(t *testing.T) {
+	page := guidesIndexPage()
+
+	for _, want := range []string{
+		"[Agent loop](agent-loop.md)",
+		"[System prompt](system-prompt.md)",
+		"[Tools](tools.md)",
+		"[Permissions](permissions.md)",
+		"[Providers](providers.md)",
+		"[Sessions](sessions.md)",
+		"[Compaction](compaction.md)",
+		"[Memory](memory.md)",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("guides index missing %q", want)
+		}
+	}
+}
+
+func TestPermissionsGuideExplainsModes(t *testing.T) {
+	page := permissionsGuidePage()
+
+	for _, want := range []string{
+		"`ask`",
+		"`trusted`",
+		"`readonly`",
+		"To turn approval prompts off",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("permissions guide missing %q", want)
+		}
+	}
+}
+
+func TestMemoryGuideSeparatesAgentsAndMemory(t *testing.T) {
+	page := memoryGuidePage()
+
+	for _, want := range []string{
+		"AGENTS.md is instruction",
+		"MEMORY.md would be learned context",
+		"experimental and off by default",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("memory guide missing %q", want)
+		}
+	}
+}
