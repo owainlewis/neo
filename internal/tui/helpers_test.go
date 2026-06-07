@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"regexp"
 
 	"charm.land/bubbles/v2/textarea"
@@ -24,6 +25,7 @@ func makeTestModel() *model {
 	ta.Focus()
 	ta.SetWidth(78)
 	return &model{
+		ctx:            context.Background(),
 		width:          80,
 		height:         24,
 		ag:             agent.New(agent.Config{Model: "test", Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(tools.ReadFile{})}),

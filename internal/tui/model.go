@@ -20,12 +20,16 @@ import (
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 )
 
 type Options struct {
-	AfterSend      func() error
-	PermissionMode string
+	AfterSend       func() error
+	PermissionMode  string
+	SessionStore    *session.Store
+	CurrentSession  *session.Session
+	OnSessionResume func(*session.Session)
 }
 
 type Option func(*Options)
@@ -36,6 +40,14 @@ func WithAfterSend(fn func() error) Option {
 
 func WithPermissionMode(mode string) Option {
 	return func(opts *Options) { opts.PermissionMode = mode }
+}
+
+func WithSessions(store *session.Store, current *session.Session, onResume func(*session.Session)) Option {
+	return func(opts *Options) {
+		opts.SessionStore = store
+		opts.CurrentSession = current
+		opts.OnSessionResume = onResume
+	}
 }
 
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
@@ -95,6 +107,7 @@ type model struct {
 	spin     spinner.Model
 	caption  string
 	picker   commandPicker
+	sessions sessionBrowser
 
 	// lastInputHeight is the textarea height the current layout was computed
 	// for. When the textarea grows/shrinks (DynamicHeight), this lets us
@@ -121,8 +134,12 @@ type model struct {
 	// skills drives $name expansion of the user's input before it's sent.
 	skills []skills.Skill
 
-	afterSend      func() error
-	permissionMode string
+	afterSend         func() error
+	permissionMode    string
+	sessionStore      *session.Store
+	currentSessionID  string
+	currentSessionCWD string
+	onSessionResume   func(*session.Session)
 }
 
 func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
@@ -183,7 +200,8 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	sp.Spinner = statusSpinner
 	sp.Style = lipgloss.NewStyle().Foreground(colDotThinking)
 
-	cwd, _ := os.Getwd()
+	absCWD, _ := os.Getwd()
+	cwd := absCWD
 	if home, err := os.UserHomeDir(); err == nil {
 		if rel, err := filepath.Rel(home, cwd); err == nil && !strings.HasPrefix(rel, "..") {
 			cwd = "~/" + rel
@@ -194,21 +212,34 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	if version == "" {
 		version = "dev"
 	}
+	currentSessionID := ""
+	currentSessionCWD := absCWD
+	if opts.CurrentSession != nil {
+		currentSessionID = opts.CurrentSession.Metadata.ID
+		if opts.CurrentSession.Metadata.CWD != "" {
+			currentSessionCWD = opts.CurrentSession.Metadata.CWD
+		}
+	}
+
 	m := &model{
-		ctx:            ctx,
-		ag:             ag,
-		modelTag:       modelTag,
-		mdStyleName:    styleName,
-		cwd:            cwd,
-		branch:         branch,
-		viewport:       vp,
-		input:          ta,
-		spin:           sp,
-		caption:        randomCaption(),
-		md:             md,
-		skills:         sk,
-		afterSend:      opts.AfterSend,
-		permissionMode: opts.PermissionMode,
+		ctx:               ctx,
+		ag:                ag,
+		modelTag:          modelTag,
+		mdStyleName:       styleName,
+		cwd:               cwd,
+		branch:            branch,
+		viewport:          vp,
+		input:             ta,
+		spin:              sp,
+		caption:           randomCaption(),
+		md:                md,
+		skills:            sk,
+		afterSend:         opts.AfterSend,
+		permissionMode:    opts.PermissionMode,
+		sessionStore:      opts.SessionStore,
+		currentSessionID:  currentSessionID,
+		currentSessionCWD: currentSessionCWD,
+		onSessionResume:   opts.OnSessionResume,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -240,6 +271,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 
 	case tea.KeyMsg:
+		if m.sessions.visible {
+			return m.handleSessionBrowserKey(msg)
+		}
 		if m.approval != nil {
 			switch msg.String() {
 			case "ctrl+c", "ctrl+d":
@@ -419,6 +453,9 @@ func (m *model) View() tea.View {
 	if m.width == 0 {
 		return makeView("loading…")
 	}
+	if m.sessions.visible {
+		return makeView(m.sessionBrowserView())
+	}
 
 	status := m.statusLine()
 	footer := m.footerLine()
@@ -486,6 +523,8 @@ func (m *model) handleSlashCommand(line string) {
 		m.appendBlock(tokensBlock{usage: m.ag.Usage()})
 	case "/model":
 		m.appendBlock(noticeBlock{text: "model: " + m.modelTag})
+	case "/sessions":
+		m.openSessionBrowser()
 	case "/clear":
 		m.ag.Clear()
 		m.blocks = nil
@@ -502,7 +541,7 @@ func (m *model) handleSlashCommand(line string) {
 
 func slashCommandRequiresIdle(cmd string) bool {
 	switch cmd {
-	case "/clear", "/tokens":
+	case "/clear", "/tokens", "/sessions":
 		return true
 	default:
 		return false

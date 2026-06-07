@@ -96,6 +96,11 @@ func (a *Agent) SetApprover(fn func(context.Context, ApprovalRequest) (bool, err
 
 func (a *Agent) Transcript() []llm.Message { return cloneMessages(a.messages) }
 
+func (a *Agent) ReplaceTranscript(messages []llm.Message) {
+	a.messages = cloneMessages(messages)
+	a.usage = llm.Usage{}
+}
+
 func (a *Agent) Clear() {
 	a.messages = nil
 }

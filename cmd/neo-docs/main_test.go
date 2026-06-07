@@ -52,3 +52,17 @@ func TestConfigPageDocumentsOpenAIAuthModesWithoutSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionsPageDocumentsTUIBrowser(t *testing.T) {
+	page := sessionsPage()
+
+	for _, want := range []string{
+		"`/sessions` opens an in-TUI session browser",
+		"cwd/all filtering",
+		"only resumes sessions from the current cwd",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("sessions page missing %q", want)
+		}
+	}
+}

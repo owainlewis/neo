@@ -116,6 +116,28 @@ func TestAgent_TranscriptReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestAgent_ReplaceTranscript(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("ok")}}
+	ag := newTestAgent(t, prov)
+	if _, err := ag.Send(context.Background(), "before"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	replacement := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "resumed"}}},
+	}
+
+	ag.ReplaceTranscript(replacement)
+	got := ag.Transcript()
+
+	if len(got) != 1 || got[0].Content[0].Text != "resumed" {
+		t.Fatalf("unexpected transcript: %#v", got)
+	}
+	replacement[0].Content[0].Text = "mutated"
+	if ag.Transcript()[0].Content[0].Text != "resumed" {
+		t.Fatal("ReplaceTranscript kept caller-owned message storage")
+	}
+}
+
 func TestAgent_ProviderErrorLeavesTranscriptClean(t *testing.T) {
 	// First call returns OK with a tool_use; second call (after we feed the
 	// tool result back) errors. The transcript must still satisfy the

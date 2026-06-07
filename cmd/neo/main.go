@@ -324,6 +324,9 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	if err := tui.Run(ctx, ag, cfg.Model, Version, sk,
 		tui.WithAfterSend(saveSession),
 		tui.WithPermissionMode(cfg.Permissions.Mode),
+		tui.WithSessions(store, sess, func(resumed *session.Session) {
+			sess = resumed
+		}),
 	); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
