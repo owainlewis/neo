@@ -31,6 +31,7 @@ var keyBindings = []struct {
 }{
 	{"↩", "send"},
 	{"⌥↩", "newline"},
+	{"!cmd", "run shell command"},
 	{"esc", "cancel the current turn"},
 	{"ctrl+l", "clear the screen"},
 	{"ctrl+c", "quit"},
