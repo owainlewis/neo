@@ -22,6 +22,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
+	"github.com/owainlewis/neo/internal/workspace"
 )
 
 type Options struct {
@@ -112,6 +113,7 @@ type model struct {
 	spin     spinner.Model
 	caption  string
 	picker   commandPicker
+	files    filePicker
 	sessions sessionBrowser
 	models   modelBrowser
 	perms    permissionPicker
@@ -240,6 +242,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		input:             ta,
 		spin:              sp,
 		caption:           randomCaption(),
+		files:             newFilePicker(workspace.Root(absCWD)),
 		md:                md,
 		skills:            sk,
 		afterSend:         opts.AfterSend,
@@ -313,6 +316,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "esc":
+			if m.files.visible {
+				m.dismissFilePicker()
+				m.layout()
+				break
+			}
 			if m.picker.visible {
 				m.dismissSlashPicker()
 				m.layout()
@@ -332,11 +340,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.layout()
 				break
 			}
+			if m.files.visible && m.acceptFilePicker() {
+				m.syncInputHeight()
+				m.layout()
+				break
+			}
 			rawInput := text
 			// Slash commands are parsed before the busy gate.
 			if strings.HasPrefix(text, "/") {
 				m.input.Reset()
 				m.hideSlashPicker()
+				m.hideFilePicker()
 				m.layout()
 				m.syncInputHeight()
 				m.handleSlashCommand(text)
@@ -347,6 +361,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(text, "!") {
 				m.input.Reset()
 				m.hideSlashPicker()
+				m.hideFilePicker()
 				m.layout()
 				m.syncInputHeight()
 				cmds = append(cmds, m.handleBangCommand(text))
@@ -358,6 +373,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.input.Reset()
 			m.hideSlashPicker()
+			m.hideFilePicker()
 			m.layout()
 			m.syncInputHeight()
 			// Pull any dragged/pasted image paths out of the input; they become
@@ -383,9 +399,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// from enter without enhanced-key reporting; alt+enter and
 			// ctrl+j are the portable fallbacks.
 			m.input.InsertString("\n")
-			m.updateSlashPicker()
+			m.updateInlinePickers()
 			m.syncInputHeight()
 		case "up":
+			if m.files.visible {
+				m.moveFilePickerSelection(-1)
+				break
+			}
 			if m.picker.visible {
 				m.moveSlashPickerSelection(-1)
 				break
@@ -393,9 +413,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
-			m.updateSlashPicker()
+			m.updateInlinePickers()
 			m.syncInputHeight()
 		case "down":
+			if m.files.visible {
+				m.moveFilePickerSelection(1)
+				break
+			}
 			if m.picker.visible {
 				m.moveSlashPickerSelection(1)
 				break
@@ -403,9 +427,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
-			m.updateSlashPicker()
+			m.updateInlinePickers()
 			m.syncInputHeight()
 		case "tab":
+			if m.files.visible && m.acceptFilePicker() {
+				m.syncInputHeight()
+				m.layout()
+				break
+			}
 			if m.picker.visible && m.acceptSlashPicker(true) {
 				m.syncInputHeight()
 				m.layout()
@@ -414,7 +443,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
-			m.updateSlashPicker()
+			m.updateInlinePickers()
 			m.syncInputHeight()
 		case "ctrl+l":
 			m.blocks = nil
@@ -423,7 +452,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
-			m.updateSlashPicker()
+			m.updateInlinePickers()
 			m.syncInputHeight()
 		}
 
@@ -490,7 +519,7 @@ func (m *model) View() tea.View {
 
 	status := m.statusLine()
 	footer := m.footerLine()
-	picker := m.slashPickerView()
+	picker := m.inlinePickerView()
 	inputBar := styInputBar.Width(m.width).Render(m.input.View())
 
 	parts := []string{
@@ -573,6 +602,22 @@ func slashCommandRequiresIdle(cmd string) bool {
 	default:
 		return false
 	}
+}
+
+func (m *model) updateInlinePickers() {
+	m.updateSlashPicker()
+	if m.picker.visible {
+		m.hideFilePicker()
+		return
+	}
+	m.updateFilePicker()
+}
+
+func (m *model) inlinePickerView() string {
+	if out := m.slashPickerView(); out != "" {
+		return out
+	}
+	return m.filePickerView()
 }
 
 // handleBangCommand parses !shell aliases. Called only when input begins with
@@ -681,6 +726,8 @@ func (m *model) layout() {
 	pickerHeight := 0
 	if m.picker.visible && len(m.picker.matches) > 0 {
 		pickerHeight = len(m.picker.matches) + 1
+	} else if m.files.visible && len(m.files.matches) > 0 {
+		pickerHeight = len(m.files.matches) + 1
 	}
 	chrome := inputHeight + pickerHeight + 4 // status + footer lines + margin above/below input
 	vpH := m.height - chrome
