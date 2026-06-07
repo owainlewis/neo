@@ -96,6 +96,15 @@ func (a *Agent) SetApprover(fn func(context.Context, ApprovalRequest) (bool, err
 
 func (a *Agent) Transcript() []llm.Message { return cloneMessages(a.messages) }
 
+func (a *Agent) Model() string { return a.cfg.Model }
+
+func (a *Agent) SetModel(model string) {
+	if strings.TrimSpace(model) == "" {
+		return
+	}
+	a.cfg.Model = strings.TrimSpace(model)
+}
+
 func (a *Agent) ReplaceTranscript(messages []llm.Message) {
 	a.messages = cloneMessages(messages)
 	a.usage = llm.Usage{}

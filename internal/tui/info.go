@@ -18,7 +18,7 @@ type slashCommand struct {
 var slashCommands = []slashCommand{
 	{"/clear", "clear the current transcript"},
 	{"/help", "show this list"},
-	{"/model", "show the current model"},
+	{"/model", "select the active model"},
 	{"/permissions", "show permission mode"},
 	{"/sessions", "resume a saved session"},
 	{"/tokens", "show token usage"},

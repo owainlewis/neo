@@ -30,6 +30,7 @@ type Options struct {
 	SessionStore    *session.Store
 	CurrentSession  *session.Session
 	OnSessionResume func(*session.Session)
+	ModelChoices    []ModelChoice
 }
 
 type Option func(*Options)
@@ -48,6 +49,10 @@ func WithSessions(store *session.Store, current *session.Session, onResume func(
 		opts.CurrentSession = current
 		opts.OnSessionResume = onResume
 	}
+}
+
+func WithModelChoices(choices []ModelChoice) Option {
+	return func(opts *Options) { opts.ModelChoices = choices }
 }
 
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
@@ -108,6 +113,7 @@ type model struct {
 	caption  string
 	picker   commandPicker
 	sessions sessionBrowser
+	models   modelBrowser
 
 	// lastInputHeight is the textarea height the current layout was computed
 	// for. When the textarea grows/shrinks (DynamicHeight), this lets us
@@ -140,6 +146,7 @@ type model struct {
 	currentSessionID  string
 	currentSessionCWD string
 	onSessionResume   func(*session.Session)
+	modelChoices      []ModelChoice
 }
 
 func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
@@ -240,6 +247,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		currentSessionID:  currentSessionID,
 		currentSessionCWD: currentSessionCWD,
 		onSessionResume:   opts.OnSessionResume,
+		modelChoices:      normalizeModelChoices(modelTag, opts.ModelChoices),
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -271,6 +279,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 
 	case tea.KeyMsg:
+		if m.models.visible {
+			return m.handleModelBrowserKey(msg)
+		}
 		if m.sessions.visible {
 			return m.handleSessionBrowserKey(msg)
 		}
@@ -456,6 +467,9 @@ func (m *model) View() tea.View {
 	if m.sessions.visible {
 		return makeView(m.sessionBrowserView())
 	}
+	if m.models.visible {
+		return makeView(m.modelBrowserView())
+	}
 
 	status := m.statusLine()
 	footer := m.footerLine()
@@ -522,7 +536,7 @@ func (m *model) handleSlashCommand(line string) {
 	case "/tokens":
 		m.appendBlock(tokensBlock{usage: m.ag.Usage()})
 	case "/model":
-		m.appendBlock(noticeBlock{text: "model: " + m.modelTag})
+		m.openModelBrowser()
 	case "/sessions":
 		m.openSessionBrowser()
 	case "/clear":
@@ -541,7 +555,7 @@ func (m *model) handleSlashCommand(line string) {
 
 func slashCommandRequiresIdle(cmd string) bool {
 	switch cmd {
-	case "/clear", "/tokens", "/sessions":
+	case "/clear", "/tokens", "/sessions", "/model":
 		return true
 	default:
 		return false

@@ -317,7 +317,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	saveSession := func() error {
 		sess.Messages = ag.Transcript()
 		sess.Metadata.CWD = cwd
-		sess.Metadata.Model = cfg.Model
+		sess.Metadata.Model = ag.Model()
 		return store.Save(ctx, sess)
 	}
 
@@ -327,9 +327,41 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		tui.WithSessions(store, sess, func(resumed *session.Session) {
 			sess = resumed
 		}),
+		tui.WithModelChoices(modelChoices(cfg)),
 	); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func modelChoices(cfg *config.Config) []tui.ModelChoice {
+	switch cfg.Provider {
+	case "openai":
+		if cfg.SubscriptionAuth() {
+			return []tui.ModelChoice{
+				{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "Coding model for long-horizon agentic tasks"},
+				{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex", Description: "Coding model optimized for agentic coding"},
+				{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex mini", Description: "Smaller Codex model for lower-cost coding tasks"},
+				{ID: "gpt-5-codex", Name: "GPT-5 Codex", Description: "Codex-optimized GPT-5 model"},
+			}
+		}
+		return []tui.ModelChoice{
+			{ID: "gpt-5.2", Name: "GPT-5.2", Description: "Recommended flagship model for coding and agentic tasks"},
+			{ID: "gpt-5.1", Name: "GPT-5.1", Description: "Coding and agentic model with configurable reasoning"},
+			{ID: "gpt-5", Name: "GPT-5", Description: "Previous GPT-5 reasoning model"},
+			{ID: "gpt-5-mini", Name: "GPT-5 mini", Description: "Faster, lower-cost GPT-5 model"},
+			{ID: "gpt-5-nano", Name: "GPT-5 nano", Description: "Smallest GPT-5 model"},
+			{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "Coding model for long-horizon agentic tasks"},
+			{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex", Description: "Coding model optimized for agentic coding"},
+			{ID: "gpt-5-codex", Name: "GPT-5 Codex", Description: "Codex-optimized GPT-5 model"},
+			{ID: "gpt-4.1", Name: "GPT-4.1", Description: "Non-reasoning model for general coding tasks"},
+			{ID: "gpt-4o", Name: "GPT-4o", Description: "Fast multimodal GPT-4o model"},
+			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},
+		}
+	default:
+		return []tui.ModelChoice{
+			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Description: "Default Anthropic model"},
+		}
 	}
 }
 
