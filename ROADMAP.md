@@ -5,6 +5,10 @@ rock-solid core with capabilities layered on top as independent, feature-flagged
 modules, so the codebase doubles as a teaching reference for how a coding agent
 actually works.
 
+Planning note: GitHub Issues are the source of truth for live issue status and
+backlog planning. This roadmap is a curated product direction snapshot; if it
+disagrees with an open issue, trust the issue and update this file.
+
 ## Architecture
 
 Three layers, each in its own package, each replaceable:
@@ -27,9 +31,11 @@ will be revisited deliberately once the core agent is rock solid (see Later).
 - [x] **Tool registry** — `Bash`, `ReadFile`, `WriteFile`, `EditFile`. Atomic
       writes, strict single-match edits, per-step tool whitelisting.
 - [x] **Anthropic provider** — `Provider` interface with one implementation.
-      Exponential backoff + jitter on 429/5xx, respects `Retry-After` (cap 30s).
+      Retries honor `Retry-After` headers, HTTP-date hints, caps, jitter, and
+      cancellable waits.
 - [x] **OpenAI provider** — API-key Responses API adapter plus experimental
-      ChatGPT/Codex subscription auth via `neo login` / `neo logout`.
+      ChatGPT/Codex subscription auth code via `neo login` / `neo logout`;
+      GitHub issue #66 remains the source of truth for open verification/status.
 - [x] **Config** — `neo.yaml` → `~/.neo/config.yaml` → embedded default, with
       tri-state feature flags for layered capabilities.
 - [x] **AGENTS.md loading** — `internal/projectctx` discovers project + global
@@ -41,8 +47,9 @@ will be revisited deliberately once the core agent is rock solid (see Later).
       future layer.)
 - [x] **TUI** — Bubble Tea v2 chat (blocking + spinner, no streaming by design),
       splash screen.
-- [x] **Search tools** — `grep` and `glob` let the model inspect repositories
-      without shelling out for common search operations.
+- [x] **Search tools, first pass** — `grep` and `glob` let the model inspect
+      repositories without shelling out for common search operations, returning
+      structured JSON with truncation metadata.
 - [x] **Permission policy** — `ask`, `trusted`, and `readonly` modes gate tools
       while keeping path-shaped tools inside the workspace.
 - [x] **Slash-command observability** — `/help`, `/tools`, `/permissions`,
@@ -50,30 +57,46 @@ will be revisited deliberately once the core agent is rock solid (see Later).
 - [x] **Session and model browsers** — `/sessions` resumes current-cwd sessions
       in the TUI, and `/model` switches the active model from a provider-aware
       picker.
+- [x] **Permissions picker** — `/permissions` selects `ask`, `trusted`, or
+      `readonly` for the current session.
+- [x] **Fast TUI references and shell alias** — `@file` path completion and
+      `!command` direct shell execution cover common terminal workflows.
 - [x] **Teaching guides** — generated `docs/developer/guides/` pages explain the
       core concepts in problem/solution form.
+- [x] **Docs freshness checks** — CI runs `go run ./cmd/neo-docs --check` on
+      pull requests while the main-branch docs workflow can regenerate output.
+- [x] **User docs for robust-core tools** — README documents permission modes,
+      approval behavior, search tools, slash commands, sessions, `!`, and
+      `@file`.
+- [x] **Roadmap and ticket hygiene** — local planning docs now distinguish
+      historical work from active next slices and point to GitHub Issues for
+      source-of-truth status.
 
 ## Next: core robustness
 
-- [ ] **Roadmap and ticket hygiene** — keep `ROADMAP.md`, `TICKETS.md`, and the
-      generated teaching guides aligned with the live code.
 - [ ] **Git context** — snapshot `git status`, branch, and recent log into the
-      prompt at session start.
-- [ ] **Permissions picker** — make `/permissions` selectable like `/model`,
-      with session-local mode changes and clear safety notes.
-- [ ] **Session search** — add saved-session search as the first useful form of
-      episodic memory.
+      prompt at session start (GitHub issue #63).
+- [ ] **Permission approval UX** — make approval prompts clearer, focused, and
+      scrollable for long previews (GitHub issue #94).
+- [ ] **TUI tool display polish** — group `/tools` output by capability and
+      show how the current permission mode affects each group.
+- [ ] **OpenAI subscription-auth verification** — verify GitHub issue #66
+      against the live implementation, then implement gaps or update the issue
+      tracker.
+- [ ] **Session transcript search** — add CLI/API saved-session search as the
+      first useful form of episodic memory; the TUI session browser already has
+      in-view filtering.
 - [ ] **Memory stub** — add an experimental, disabled-by-default `/memory`
       surface before implementing project memory.
+- [ ] **Teaching guide polish** — keep improving generated guides from
+      `cmd/neo-docs` with practical examples, not hand edits.
 - [ ] **Context compaction** — token-aware summarization at a threshold, cutting
-      only at valid points (never mid-tool-result).
+      only at valid points (never mid-tool-result; GitHub issue #65).
 
 ## Later
 
 - [x] **Prompt caching** — `cache_control` on the static system prompt; keep the
       dynamic sections (git, project context) separate to maximize cache hits.
-- [ ] **Docs freshness automation** — fail PRs when generated docs/guides are out
-      of date, while preserving the main-branch auto-update workflow.
 - [ ] **`neo update`** — self-update the installed binary from GitHub Releases.
       See `TICKETS.md` NEO-1.
 - [ ] **Release automation** — replace manual tag pushes with a release PR/tag
