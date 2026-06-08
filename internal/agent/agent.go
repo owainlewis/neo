@@ -146,6 +146,7 @@ func (a *Agent) Usage() llm.Usage {
 func (a *Agent) RunTool(ctx context.Context, name string, input map[string]any) (string, bool) {
 	a.emit(Event{Kind: EventToolCall, Name: name, Args: cloneInput(input)})
 	out, isErr := a.runTool(ctx, name, input)
+	out = capToolResultContent(out)
 	a.emit(Event{Kind: EventToolResult, Name: name, Text: out, IsError: isErr})
 	return out, isErr
 }
@@ -223,6 +224,7 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			case "tool_use":
 				a.emit(Event{Kind: EventToolCall, Name: block.Name, Args: block.Input})
 				out, isErr := a.runTool(ctx, block.Name, block.Input)
+				out = capToolResultContent(out)
 				a.emit(Event{Kind: EventToolResult, Name: block.Name, Text: out, IsError: isErr})
 				toolResults = append(toolResults, llm.ContentBlock{
 					Type:      "tool_result",
