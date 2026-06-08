@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -122,6 +123,23 @@ func TestLoad_OpenAIDefaultsToAPIKeyAuth(t *testing.T) {
 	})
 }
 
+func TestLoad_OpenAIAcceptsExplicitAPIKeyAuth(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: openai\nopenai_auth: api_key\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.OpenAIAuth != OpenAIAuthAPIKey {
+			t.Fatalf("openai_auth: got %q want %q", cfg.OpenAIAuth, OpenAIAuthAPIKey)
+		}
+		if cfg.SubscriptionAuth() {
+			t.Fatal("api_key auth must not report SubscriptionAuth")
+		}
+	})
+}
+
 func TestLoad_OpenAISubscriptionGetsCodexModel(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
@@ -135,6 +153,42 @@ func TestLoad_OpenAISubscriptionGetsCodexModel(t *testing.T) {
 		}
 		if cfg.Model != defaultCodexModel {
 			t.Fatalf("model: got %q want %q", cfg.Model, defaultCodexModel)
+		}
+	})
+}
+
+func TestLoad_RejectsInvalidOpenAIAuthMode(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "openai_auth: nope\n")
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected invalid openai_auth to fail")
+		}
+		for _, want := range []string{"neo.yaml", "openai_auth", OpenAIAuthAPIKey, OpenAIAuthSubscription, "nope"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error %q does not contain %q", err.Error(), want)
+			}
+		}
+	})
+}
+
+func TestLoad_ValidOpenAIAuthIgnoredForAnthropicProvider(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: anthropic\nopenai_auth: subscription\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Provider != "anthropic" {
+			t.Fatalf("provider: got %q want anthropic", cfg.Provider)
+		}
+		if cfg.SubscriptionAuth() {
+			t.Fatal("openai_auth must be ignored for non-openai providers")
+		}
+		if cfg.Model != defaultModel {
+			t.Fatalf("model: got %q want %q", cfg.Model, defaultModel)
 		}
 	})
 }
