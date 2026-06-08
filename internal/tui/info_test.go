@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,11 +10,15 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/llm/llmtest"
+	"github.com/owainlewis/neo/internal/permission"
+	"github.com/owainlewis/neo/internal/tools"
 )
 
 func TestHelpBlock_ListsHelpCommandAndKeys(t *testing.T) {
 	out := plain(helpBlock{}.render(80, nil))
-	for _, want := range []string{"/help", "send", "newline", "quit"} {
+	for _, want := range []string{"/help", "!cmd", "send", "newline", "quit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("/help missing %q: %s", want, out)
 		}
@@ -188,6 +193,91 @@ func TestApprovalPromptRepliesFromKeypress(t *testing.T) {
 	}
 	if m.approval != nil {
 		t.Fatal("expected approval to clear")
+	}
+}
+
+func TestBangCommand_EmptyShowsHelpfulError(t *testing.T) {
+	m := makeTestModel()
+
+	cmd := m.handleBangCommand("!")
+
+	if cmd != nil {
+		t.Fatal("empty ! should not start a command")
+	}
+	if len(m.blocks) != 1 {
+		t.Fatalf("expected one error block, got %d", len(m.blocks))
+	}
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "!git status") {
+		t.Fatalf("expected helpful example, got %v", eb.err)
+	}
+}
+
+func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) {
+	prov := &llmtest.FakeProvider{}
+	ag := agent.New(agent.Config{
+		Model:    "test",
+		Provider: prov,
+		Tools:    tools.NewRegistry(tuiEchoTool{}),
+		Policy:   permission.New("trusted", "."),
+	})
+	m := makeTestModel()
+	m.ag = ag
+	m.ag.SetEventHandler(m.handleEvent)
+
+	cmd := m.handleBangCommand("!echo hello")
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
+	msg := cmd()
+	m.Update(msg)
+
+	if m.busy {
+		t.Fatal("expected command to finish")
+	}
+	if len(prov.Calls) != 0 {
+		t.Fatalf("provider calls = %d, want 0", len(prov.Calls))
+	}
+	if got := len(m.ag.Transcript()); got != 0 {
+		t.Fatalf("agent transcript length = %d, want 0", got)
+	}
+	if len(m.blocks) != 2 {
+		t.Fatalf("expected tool call and result blocks, got %d", len(m.blocks))
+	}
+	tc, ok := m.blocks[0].(toolCallBlock)
+	if !ok {
+		t.Fatalf("expected toolCallBlock, got %T", m.blocks[0])
+	}
+	if tc.name != "bash" || tc.args["command"] != "echo hello" {
+		t.Fatalf("unexpected tool call: %+v", tc)
+	}
+	tr, ok := m.blocks[1].(toolResultBlock)
+	if !ok {
+		t.Fatalf("expected toolResultBlock, got %T", m.blocks[1])
+	}
+	if tr.isError || tr.text != "echo hello" {
+		t.Fatalf("unexpected tool result: %+v", tr)
+	}
+}
+
+func TestBangCommand_BusyIsUnavailable(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+
+	cmd := m.handleBangCommand("!git status")
+
+	if cmd != nil {
+		t.Fatal("busy ! should not start a command")
+	}
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "while a turn is running") {
+		t.Fatalf("unexpected error: %v", eb.err)
 	}
 }
 
@@ -405,4 +495,17 @@ func withSlashCommands(t *testing.T, commands []slashCommand) {
 
 func keyPress(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code})
+}
+
+type tuiEchoTool struct{}
+
+func (tuiEchoTool) Name() string { return "bash" }
+func (tuiEchoTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: "bash", Description: "bash", InputSchema: map[string]any{"type": "object"}}
+}
+func (tuiEchoTool) Run(_ context.Context, in map[string]any) (string, error) {
+	if s, ok := in["command"].(string); ok {
+		return s, nil
+	}
+	return "", nil
 }

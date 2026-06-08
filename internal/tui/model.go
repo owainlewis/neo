@@ -342,6 +342,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.handleSlashCommand(text)
 				break
 			}
+			// A leading ! is a direct shell command alias. It runs through the
+			// agent's normal bash tool policy and rendering events, not as chat.
+			if strings.HasPrefix(text, "!") {
+				m.input.Reset()
+				m.hideSlashPicker()
+				m.layout()
+				m.syncInputHeight()
+				cmds = append(cmds, m.handleBangCommand(text))
+				break
+			}
 			// Chat text is suppressed while a turn is in flight.
 			if m.busy {
 				break
@@ -565,6 +575,25 @@ func slashCommandRequiresIdle(cmd string) bool {
 	}
 }
 
+// handleBangCommand parses !shell aliases. Called only when input begins with
+// '!'. The command is intentionally not appended as a user chat message.
+func (m *model) handleBangCommand(line string) tea.Cmd {
+	command := strings.TrimSpace(strings.TrimPrefix(line, "!"))
+	if command == "" {
+		m.appendBlock(errorBlock{err: fmt.Errorf("type a shell command after !, for example !git status")})
+		return nil
+	}
+	if m.busy {
+		m.appendBlock(errorBlock{err: fmt.Errorf("! is unavailable while a turn is running")})
+		return nil
+	}
+	m.busy = true
+	m.busySince = time.Now()
+	m.caption = randomCaption()
+	m.setDotColor(colDotThinking)
+	return m.startTool("bash", map[string]any{"command": command})
+}
+
 func (m *model) finishApproval(ok bool) {
 	if m.approval == nil {
 		return
@@ -776,6 +805,15 @@ func (m *model) startSend(text string, images []string) tea.Cmd {
 			}
 		}
 		return sendResultMsg{err: err}
+	}
+}
+
+func (m *model) startTool(name string, input map[string]any) tea.Cmd {
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.sendCancel = cancel
+	return func() tea.Msg {
+		m.ag.RunTool(ctx, name, input)
+		return sendResultMsg{}
 	}
 }
 

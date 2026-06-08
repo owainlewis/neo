@@ -140,6 +140,16 @@ func (a *Agent) Usage() llm.Usage {
 	return a.usage
 }
 
+// RunTool runs a built-in tool directly through the same permission and
+// approval path used for model-requested tool calls. It emits the normal tool
+// call/result events, but does not mutate the LLM transcript.
+func (a *Agent) RunTool(ctx context.Context, name string, input map[string]any) (string, bool) {
+	a.emit(Event{Kind: EventToolCall, Name: name, Args: cloneInput(input)})
+	out, isErr := a.runTool(ctx, name, input)
+	a.emit(Event{Kind: EventToolResult, Name: name, Text: out, IsError: isErr})
+	return out, isErr
+}
+
 func (a *Agent) Send(ctx context.Context, userText string) (string, error) {
 	return a.SendWith(ctx, userText, nil)
 }

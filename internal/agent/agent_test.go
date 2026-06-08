@@ -264,6 +264,59 @@ func TestAgent_MissingApproverDeniesAskedTool(t *testing.T) {
 	}
 }
 
+func TestAgent_RunToolUsesPolicyAndDoesNotMutateTranscript(t *testing.T) {
+	var events []Event
+	approvals := 0
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: &llmtest.FakeProvider{},
+		Tools:    tools.NewRegistry(namedTool("bash")),
+		Policy:   permission.New("ask", "."),
+		Approve: func(context.Context, ApprovalRequest) (bool, error) {
+			approvals++
+			return true, nil
+		},
+		OnEvent: func(e Event) {
+			events = append(events, e)
+		},
+	})
+
+	out, isErr := ag.RunTool(context.Background(), "bash", map[string]any{"command": "date"})
+	if isErr {
+		t.Fatalf("RunTool returned error output: %q", out)
+	}
+	if out != "ok" {
+		t.Fatalf("RunTool output = %q, want ok", out)
+	}
+	if approvals != 1 {
+		t.Fatalf("approvals = %d, want 1", approvals)
+	}
+	if got := len(ag.Transcript()); got != 0 {
+		t.Fatalf("RunTool mutated transcript with %d messages", got)
+	}
+	if len(events) != 2 || events[0].Kind != EventToolCall || events[1].Kind != EventToolResult {
+		t.Fatalf("events = %#v, want tool call then result", events)
+	}
+}
+
+func TestAgent_RunToolReadonlyDeniesBash(t *testing.T) {
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: &llmtest.FakeProvider{},
+		Tools:    tools.NewRegistry(namedTool("bash")),
+		Policy:   permission.New("readonly", "."),
+		Approve: func(context.Context, ApprovalRequest) (bool, error) {
+			t.Fatal("readonly should deny bash without asking")
+			return false, nil
+		},
+	})
+
+	out, isErr := ag.RunTool(context.Background(), "bash", map[string]any{"command": "date"})
+	if !isErr || !strings.Contains(out, "readonly denied bash") {
+		t.Fatalf("RunTool = (%q, %v), want readonly denial", out, isErr)
+	}
+}
+
 func TestAgent_SetPermissionModeTrustedSkipsApproval(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
 		llmtest.ToolUse("call_1", "bash", map[string]any{"command": "date"}),
