@@ -8,8 +8,8 @@ Neo exposes a small built-in tool surface to the model.
 | --- | --- |
 | `bash` | Run a shell command via /bin/bash -lc. Returns combined stdout+stderr. Use for git, tests, builds, file inspection beyond Read. |
 | `edit_file` | Replace exactly one occurrence of old_string with new_string in a file. Fails if old_string is missing or appears more than once. |
-| `glob` | Find files under the workspace root using a glob pattern. Supports ** for recursive matches. |
-| `grep` | Search text files under the workspace with a regular expression. Returns file:line matches with optional context. |
+| `glob` | Find files under the workspace root using a glob pattern. Supports ** for recursive matches. Returns JSON: {matches:[path],truncated,count}. |
+| `grep` | Search text files under the workspace with a regular expression. Returns JSON: {matches:[{path,line,text,context_before?,context_after?}],truncated,count}. |
 | `read_file` | Read a file from disk. Returns up to ~256KB. Use offset/limit (1-indexed line numbers) to page through larger files. |
 | `write_file` | Write content to a file, creating parent directories. Overwrites if exists. |
 
@@ -62,7 +62,7 @@ Replace exactly one occurrence of old_string with new_string in a file. Fails if
 
 ### `glob`
 
-Find files under the workspace root using a glob pattern. Supports ** for recursive matches.
+Find files under the workspace root using a glob pattern. Supports ** for recursive matches. Returns JSON: {matches:[path],truncated,count}.
 
 ```json
 {
@@ -89,7 +89,7 @@ Find files under the workspace root using a glob pattern. Supports ** for recurs
 
 ### `grep`
 
-Search text files under the workspace with a regular expression. Returns file:line matches with optional context.
+Search text files under the workspace with a regular expression. Returns JSON: {matches:[{path,line,text,context_before?,context_after?}],truncated,count}.
 
 ```json
 {
