@@ -183,3 +183,24 @@ func TestCodex_RetriesOn5xx(t *testing.T) {
 		t.Fatalf("expected 3 calls, got %d", calls)
 	}
 }
+
+func TestCodexDoRequest_ReturnsRetryAfterHeader(t *testing.T) {
+	when := time.Now().UTC().Add(5 * time.Second).Truncate(time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", when.Format(http.TimeFormat))
+		w.WriteHeader(429)
+		w.Write([]byte(`{"error":{"message":"slow down"}}`))
+	}))
+	defer srv.Close()
+
+	_, _, retryAfter, err := newTestCodex(srv).doRequest(context.Background(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !retryAfter.Present {
+		t.Fatal("expected Retry-After header")
+	}
+	if retryAfter.Delay <= 0 || retryAfter.Delay > 5*time.Second {
+		t.Fatalf("delay = %s, want within HTTP-date window", retryAfter.Delay)
+	}
+}

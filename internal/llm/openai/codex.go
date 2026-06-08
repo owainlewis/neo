@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/llm/retry"
 )
 
 // codexEndpoint is the ChatGPT/Codex subscription backend. It speaks the same
@@ -86,7 +87,7 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 			if attempt == maxRetries {
 				return nil, err
 			}
-			if err := sleep(ctx, backoffDelay(baseDelay, attempt)); err != nil {
+			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retry.Absent())); err != nil {
 				return nil, err
 			}
 			continue
@@ -97,7 +98,7 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 			if attempt == maxRetries {
 				return nil, lastErr
 			}
-			if err := sleep(ctx, delayWithHeader(baseDelay, attempt, retryAfter)); err != nil {
+			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retryAfter)); err != nil {
 				return nil, err
 			}
 			continue
@@ -116,15 +117,15 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 // returns the buffered body, status, and any Retry-After hint. The SSE body is
 // small enough to buffer fully — neo presents blocking results, so there is no
 // need to consume deltas incrementally.
-func (c *CodexClient) doRequest(ctx context.Context, body []byte) ([]byte, int, time.Duration, error) {
+func (c *CodexClient) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
 	access, accountID, err := c.Source.Token(ctx)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, retry.Absent(), err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, retry.Absent(), err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
@@ -135,11 +136,11 @@ func (c *CodexClient) doRequest(ctx context.Context, body []byte) ([]byte, int, 
 
 	resp, err := c.HTTP.Do(httpReq)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, retry.Absent(), err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	return raw, resp.StatusCode, parseRetryAfterHeader(resp.Header.Get("Retry-After")), nil
+	return raw, resp.StatusCode, retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()), nil
 }
 
 // parseCodexStream extracts the final result from a Responses SSE stream.
