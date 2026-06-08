@@ -17,8 +17,8 @@ The danger is that tools have side effects. A shell command or file write can ch
 Neo exposes a small built-in tool surface:
 
 - `read_file`: read files.
-- `grep`: search file contents.
-- `glob`: find files by pattern.
+- `grep`: search file contents and return structured JSON matches.
+- `glob`: find files by pattern and return structured JSON paths.
 - `bash`: run shell commands.
 - `write_file`: overwrite or create files.
 - `edit_file`: replace one exact string.
