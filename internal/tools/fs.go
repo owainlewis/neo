@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -34,7 +36,7 @@ func (ReadFile) Spec() llm.ToolSpec {
 	}
 }
 
-func (ReadFile) Run(_ context.Context, input map[string]any) (string, error) {
+func (ReadFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	path, err := mustString(input, "path")
 	if err != nil {
 		return "", err
@@ -42,33 +44,133 @@ func (ReadFile) Run(_ context.Context, input map[string]any) (string, error) {
 	offset := optInt(input, "offset")
 	limit := optInt(input, "limit")
 
-	b, err := os.ReadFile(path)
+	if offset <= 0 && limit <= 0 {
+		return readWholeFileCapped(path)
+	}
+	return readFileWindow(ctx, path, offset, limit)
+}
+
+func readWholeFileCapped(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
+	defer f.Close()
 
-	// Fast path: no pagination requested and the file is small enough.
-	if offset <= 0 && limit <= 0 && len(b) <= MaxReadBytes {
-		return string(b), nil
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > MaxReadBytes {
+		return "", fmt.Errorf("read_file: file exceeds %d bytes; use offset/limit to read a smaller selection", MaxReadBytes)
 	}
 
-	lines := strings.Split(string(b), "\n")
-	start := 0
+	b, err := io.ReadAll(io.LimitReader(f, MaxReadBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(b) > MaxReadBytes {
+		return "", fmt.Errorf("read_file: file exceeds %d bytes; use offset/limit to read a smaller selection", MaxReadBytes)
+	}
+	return string(b), nil
+}
+
+func readFileWindow(ctx context.Context, path string, offset, limit int) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	startLine := 1
 	if offset > 0 {
-		start = offset - 1
+		startLine = offset
 	}
-	if start > len(lines) {
-		start = len(lines)
+
+	var out strings.Builder
+	r := bufio.NewReader(f)
+	fileEmpty := false
+	if info, err := f.Stat(); err == nil {
+		fileEmpty = info.Size() == 0
 	}
-	end := len(lines)
-	if limit > 0 && start+limit < end {
-		end = start + limit
+	lineNo := 1
+	selected := 0
+	wroteLine := false
+	inSelectedLine := false
+	lastLineEndedWithNewline := false
+
+	for limit <= 0 || selected < limit {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return out.String(), err
+			}
+		}
+
+		part, err := r.ReadSlice('\n')
+		if len(part) > 0 {
+			endsLine := part[len(part)-1] == '\n'
+			lastLineEndedWithNewline = endsLine
+			if endsLine {
+				part = part[:len(part)-1]
+			}
+
+			if lineNo >= startLine {
+				if !inSelectedLine {
+					if !wroteLine {
+						wroteLine = true
+					} else if err := appendReadFileChunk(&out, "\n"); err != nil {
+						return "", err
+					}
+					inSelectedLine = true
+				}
+				if err := appendReadFileChunk(&out, string(part)); err != nil {
+					return "", err
+				}
+			}
+
+			if endsLine {
+				if lineNo >= startLine {
+					selected++
+					inSelectedLine = false
+				}
+				lineNo++
+			}
+		}
+
+		if err == nil {
+			continue
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err != io.EOF {
+			return "", err
+		}
+		if len(part) > 0 {
+			break
+		}
+		if lastLineEndedWithNewline && lineNo >= startLine && (limit <= 0 || selected < limit) {
+			if !wroteLine {
+				wroteLine = true
+			} else if err := appendReadFileChunk(&out, "\n"); err != nil {
+				return "", err
+			}
+		}
+		break
 	}
-	out := strings.Join(lines[start:end], "\n")
-	if len(out) > MaxReadBytes {
-		return "", fmt.Errorf("read_file: selection exceeds %d bytes; narrow with offset/limit", MaxReadBytes)
+
+	if offset > 0 && !wroteLine && (!fileEmpty || offset != 1) {
+		return "", fmt.Errorf("read_file: offset %d is past end of file", offset)
 	}
-	return out, nil
+	return out.String(), nil
+}
+
+func appendReadFileChunk(out *strings.Builder, chunk string) error {
+	if out.Len()+len(chunk) > MaxReadBytes {
+		return fmt.Errorf("read_file: selection exceeds %d bytes; narrow with offset/limit", MaxReadBytes)
+	}
+	_, _ = out.WriteString(chunk)
+	return nil
 }
 
 type WriteFile struct{}
