@@ -16,8 +16,10 @@ top as independent, feature-flagged modules.
 
 - **Interactive chat.** `neo` opens a Bubble Tea terminal UI. Type a task and
   watch the agent work.
-- **Small tool surface.** bash, read\_file, write\_file, edit\_file — inspectable
-  and easy to reason about.
+- **Small tool surface.** Read, search, shell, and edit tools are inspectable
+  and permissioned.
+- **Permission modes.** Choose `ask`, `trusted`, or `readonly` depending on how
+  much approval you want before Neo runs tools.
 - **AGENTS.md support.** Drop an `AGENTS.md` in your project (or `~/.neo/`) and
   its guidance is loaded into the agent's system prompt. Feature-flagged.
 - **Skills.** Reusable prompt snippets in `.neo/skills/<name>/SKILL.md`. Mention
@@ -133,10 +135,38 @@ neo sessions        # list recent sessions
 neo resume <id>     # reopen a saved session
 ```
 
-Future gateways should map transport sessions onto the same store instead of
-creating separate transcript formats. For example, a Telegram DM can map
-`telegram:chat:<id>` to a Neo session, and a Slack thread can map
-`slack:channel:<id>:thread:<ts>` to a Neo session.
+Inside the TUI, use `/sessions` to open the session browser. The in-TUI browser
+can resume sessions for the current working directory; use `neo resume <id>`
+from the shell when you want Neo to restore a different saved cwd before tools
+are created.
+
+## TUI Shortcuts
+
+Slash commands keep common actions out of the chat transcript:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show slash commands and key bindings |
+| `/tools` | List available tools |
+| `/permissions` | Change the current permission mode |
+| `/tokens` | Show token usage for the session |
+| `/model` | Pick the active model for this session |
+| `/sessions` | Browse saved sessions |
+| `/clear` | Clear the current transcript |
+
+Small examples:
+
+```text
+/model              # open the model picker
+/permissions        # switch between ask, trusted, readonly
+/sessions           # resume a saved session for this workspace
+!git status         # run a shell command through Neo's bash tool
+read @README        # type @ to search workspace files, then tab/enter to insert
+```
+
+The `!` alias is a convenience for one-off shell commands. It follows the same
+permission policy as the `bash` tool, so `ask` mode prompts, `trusted` runs it,
+and `readonly` denies it.
 
 ## AGENTS.md
 
@@ -234,6 +264,13 @@ openai_auth: api_key
 #   openai + subscription    -> gpt-5-codex
 model: claude-opus-4-8
 
+# Tool permission mode:
+#   ask      -> allow read/search, ask before bash and file mutations
+#   trusted  -> allow built-in tools without prompts; path-shaped tools stay inside repo
+#   readonly -> allow read/search only
+permissions:
+  mode: ask
+
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.
 features:
@@ -242,14 +279,35 @@ features:
   prompt_caching: true # cache the static system prompt prefix
 ```
 
+### Permissions
+
+Neo defaults to `permissions.mode: ask`.
+
+| Mode | Behavior |
+|------|----------|
+| `ask` | Read/search tools run automatically; bash and file mutations ask first |
+| `trusted` | Built-in tools run without approval prompts |
+| `readonly` | Read/search tools run; bash and file mutations are denied |
+
+Path-shaped tools (`read_file`, `write_file`, `edit_file`, `grep`, and `glob`)
+are workspace-bound: Neo denies paths outside the workspace root even in
+`trusted` mode.
+
+Approved or trusted `bash` is different. It runs `/bin/bash -c` in the working
+directory with a timeout, but it is not a true filesystem sandbox. A shell
+command can still affect files outside the repo if the command does so, so keep
+`ask` mode on when you want to review shell commands first.
+
 ## Tools
 
-The agent has four built-in tools:
+The agent has these built-in tools:
 
 | Tool | Description |
 |------|-------------|
-| `bash` | Run a shell command (2-minute timeout) |
-| `read_file` | Read a file from disk |
+| `read_file` | Read a file from disk, with offset/limit support for large files |
+| `grep` | Search text files under the workspace with a regular expression |
+| `glob` | Find files under the workspace with glob patterns such as `**/*.go` |
+| `bash` | Run a shell command through `/bin/bash -c` with a 2-minute timeout |
 | `write_file` | Create or overwrite a file |
 | `edit_file` | Replace one exact string match in a file |
 
@@ -265,7 +323,7 @@ internal/llm/           Provider interface + Anthropic and OpenAI adapters
 internal/projectctx/    AGENTS.md discovery and system-prompt injection
 internal/session/       Saved session metadata and transcripts
 internal/skills/        skill discovery, catalog, and $name expansion
-internal/tools/         bash, read_file, write_file, edit_file implementations
+internal/tools/         bash, read_file, write_file, edit_file, grep, glob
 internal/tui/           Bubble Tea terminal UI
 ```
 
@@ -279,6 +337,8 @@ go run ./cmd/neo-docs --check
 ```
 
 Neo is pointed at these docs through `AGENTS.md`, so local agent sessions can read the same developer reference humans use.
+For background on the safety and observability milestone behind the current
+tooling, see [docs/robust-core-plan.md](docs/robust-core-plan.md).
 
 ## Development
 
