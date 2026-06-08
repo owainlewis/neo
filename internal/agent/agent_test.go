@@ -11,6 +11,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/permission"
+	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -81,6 +82,102 @@ func TestAgent_ToolUseFollowedByText(t *testing.T) {
 	// Transcript invariant: every assistant tool_use must be followed by a
 	// user tool_result with a matching ToolUseID.
 	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_CapsLargeBashToolResultBeforeTranscript(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "bash", map[string]any{"command": "printf '%300000s' ''"}),
+		llmtest.Text("done"),
+	}}
+	var events []Event
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(tools.Bash{}),
+		OnEvent: func(e Event) {
+			events = append(events, e)
+		},
+	})
+
+	if _, err := ag.Send(context.Background(), "run noisy command"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	result := ag.Transcript()[2].Content[0].Content
+	if len(result) > maxToolResultContentBytes {
+		t.Fatalf("tool result stored %d bytes, want at most %d", len(result), maxToolResultContentBytes)
+	}
+	assertTruncationMarker(t, result, 300000, 1)
+	if !sawToolResultEventWithText(events, result) {
+		t.Fatal("tool result event did not receive capped output")
+	}
+
+	providerResult := prov.Calls[1].Messages[2].Content[0].Content
+	if providerResult != result {
+		t.Fatal("provider did not receive capped transcript content")
+	}
+}
+
+func TestAgent_LeavesSmallToolResultUnchanged(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "small\noutput"}),
+		llmtest.Text("done"),
+	}}
+	ag := newTestAgent(t, prov, echoTool{})
+
+	if _, err := ag.Send(context.Background(), "ping"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	result := ag.Transcript()[2].Content[0].Content
+	if result != "small\noutput" {
+		t.Fatalf("tool result = %q, want original small output", result)
+	}
+}
+
+func TestAgent_ToolResultTruncationMarkerShape(t *testing.T) {
+	large := strings.Repeat("0123456789\n", (maxToolResultContentBytes/11)+100)
+	capped := capToolResultContent(large)
+
+	if len(capped) > maxToolResultContentBytes {
+		t.Fatalf("capped output stored %d bytes, want at most %d", len(capped), maxToolResultContentBytes)
+	}
+	assertTruncationMarker(t, capped, len(large), countOutputLines(large))
+	if !strings.Contains(capped, "\n\n[tool output truncated:") {
+		t.Fatal("marker was not separated from retained output")
+	}
+}
+
+func TestAgent_CappedToolResultPersistsToSession(t *testing.T) {
+	large := strings.Repeat("x\n", (maxToolResultContentBytes/2)+100)
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "echo", map[string]any{"text": large}),
+		llmtest.Text("done"),
+	}}
+	ag := newTestAgent(t, prov, echoTool{})
+	if _, err := ag.Send(context.Background(), "ping"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	store := session.NewStore(t.TempDir())
+	sess := &session.Session{
+		Metadata: session.Metadata{ID: "sess_test", Model: "test-model"},
+		Messages: ag.Transcript(),
+	}
+	if err := store.Save(context.Background(), sess); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	loaded, err := store.Load(context.Background(), "sess_test")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	result := loaded.Messages[2].Content[0].Content
+	if len(result) > maxToolResultContentBytes {
+		t.Fatalf("persisted result stored %d bytes, want at most %d", len(result), maxToolResultContentBytes)
+	}
+	assertTruncationMarker(t, result, len(large), countOutputLines(large))
+	if result == large {
+		t.Fatal("session stored the original giant output")
+	}
 }
 
 func TestAgent_RestoresTranscriptFromConfig(t *testing.T) {
@@ -299,6 +396,23 @@ func TestAgent_RunToolUsesPolicyAndDoesNotMutateTranscript(t *testing.T) {
 	}
 }
 
+func TestAgent_RunToolCapsReturnedOutput(t *testing.T) {
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: &llmtest.FakeProvider{},
+		Tools:    tools.NewRegistry(echoTool{}),
+	})
+
+	out, isErr := ag.RunTool(context.Background(), "echo", map[string]any{"text": strings.Repeat("x", maxToolResultContentBytes+1)})
+	if isErr {
+		t.Fatalf("RunTool returned error output: %q", out)
+	}
+	if len(out) > maxToolResultContentBytes {
+		t.Fatalf("RunTool output stored %d bytes, want at most %d", len(out), maxToolResultContentBytes)
+	}
+	assertTruncationMarker(t, out, maxToolResultContentBytes+1, 1)
+}
+
 func TestAgent_RunToolReadonlyDeniesBash(t *testing.T) {
 	ag := New(Config{
 		Model:    "test-model",
@@ -433,6 +547,39 @@ func sawMaxTurnsEvent(events []Event, limit int) bool {
 		}
 	}
 	return false
+}
+
+func sawToolResultEventWithText(events []Event, text string) bool {
+	for _, event := range events {
+		if event.Kind == EventToolResult && event.Text == text {
+			return true
+		}
+	}
+	return false
+}
+
+func assertTruncationMarker(t *testing.T, content string, originalBytes, originalLines int) {
+	t.Helper()
+	wantParts := []string{
+		"[tool output truncated:",
+		fmt.Sprintf("original %d bytes", originalBytes),
+		fmt.Sprintf("across %d lines", originalLines),
+		"showing first ",
+		"Re-run the tool with narrower output",
+	}
+	for _, want := range wantParts {
+		if !strings.Contains(content, want) {
+			t.Fatalf("capped content missing marker part %q:\n%s", want, markerTail(content))
+		}
+	}
+}
+
+func markerTail(content string) string {
+	const tailBytes = 400
+	if len(content) <= tailBytes {
+		return content
+	}
+	return content[len(content)-tailBytes:]
 }
 
 func assertToolUseResultsPaired(t *testing.T, msgs []llm.Message) {

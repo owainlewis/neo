@@ -38,6 +38,8 @@ Every assistant `tool_use` must be followed by a matching user `tool_result` bef
 
 Neo builds the assistant message and tool results together before committing them to the transcript. That keeps the conversation valid even when a tool fails.
 
+Oversized tool output is capped at the agent boundary before it enters the transcript or session payload. The capped content includes a visible truncation marker with the original byte size and line count.
+
 ## How To Extend It
 
 Add behavior around the loop, not inside it, unless the behavior is truly provider/tool-turn mechanics.

@@ -37,4 +37,4 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 
 ## Agent Loop Contract
 
-The agent appends one user text message per `Send` call. Each provider response becomes an assistant message. If the assistant requests tools, Neo runs them, appends matching user `tool_result` blocks, and continues the provider loop until the assistant ends the turn or max turns is reached.
+The agent appends one user text message per `Send` call. Each provider response becomes an assistant message. If the assistant requests tools, Neo runs them, caps oversized output before it enters user `tool_result` blocks, and continues the provider loop until the assistant ends the turn or max turns is reached.
