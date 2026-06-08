@@ -30,6 +30,9 @@ jobs:
       - name: Test with race detector
         run: go test -race ./...
 
+      - name: Check generated developer docs
+        run: go run ./cmd/neo-docs --check
+
       - name: Vet
         run: go vet ./...
 
