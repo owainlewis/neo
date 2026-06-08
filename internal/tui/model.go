@@ -114,6 +114,7 @@ type model struct {
 	picker   commandPicker
 	sessions sessionBrowser
 	models   modelBrowser
+	perms    permissionPicker
 
 	// lastInputHeight is the textarea height the current layout was computed
 	// for. When the textarea grows/shrinks (DynamicHeight), this lets us
@@ -279,6 +280,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 
 	case tea.KeyMsg:
+		if m.perms.visible {
+			return m.handlePermissionPickerKey(msg)
+		}
 		if m.models.visible {
 			return m.handleModelBrowserKey(msg)
 		}
@@ -470,6 +474,9 @@ func (m *model) View() tea.View {
 	if m.models.visible {
 		return makeView(m.modelBrowserView())
 	}
+	if m.perms.visible {
+		return makeView(m.permissionPickerView())
+	}
 
 	status := m.statusLine()
 	footer := m.footerLine()
@@ -528,11 +535,7 @@ func (m *model) handleSlashCommand(line string) {
 	case "/tools":
 		m.appendBlock(toolsBlock{specs: m.ag.ToolSpecs()})
 	case "/permissions":
-		mode := m.permissionMode
-		if mode == "" {
-			mode = "ask"
-		}
-		m.appendBlock(noticeBlock{text: "permissions: " + mode})
+		m.openPermissionPicker()
 	case "/tokens":
 		m.appendBlock(tokensBlock{usage: m.ag.Usage()})
 	case "/model":
@@ -555,7 +558,7 @@ func (m *model) handleSlashCommand(line string) {
 
 func slashCommandRequiresIdle(cmd string) bool {
 	switch cmd {
-	case "/clear", "/tokens", "/sessions", "/model":
+	case "/clear", "/tokens", "/sessions", "/model", "/permissions":
 		return true
 	default:
 		return false
