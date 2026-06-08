@@ -132,6 +132,9 @@ func parseConfig(b []byte, source string) (*Config, error) {
 	if c.Provider == "openai" && c.OpenAIAuth == "" {
 		c.OpenAIAuth = OpenAIAuthAPIKey
 	}
+	if err := validateOpenAIAuth(c.OpenAIAuth, source); err != nil {
+		return nil, err
+	}
 	if c.Model == "" {
 		c.Model = defaultModelFor(c.Provider, c.OpenAIAuth)
 	}
@@ -144,6 +147,15 @@ func parseConfig(b []byte, source string) (*Config, error) {
 		return nil, fmt.Errorf("%s: permissions.mode must be one of %q, %q, %q", source, PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly)
 	}
 	return &c, nil
+}
+
+func validateOpenAIAuth(mode, source string) error {
+	switch mode {
+	case "", OpenAIAuthAPIKey, OpenAIAuthSubscription:
+		return nil
+	default:
+		return fmt.Errorf("%s: openai_auth must be one of %q, %q (got %q)", source, OpenAIAuthAPIKey, OpenAIAuthSubscription, mode)
+	}
 }
 
 // SubscriptionAuth reports whether the openai provider should authenticate via
