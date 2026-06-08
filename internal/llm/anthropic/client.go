@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/llm/retry"
 )
 
 const defaultEndpoint = "https://api.anthropic.com/v1/messages"
@@ -129,7 +130,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		raw, status, err := c.doRequest(ctx, body)
+		raw, status, retryAfter, err := c.doRequest(ctx, body)
 		if err != nil {
 			// Network errors: retry unless the context is done.
 			lastErr = err
@@ -139,7 +140,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			if attempt == maxRetries {
 				return nil, err
 			}
-			if err := sleep(ctx, backoffDelay(baseDelay, attempt, "")); err != nil {
+			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retry.Absent())); err != nil {
 				return nil, err
 			}
 			continue
@@ -150,8 +151,10 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			if attempt == maxRetries {
 				return nil, lastErr
 			}
-			retryAfter := parseRetryAfter(raw, status)
-			if err := sleep(ctx, backoffDelayFromHeader(baseDelay, attempt, retryAfter)); err != nil {
+			if !retryAfter.Present {
+				retryAfter = parseRetryAfterBody(raw)
+			}
+			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retryAfter)); err != nil {
 				return nil, err
 			}
 			continue
@@ -181,11 +184,12 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 	return nil, lastErr
 }
 
-// doRequest issues one POST and returns the body and status.
-func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, error) {
+// doRequest issues one POST and returns the body, status, and any Retry-After
+// hint from the response header.
+func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, retry.Absent(), err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.APIKey)
@@ -193,47 +197,34 @@ func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, error
 
 	resp, err := c.HTTP.Do(httpReq)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, retry.Absent(), err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	return raw, resp.StatusCode, nil
+	return raw, resp.StatusCode, retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()), nil
 }
 
-func backoffDelay(base time.Duration, attempt int, _ string) time.Duration {
-	d := base << attempt // 500ms, 1s, 2s, 4s, ...
-	if d > 30*time.Second {
-		d = 30 * time.Second
-	}
-	return d
-}
-
-func backoffDelayFromHeader(base time.Duration, attempt int, retryAfter time.Duration) time.Duration {
-	if retryAfter > 0 {
-		return retryAfter
-	}
-	return backoffDelay(base, attempt, "")
-}
-
-// parseRetryAfter extracts a Retry-After hint. The Anthropic API surfaces this
-// inside the response body for 429s; we look for a top-level "retry-after"-ish
-// field, otherwise return 0 and fall back to exponential backoff.
-func parseRetryAfter(body []byte, _ int) time.Duration {
+func parseRetryAfterBody(body []byte) retry.RetryAfter {
 	var probe struct {
 		RetryAfter any `json:"retry_after"`
 	}
 	if err := json.Unmarshal(body, &probe); err != nil {
-		return 0
+		return retry.Absent()
 	}
 	switch v := probe.RetryAfter.(type) {
 	case float64:
-		return time.Duration(v * float64(time.Second))
-	case string:
-		if n, err := strconv.Atoi(v); err == nil {
-			return time.Duration(n) * time.Second
+		if v < 0 {
+			return retry.Absent()
 		}
+		return retry.RetryAfter{Delay: time.Duration(v * float64(time.Second)), Present: true}
+	case string:
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return retry.Absent()
+		}
+		return retry.RetryAfter{Delay: time.Duration(n) * time.Second, Present: true}
 	}
-	return 0
+	return retry.Absent()
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

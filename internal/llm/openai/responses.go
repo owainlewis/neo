@@ -429,36 +429,6 @@ func toUsage(u *responseUsage) llm.Usage {
 
 // --- shared transport / retry ----------------------------------------------
 
-// backoffDelay grows exponentially from base, capped at 30s.
-func backoffDelay(base time.Duration, attempt int) time.Duration {
-	d := base << attempt // 500ms, 1s, 2s, 4s, ...
-	if d > 30*time.Second {
-		d = 30 * time.Second
-	}
-	return d
-}
-
-func delayWithHeader(base time.Duration, attempt int, retryAfter time.Duration) time.Duration {
-	if retryAfter > 0 {
-		if retryAfter > 30*time.Second {
-			return 30 * time.Second
-		}
-		return retryAfter
-	}
-	return backoffDelay(base, attempt)
-}
-
-// parseRetryAfterHeader reads a Retry-After header value (seconds form).
-func parseRetryAfterHeader(v string) time.Duration {
-	if v == "" {
-		return 0
-	}
-	if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-		return time.Duration(n) * time.Second
-	}
-	return 0
-}
-
 func sleep(ctx context.Context, d time.Duration) error {
 	t := time.NewTimer(d)
 	defer t.Stop()

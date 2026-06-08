@@ -91,6 +91,62 @@ func TestComplete_RetriesOn429(t *testing.T) {
 	}
 }
 
+func TestComplete_RetryAfterHeaderOverridesBodyHint(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(429)
+			w.Write([]byte(`{"retry_after":30}`))
+			return
+		}
+		w.WriteHeader(200)
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := newTestClient(srv).Complete(ctx, llm.Request{Model: "m"}); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("expected 2 attempts, got %d", got)
+	}
+}
+
+func TestDoRequest_ReturnsRetryAfterHeader(t *testing.T) {
+	when := time.Now().UTC().Add(5 * time.Second).Truncate(time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", when.Format(http.TimeFormat))
+		w.WriteHeader(429)
+		w.Write([]byte("slow down"))
+	}))
+	defer srv.Close()
+
+	_, _, retryAfter, err := newTestClient(srv).doRequest(context.Background(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !retryAfter.Present {
+		t.Fatal("expected Retry-After header")
+	}
+	if retryAfter.Delay <= 0 || retryAfter.Delay > 5*time.Second {
+		t.Fatalf("delay = %s, want within HTTP-date window", retryAfter.Delay)
+	}
+}
+
+func TestSleep_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := sleep(ctx, time.Hour)
+	if err != context.Canceled {
+		t.Fatalf("sleep error = %v, want context canceled", err)
+	}
+}
+
 func TestComplete_DoesNotRetry4xxClientErrors(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

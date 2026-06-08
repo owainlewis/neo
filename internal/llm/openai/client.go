@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/llm/retry"
 )
 
 const defaultEndpoint = "https://api.openai.com/v1/responses"
@@ -73,7 +74,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			if attempt == maxRetries {
 				return nil, err
 			}
-			if err := sleep(ctx, backoffDelay(baseDelay, attempt)); err != nil {
+			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retry.Absent())); err != nil {
 				return nil, err
 			}
 			continue
@@ -84,7 +85,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			if attempt == maxRetries {
 				return nil, lastErr
 			}
-			if err := sleep(ctx, delayWithHeader(baseDelay, attempt, retryAfter)); err != nil {
+			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retryAfter)); err != nil {
 				return nil, err
 			}
 			continue
@@ -105,19 +106,19 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 
 // doRequest issues one POST and returns the body, status, and any Retry-After
 // hint from the response header.
-func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, time.Duration, error) {
+func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, retry.Absent(), err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
 
 	resp, err := c.HTTP.Do(httpReq)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, retry.Absent(), err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	return raw, resp.StatusCode, parseRetryAfterHeader(resp.Header.Get("Retry-After")), nil
+	return raw, resp.StatusCode, retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()), nil
 }
