@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,72 @@ func TestReadFile_OffsetLimit(t *testing.T) {
 	}
 }
 
+func TestReadFile_LargePaginatedRead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "large-lines.txt")
+
+	var content strings.Builder
+	for i := 1; content.Len() <= MaxReadBytes+1024; i++ {
+		fmt.Fprintf(&content, "line-%05d\n", i)
+	}
+	if err := os.WriteFile(path, []byte(content.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := ReadFile{}.Run(context.Background(), map[string]any{
+		"path":   path,
+		"offset": 250,
+		"limit":  3,
+	})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	want := "line-00250\nline-00251\nline-00252"
+	if out != want {
+		t.Fatalf("got %q, want %q", out, want)
+	}
+}
+
+func TestReadFile_OffsetPastEOF(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "short.txt")
+	if err := os.WriteFile(path, []byte("a\nb"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadFile{}.Run(context.Background(), map[string]any{
+		"path":   path,
+		"offset": 10,
+		"limit":  2,
+	})
+	if err == nil {
+		t.Fatal("expected error for offset past EOF")
+	}
+	if !strings.Contains(err.Error(), "offset 10 is past end of file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadFile_EmptyFileOffsetOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.txt")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := ReadFile{}.Run(context.Background(), map[string]any{
+		"path":   path,
+		"offset": 1,
+		"limit":  1,
+	})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if out != "" {
+		t.Fatalf("got %q, want empty string", out)
+	}
+}
+
 func TestReadFile_OversizedNeedsPagination(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "big.bin")
@@ -52,13 +119,31 @@ func TestReadFile_OversizedNeedsPagination(t *testing.T) {
 	if err := os.WriteFile(path, big, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Without pagination → falls into the line-paging branch; the single line
-	// exceeds MaxReadBytes, so this should error rather than dump megabytes.
 	_, err := ReadFile{}.Run(context.Background(), map[string]any{"path": path})
 	if err == nil {
 		t.Fatal("expected error for oversized read without pagination")
 	}
 	if !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadFile_PaginatedSelectionExceedsCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long-line.txt")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", MaxReadBytes+1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadFile{}.Run(context.Background(), map[string]any{
+		"path":   path,
+		"offset": 1,
+		"limit":  1,
+	})
+	if err == nil {
+		t.Fatal("expected error for oversized paginated selection")
+	}
+	if !strings.Contains(err.Error(), "selection exceeds") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
