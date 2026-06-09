@@ -6,8 +6,8 @@ remaining simple enough to teach from.
 
 This file is not the backlog. It describes the high-level product milestones
 that make Neo feel production-ready. GitHub Issues are the source of truth for
-implementation status and detailed task breakdowns. If this roadmap disagrees
-with an open issue, trust the issue and update this file.
+implementation status and detailed task breakdowns. This roadmap is intentionally
+high-level; if it disagrees with GitHub Issues, trust the issue and update this file.
 
 ## Production-ready means
 
@@ -35,9 +35,8 @@ Essential capabilities:
 Related tracking:
 
 - [#110 Improve README onboarding and project overview](https://github.com/owainlewis/neo/issues/110)
-- [#66 OpenAI provider support](https://github.com/owainlewis/neo/issues/66)
 - [#53 neo doctor](https://github.com/owainlewis/neo/issues/53)
-- `TICKETS.md` NEO-1 for `neo update`
+- GitHub Issues for release/update automation follow-ups
 
 ## Milestone 2: Safe and controllable coding sessions
 
@@ -83,8 +82,7 @@ Related tracking:
 - [#63 Git context injection](https://github.com/owainlewis/neo/issues/63)
 - [#23 TUI multi-line input and expanded tool results](https://github.com/owainlewis/neo/issues/23)
 - [#69 Custom slash commands](https://github.com/owainlewis/neo/issues/69)
-- `TICKETS.md` NEO-6 for session transcript search
-- `TICKETS.md` NEO-8 for `/tools` display polish
+- GitHub Issues for session transcript search and `/tools` display polish follow-ups
 
 ## Milestone 4: Longer useful context
 
@@ -107,8 +105,7 @@ Related tracking:
 - [#55 Cost accounting per chat session](https://github.com/owainlewis/neo/issues/55)
 - [#95 Model catalog and cost display](https://github.com/owainlewis/neo/issues/95)
 - [#96 Memory store and recall](https://github.com/owainlewis/neo/issues/96)
-- `TICKETS.md` NEO-6 for session transcript search
-- `TICKETS.md` NEO-7 for the memory stub
+- GitHub Issues for session transcript search and memory follow-ups
 
 ## Milestone 5: Project workflows and larger tasks
 
@@ -167,5 +164,5 @@ These are no longer roadmap goals, but they define the base Neo is building on:
   tool.
 - **Context is a product feature.** Token usage, compaction, sessions, memory,
   and model choice should be visible and intentional.
-- **Issues hold the detail.** This roadmap sets direction; issues and
-  `TICKETS.md` hold implementation slices.
+- **Issues hold the detail.** This roadmap sets direction; GitHub Issues hold
+  implementation slices.
