@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"regexp"
 
 	"charm.land/bubbles/v2/textarea"
@@ -22,6 +24,7 @@ func plain(s string) string { return ansiRe.ReplaceAllString(s, "") }
 // tests without going through newModel (which probes the terminal). Only the
 // fields exercised by tests are populated.
 func makeTestModel() *model {
+	root, _ := os.MkdirTemp("", "neo-tui-memory-*")
 	ta := textarea.New()
 	ta.Focus()
 	ta.SetWidth(78)
@@ -36,5 +39,7 @@ func makeTestModel() *model {
 		cwd:            "~",
 		branch:         "main",
 		permissionMode: "ask",
+		projectRoot:    filepath.Clean(root),
+		memoryEnabled:  true,
 	}
 }

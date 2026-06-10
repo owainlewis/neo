@@ -39,6 +39,7 @@ permissions:
 # to false to disable it. The core agent loop is never affected by these.
 features:
   agents_file: true # load AGENTS.md (project tree + ~/.neo) into the system prompt
+  memory: true      # load and update project-root memory.md
   skills: true      # discover .neo/skills, advertise them, expand $name references
   prompt_caching: true # cache_control the static system prompt prefix to cut input cost
 ```
@@ -60,6 +61,7 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `agents_file` | `true` | Load AGENTS.md into the chat system prompt. |
+| `memory` | `true` | Load and update project-root `memory.md`. |
 | `skills` | `true` | Discover skills and expand $name references. |
 | `prompt_caching` | `true` | Mark the stable system prompt prefix as cacheable when the provider supports it. |
 

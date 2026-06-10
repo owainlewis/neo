@@ -8,14 +8,14 @@ import (
 )
 
 // helpBlock renders the available slash commands and key bindings.
-type helpBlock struct{}
+type helpBlock struct{ commands []slashCommand }
 
 type slashCommand struct {
 	cmd  string
 	desc string
 }
 
-var slashCommands = []slashCommand{
+var baseSlashCommands = []slashCommand{
 	{"/clear", "clear the current transcript"},
 	{"/help", "show this list"},
 	{"/model", "select the active model"},
@@ -24,6 +24,8 @@ var slashCommands = []slashCommand{
 	{"/tokens", "show token usage"},
 	{"/tools", "list available tools"},
 }
+
+var memorySlashCommand = slashCommand{"/memory", "append a project memory entry"}
 
 var keyBindings = []struct {
 	key  string
@@ -37,10 +39,10 @@ var keyBindings = []struct {
 	{"ctrl+c", "quit"},
 }
 
-func (helpBlock) render(width int, _ *glamour.TermRenderer) string {
+func (h helpBlock) render(width int, _ *glamour.TermRenderer) string {
 	var sb strings.Builder
 	sb.WriteString(styAccent.Render("slash commands") + "\n")
-	for _, c := range slashCommands {
+	for _, c := range h.commands {
 		sb.WriteString(fmt.Sprintf("  %s  %s\n",
 			styTool.Render(padRight(c.cmd, 10)),
 			styMuted.Render(c.desc)))
@@ -52,4 +54,12 @@ func (helpBlock) render(width int, _ *glamour.TermRenderer) string {
 			styMuted.Render(k.desc)))
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (m *model) slashCommands() []slashCommand {
+	commands := append([]slashCommand(nil), baseSlashCommands...)
+	if m.memoryEnabled {
+		commands = append(commands, memorySlashCommand)
+	}
+	return commands
 }

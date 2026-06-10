@@ -63,6 +63,7 @@ type Permissions struct {
 // turn the capability off explicitly.
 type Features struct {
 	AgentsFile    *bool `yaml:"agents_file"`    // load AGENTS.md into the chat system prompt
+	Memory        *bool `yaml:"memory"`         // load and update project-root memory.md
 	Skills        *bool `yaml:"skills"`         // discover and expand $name skills
 	PromptCaching *bool `yaml:"prompt_caching"` // cache the static system prompt prefix
 }
@@ -72,6 +73,9 @@ func (c *Config) AgentsFileEnabled() bool { return featureEnabled(c.Features.Age
 
 // SkillsEnabled reports whether skill loading is on (default: true).
 func (c *Config) SkillsEnabled() bool { return featureEnabled(c.Features.Skills, true) }
+
+// MemoryEnabled reports whether project memory loading is on (default: true).
+func (c *Config) MemoryEnabled() bool { return featureEnabled(c.Features.Memory, true) }
 
 // PromptCachingEnabled reports whether the static system prompt is marked for
 // provider-side prompt caching (default: true).

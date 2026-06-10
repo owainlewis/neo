@@ -167,7 +167,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`internal/llm/anthropic/`" + ` | Anthropic provider adapter. |
 | ` + "`internal/llm/openai/`" + ` | OpenAI provider adapters for API-key Responses API calls and ChatGPT/Codex subscription calls. |
 | ` + "`internal/permission/`" + ` | Tool-call permission policy and workspace path boundary checks. |
-| ` + "`internal/projectctx/`" + ` | AGENTS.md discovery and prompt augmentation. |
+| ` + "`internal/projectctx/`" + ` | AGENTS.md and memory.md discovery plus prompt augmentation. |
 | ` + "`internal/session/`" + ` | File-backed session metadata and transcripts. |
 | ` + "`internal/skills/`" + ` | Skill discovery, catalog rendering, and $name expansion. |
 | ` + "`internal/tools/`" + ` | Built-in tools exposed to the model. |
@@ -179,7 +179,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 1. ` + "`cmd/neo`" + ` loads config.
 2. ` + "`mustProvider`" + ` selects Anthropic or OpenAI. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
 3. The CLI creates or loads a session from ` + "`internal/session`" + `.
-4. Skills and AGENTS.md context are discovered when enabled.
+4. Skills, AGENTS.md, and project memory are discovered when enabled.
 5. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
 6. ` + "`agent.New`" + ` receives provider, tools, permission policy, system prompt, and optional restored messages.
 7. ` + "`tui.Run`" + ` owns user interaction and saves the transcript after each send.
@@ -255,6 +255,7 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | Flag | Default | Effect |
 | --- | --- | --- |
 | ` + "`agents_file`" + ` | ` + "`true`" + ` | Load AGENTS.md into the chat system prompt. |
+| ` + "`memory`" + ` | ` + "`true`" + ` | Load and update project-root ` + "`memory.md`" + `. |
 | ` + "`skills`" + ` | ` + "`true`" + ` | Discover skills and expand $name references. |
 | ` + "`prompt_caching`" + ` | ` + "`true`" + ` | Mark the stable system prompt prefix as cacheable when the provider supports it. |
 
@@ -348,6 +349,7 @@ The flattened ` + "`Request.System`" + ` string remains available for providers 
 
 1. Static base instructions plus skill catalog. This block is marked cacheable when ` + "`features.prompt_caching`" + ` is enabled.
 2. Dynamic AGENTS.md project context. This block is not marked cacheable.
+3. Dynamic ` + "`memory.md`" + ` project context. This block is not marked cacheable.
 
 The goal is to cache stable instructions without letting changing project context evict that prefix.
 `
@@ -460,7 +462,7 @@ If the user message is the task, the system prompt is the job description.
 
 ## The Problem
 
-A coding agent needs stable instructions, but it also needs local context. Some context is almost always the same, such as "prefer small verified changes." Other context changes by project, such as AGENTS.md files or available skills.
+A coding agent needs stable instructions, but it also needs local context. Some context is almost always the same, such as "prefer small verified changes." Other context changes by project, such as AGENTS.md files, project memory, or available skills.
 
 If all of that is mashed into one giant string, it is harder to understand, harder to cache, and harder to customize.
 
@@ -470,6 +472,7 @@ Neo builds the prompt in ordered blocks:
 
 1. A stable base prompt plus the skill catalog.
 2. Dynamic project instructions from AGENTS.md files.
+3. Dynamic project memory from ` + "`memory.md`" + ` when enabled.
 
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use ` + "`llm.SystemBlock`" + ` values instead.
 
@@ -480,7 +483,7 @@ The flattened prompt is still available for providers that only accept a string.
 | Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. |
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
-| Future memory | Learned project facts or conventions, if the experimental memory feature is added. |
+| ` + "`memory.md`" + ` | Durable project facts or preferences the user saved for future sessions. |
 
 ## How To Customize It
 
@@ -503,7 +506,7 @@ Always-loaded prompt text costs tokens every turn. Keep stable instructions shor
 ## Where To Look
 
 - ` + "`cmd/neo/main.go`" + `: chat startup and prompt assembly.
-- ` + "`internal/projectctx`" + `: AGENTS.md discovery and rendering.
+- ` + "`internal/projectctx`" + `: AGENTS.md and memory.md discovery and rendering.
 - ` + "`internal/skills`" + `: skill catalog and expansion.
 - ` + "`internal/llm/provider.go`" + `: ` + "`SystemBlock`" + `.
 `
@@ -852,32 +855,29 @@ A simple shorthand: episodic is the diary, semantic is the facts, procedural is 
 
 ## What Neo Has Today
 
-Neo does not yet have a first-class memory feature.
+Neo now has a narrow, manual memory feature:
 
-It already has pieces that look memory-adjacent:
+- project-local ` + "`memory.md`" + ` at the repo root,
+- a user-entered ` + "`/memory <text>`" + ` slash command,
+- prompt loading when ` + "`features.memory`" + ` is enabled.
 
-- AGENTS.md loading for explicit project instructions.
-- Skills for reusable procedures invoked by name.
-- Sessions for saved episodic history.
-
-Those are useful, but they are not the same as learned memory.
+Neo still keeps memory intentionally small. It does not expose an autonomous memory-writing tool to the model in this version.
 
 ## A Minimal Neo Memory Design
 
-For a coding agent, the smallest useful memory feature would be:
+For a coding agent, the smallest useful memory feature is:
 
-- ` + "`.neo/MEMORY.md`" + ` for project-specific learned facts and conventions.
-- ` + "`/memory`" + ` to show loaded memory.
-- ` + "`/memory add <text>`" + ` to append a memory, with user control.
-- ` + "`/memory search <query>`" + ` to search project memory plus saved sessions.
+- ` + "`memory.md`" + ` at the project root for learned facts and conventions.
+- ` + "`/memory <text>`" + ` to append a memory, with explicit user control.
+- a distinct dynamic system-prompt section so loaded memory stays separate from base instructions and AGENTS.md.
 
-Memory should be experimental and off by default at first.
+That gives Neo durable project context without inventing automatic memory behavior too early.
 
 ## AGENTS.md vs MEMORY.md
 
 AGENTS.md is instruction. It says how the agent should behave in this repo.
 
-MEMORY.md would be learned context. It says what the agent or team learned while working.
+memory.md is learned context. It says what the agent or team learned while working.
 
 Examples:
 
@@ -886,8 +886,8 @@ Examples:
 - Read docs/developer/index.md before changing Neo.
 - Do not edit generated docs by hand.
 
-# MEMORY.md
-- 2026-06: We decided memory should stay project-specific and experimental.
+# memory.md
+- 2026-06-10: Memory stays project-specific and manual in V1.
 - The /sessions browser only resumes sessions from the current cwd.
 ` + "```" + `
 
@@ -900,7 +900,7 @@ Examples:
 
 ## Where To Look
 
-- ` + "`internal/projectctx`" + `: current AGENTS.md context loading.
+- ` + "`internal/projectctx`" + `: AGENTS.md and memory.md loading.
 - ` + "`internal/session`" + `: saved conversation history.
 - ` + "`internal/skills`" + `: reusable procedural instructions.
 `
