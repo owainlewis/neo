@@ -36,7 +36,7 @@ func (m *model) updateSlashPicker() {
 	}
 
 	var matches []slashCommand
-	for _, c := range slashCommands {
+	for _, c := range m.slashCommands() {
 		if strings.HasPrefix(c.cmd, query) {
 			matches = append(matches, c)
 		}

@@ -10,7 +10,7 @@ If the user message is the task, the system prompt is the job description.
 
 ## The Problem
 
-A coding agent needs stable instructions, but it also needs local context. Some context is almost always the same, such as "prefer small verified changes." Other context changes by project, such as AGENTS.md files or available skills.
+A coding agent needs stable instructions, but it also needs local context. Some context is almost always the same, such as "prefer small verified changes." Other context changes by project, such as AGENTS.md files, project memory, or available skills.
 
 If all of that is mashed into one giant string, it is harder to understand, harder to cache, and harder to customize.
 
@@ -20,6 +20,7 @@ Neo builds the prompt in ordered blocks:
 
 1. A stable base prompt plus the skill catalog.
 2. Dynamic project instructions from AGENTS.md files.
+3. Dynamic project memory from `memory.md` when enabled.
 
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use `llm.SystemBlock` values instead.
 
@@ -30,7 +31,7 @@ The flattened prompt is still available for providers that only accept a string.
 | Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. |
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
-| Future memory | Learned project facts or conventions, if the experimental memory feature is added. |
+| `memory.md` | Durable project facts or preferences the user saved for future sessions. |
 
 ## How To Customize It
 
@@ -53,6 +54,6 @@ Always-loaded prompt text costs tokens every turn. Keep stable instructions shor
 ## Where To Look
 
 - `cmd/neo/main.go`: chat startup and prompt assembly.
-- `internal/projectctx`: AGENTS.md discovery and rendering.
+- `internal/projectctx`: AGENTS.md and memory.md discovery and rendering.
 - `internal/skills`: skill catalog and expansion.
 - `internal/llm/provider.go`: `SystemBlock`.

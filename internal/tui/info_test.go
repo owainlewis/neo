@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,7 +19,8 @@ import (
 )
 
 func TestHelpBlock_ListsHelpCommandAndKeys(t *testing.T) {
-	out := plain(helpBlock{}.render(80, nil))
+	m := makeTestModel()
+	out := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
 	for _, want := range []string{"/help", "!cmd", "send", "newline", "quit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("/help missing %q: %s", want, out)
@@ -33,6 +36,124 @@ func TestSlashCommand_HelpAppendsHelpBlock(t *testing.T) {
 	}
 	if _, ok := m.blocks[0].(helpBlock); !ok {
 		t.Fatalf("expected helpBlock, got %T", m.blocks[0])
+	}
+}
+
+func TestSlashCommand_MemoryAppendsProjectMemory(t *testing.T) {
+	m := makeTestModel()
+	m.projectRoot = t.TempDir()
+
+	m.handleSlashCommand("/memory prefer table-driven tests")
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(m.blocks))
+	}
+	nb, ok := m.blocks[0].(noticeBlock)
+	if !ok {
+		t.Fatalf("expected noticeBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(nb.text, "saved project memory") {
+		t.Fatalf("unexpected notice: %q", nb.text)
+	}
+	got, err := os.ReadFile(filepath.Join(m.projectRoot, "memory.md"))
+	if err != nil {
+		t.Fatalf("read memory: %v", err)
+	}
+	if !strings.Contains(string(got), "prefer table-driven tests") {
+		t.Fatalf("memory contents = %q", string(got))
+	}
+}
+
+func TestSlashCommand_MemoryBlankShowsHelpfulError(t *testing.T) {
+	m := makeTestModel()
+	m.projectRoot = t.TempDir()
+
+	m.handleSlashCommand("/memory")
+
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "type text after /memory") {
+		t.Fatalf("unexpected error: %v", eb.err)
+	}
+}
+
+func TestSlashCommand_MemoryDisabledDoesNotWrite(t *testing.T) {
+	m := makeTestModel()
+	m.projectRoot = t.TempDir()
+	m.memoryEnabled = false
+
+	m.handleSlashCommand("/memory keep release notes in sync")
+
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "unknown command: /memory") {
+		t.Fatalf("unexpected error: %v", eb.err)
+	}
+	if _, err := os.Stat(filepath.Join(m.projectRoot, "memory.md")); !os.IsNotExist(err) {
+		t.Fatalf("memory file should not exist, stat err = %v", err)
+	}
+}
+
+func TestSlashCommand_MemoryReadonlyDoesNotWrite(t *testing.T) {
+	m := makeTestModel()
+	m.projectRoot = t.TempDir()
+	m.permissionMode = "readonly"
+
+	m.handleSlashCommand("/memory keep release notes in sync")
+
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "readonly") {
+		t.Fatalf("unexpected error: %v", eb.err)
+	}
+	if _, err := os.Stat(filepath.Join(m.projectRoot, "memory.md")); !os.IsNotExist(err) {
+		t.Fatalf("memory file should not exist, stat err = %v", err)
+	}
+}
+
+func TestHelpBlock_HidesMemoryWhenDisabled(t *testing.T) {
+	m := makeTestModel()
+	m.memoryEnabled = false
+
+	out := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
+
+	if strings.Contains(out, "/memory") {
+		t.Fatalf("help should hide /memory when disabled: %s", out)
+	}
+}
+
+func TestSlashPicker_HidesMemoryWhenDisabled(t *testing.T) {
+	m := makeTestModel()
+	m.memoryEnabled = false
+	m.input.SetValue("/")
+
+	m.updateSlashPicker()
+
+	for _, match := range m.picker.matches {
+		if match.cmd == "/memory" {
+			t.Fatalf("picker should hide /memory when disabled: %+v", m.picker.matches)
+		}
+	}
+}
+
+func TestSlashCommand_MemoryDisabledBehavesAsUnknown(t *testing.T) {
+	m := makeTestModel()
+	m.memoryEnabled = false
+
+	m.handleSlashCommand("/memory keep release notes in sync")
+
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "unknown command: /memory") {
+		t.Fatalf("unexpected error: %v", eb.err)
 	}
 }
 
@@ -488,9 +609,14 @@ func TestSlashPicker_RendersBelowInput(t *testing.T) {
 
 func withSlashCommands(t *testing.T, commands []slashCommand) {
 	t.Helper()
-	old := slashCommands
-	slashCommands = commands
-	t.Cleanup(func() { slashCommands = old })
+	oldBase := baseSlashCommands
+	oldMemory := memorySlashCommand
+	baseSlashCommands = commands
+	memorySlashCommand = slashCommand{}
+	t.Cleanup(func() {
+		baseSlashCommands = oldBase
+		memorySlashCommand = oldMemory
+	})
 }
 
 func keyPress(code rune) tea.KeyPressMsg {

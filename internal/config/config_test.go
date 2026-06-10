@@ -258,6 +258,29 @@ func TestFeatures_SkillsDefaultsOnExplicitFalseDisables(t *testing.T) {
 	})
 }
 
+func TestFeatures_MemoryDefaultsOnExplicitFalseDisables(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if !cfg.MemoryEnabled() {
+			t.Fatal("expected memory to default on when omitted")
+		}
+
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\nfeatures:\n  memory: false\n")
+		cfg, err = Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.MemoryEnabled() {
+			t.Fatal("expected memory disabled when set to false")
+		}
+	})
+}
+
 func TestFeatures_PromptCachingDefaultsOnExplicitFalseDisables(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)

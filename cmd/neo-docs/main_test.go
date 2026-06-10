@@ -12,6 +12,7 @@ func TestArchitecturePageDocumentsProviderAndAuthModules(t *testing.T) {
 		"`internal/llm/anthropic/` | Anthropic provider adapter.",
 		"`internal/llm/openai/` | OpenAI provider adapters",
 		"`internal/auth/` | OpenAI ChatGPT/Codex device-code login",
+		"`internal/projectctx/` | AGENTS.md and memory.md discovery plus prompt augmentation.",
 		"`openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials",
 	} {
 		if !strings.Contains(page, want) {
@@ -45,10 +46,26 @@ func TestConfigPageDocumentsOpenAIAuthModesWithoutSecrets(t *testing.T) {
 		"`OPENAI_API_KEY`",
 		"`provider: openai` with `openai_auth: subscription`",
 		"ChatGPT/Codex device-code credentials from `~/.neo/auth.json`",
+		"`memory`",
+		"project-root `memory.md`",
 		"token values are never generated into developer docs",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("config page missing %q", want)
+		}
+	}
+}
+
+func TestPromptCachingPageDocumentsMemoryAsDynamicTail(t *testing.T) {
+	page := promptCachingPage()
+
+	for _, want := range []string{
+		"Static base instructions plus skill catalog",
+		"Dynamic AGENTS.md project context",
+		"Dynamic `memory.md` project context",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("prompt caching page missing %q", want)
 		}
 	}
 }
@@ -114,8 +131,9 @@ func TestMemoryGuideSeparatesAgentsAndMemory(t *testing.T) {
 
 	for _, want := range []string{
 		"AGENTS.md is instruction",
-		"MEMORY.md would be learned context",
-		"experimental and off by default",
+		"memory.md is learned context",
+		"`/memory <text>`",
+		"does not expose an autonomous memory-writing tool",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("memory guide missing %q", want)

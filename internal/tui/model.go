@@ -20,6 +20,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workspace"
@@ -32,6 +33,8 @@ type Options struct {
 	CurrentSession  *session.Session
 	OnSessionResume func(*session.Session)
 	ModelChoices    []ModelChoice
+	ProjectRoot     string
+	MemoryEnabled   bool
 }
 
 type Option func(*Options)
@@ -54,6 +57,13 @@ func WithSessions(store *session.Store, current *session.Session, onResume func(
 
 func WithModelChoices(choices []ModelChoice) Option {
 	return func(opts *Options) { opts.ModelChoices = choices }
+}
+
+func WithProjectMemory(root string, enabled bool) Option {
+	return func(opts *Options) {
+		opts.ProjectRoot = root
+		opts.MemoryEnabled = enabled
+	}
 }
 
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
@@ -150,6 +160,8 @@ type model struct {
 	currentSessionCWD string
 	onSessionResume   func(*session.Session)
 	modelChoices      []ModelChoice
+	projectRoot       string
+	memoryEnabled     bool
 }
 
 func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
@@ -252,6 +264,8 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		currentSessionCWD: currentSessionCWD,
 		onSessionResume:   opts.OnSessionResume,
 		modelChoices:      normalizeModelChoices(modelTag, opts.ModelChoices),
+		projectRoot:       opts.ProjectRoot,
+		memoryEnabled:     opts.MemoryEnabled,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -570,7 +584,7 @@ func (m *model) handleSlashCommand(line string) {
 	}
 	switch cmd {
 	case "/help":
-		m.appendBlock(helpBlock{})
+		m.appendBlock(helpBlock{commands: m.slashCommands()})
 	case "/tools":
 		m.appendBlock(toolsBlock{specs: m.ag.ToolSpecs()})
 	case "/permissions":
@@ -579,6 +593,8 @@ func (m *model) handleSlashCommand(line string) {
 		m.appendBlock(tokensBlock{usage: m.ag.Usage()})
 	case "/model":
 		m.openModelBrowser()
+	case "/memory":
+		m.appendProjectMemory(strings.TrimSpace(strings.TrimPrefix(line, cmd)))
 	case "/sessions":
 		m.openSessionBrowser()
 	case "/clear":
@@ -602,6 +618,27 @@ func slashCommandRequiresIdle(cmd string) bool {
 	default:
 		return false
 	}
+}
+
+func (m *model) appendProjectMemory(text string) {
+	if !m.memoryEnabled {
+		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: /memory — try /help")})
+		return
+	}
+	if m.permissionMode == "readonly" {
+		m.appendBlock(errorBlock{err: fmt.Errorf("/memory is unavailable in readonly mode because it writes project files")})
+		return
+	}
+	if m.projectRoot == "" {
+		m.appendBlock(errorBlock{err: fmt.Errorf("/memory is unavailable because the project root could not be determined")})
+		return
+	}
+	path, err := projectctx.AppendMemory(m.projectRoot, text, time.Now())
+	if err != nil {
+		m.appendBlock(errorBlock{err: err})
+		return
+	}
+	m.appendBlock(noticeBlock{text: "saved project memory to " + path})
 }
 
 func (m *model) updateInlinePickers() {

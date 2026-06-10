@@ -31,32 +31,29 @@ A simple shorthand: episodic is the diary, semantic is the facts, procedural is 
 
 ## What Neo Has Today
 
-Neo does not yet have a first-class memory feature.
+Neo now has a narrow, manual memory feature:
 
-It already has pieces that look memory-adjacent:
+- project-local `memory.md` at the repo root,
+- a user-entered `/memory <text>` slash command,
+- prompt loading when `features.memory` is enabled.
 
-- AGENTS.md loading for explicit project instructions.
-- Skills for reusable procedures invoked by name.
-- Sessions for saved episodic history.
-
-Those are useful, but they are not the same as learned memory.
+Neo still keeps memory intentionally small. It does not expose an autonomous memory-writing tool to the model in this version.
 
 ## A Minimal Neo Memory Design
 
-For a coding agent, the smallest useful memory feature would be:
+For a coding agent, the smallest useful memory feature is:
 
-- `.neo/MEMORY.md` for project-specific learned facts and conventions.
-- `/memory` to show loaded memory.
-- `/memory add <text>` to append a memory, with user control.
-- `/memory search <query>` to search project memory plus saved sessions.
+- `memory.md` at the project root for learned facts and conventions.
+- `/memory <text>` to append a memory, with explicit user control.
+- a distinct dynamic system-prompt section so loaded memory stays separate from base instructions and AGENTS.md.
 
-Memory should be experimental and off by default at first.
+That gives Neo durable project context without inventing automatic memory behavior too early.
 
 ## AGENTS.md vs MEMORY.md
 
 AGENTS.md is instruction. It says how the agent should behave in this repo.
 
-MEMORY.md would be learned context. It says what the agent or team learned while working.
+memory.md is learned context. It says what the agent or team learned while working.
 
 Examples:
 
@@ -65,8 +62,8 @@ Examples:
 - Read docs/developer/index.md before changing Neo.
 - Do not edit generated docs by hand.
 
-# MEMORY.md
-- 2026-06: We decided memory should stay project-specific and experimental.
+# memory.md
+- 2026-06-10: Memory stays project-specific and manual in V1.
 - The /sessions browser only resumes sessions from the current cwd.
 ```
 
@@ -79,6 +76,6 @@ Examples:
 
 ## Where To Look
 
-- `internal/projectctx`: current AGENTS.md context loading.
+- `internal/projectctx`: AGENTS.md and memory.md loading.
 - `internal/session`: saved conversation history.
 - `internal/skills`: reusable procedural instructions.

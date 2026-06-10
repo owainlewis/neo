@@ -10,5 +10,6 @@ The flattened `Request.System` string remains available for providers that do no
 
 1. Static base instructions plus skill catalog. This block is marked cacheable when `features.prompt_caching` is enabled.
 2. Dynamic AGENTS.md project context. This block is not marked cacheable.
+3. Dynamic `memory.md` project context. This block is not marked cacheable.
 
 The goal is to cache stable instructions without letting changing project context evict that prefix.
