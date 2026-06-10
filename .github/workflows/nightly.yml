@@ -1,0 +1,138 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-main
+  cancel-in-progress: true
+
+jobs:
+  nightly:
+    name: Build and publish nightly artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify repository
+        run: |
+          go test ./...
+          go run ./cmd/neo-docs --check
+
+      - name: Determine nightly metadata
+        id: nightly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          sha="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short=7 "${sha}")"
+          version="nightly-$(date -u +%Y%m%d)-${short_sha}"
+          tag="${version}"
+
+          latest_target="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '[.[] | select(.prerelease and (.tag_name | startswith("nightly-")))] | sort_by(.created_at) | reverse | .[0].target_commitish // ""'
+          )"
+
+          should_publish=true
+          if [[ -n "${latest_target}" && "${latest_target}" == "${sha}" ]]; then
+            should_publish=false
+            echo "Latest nightly already targets ${sha}; skipping publish."
+          fi
+
+          {
+            echo "sha=${sha}"
+            echo "short_sha=${short_sha}"
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "should_publish=${should_publish}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build nightly artifacts
+        if: steps.nightly.outputs.should_publish == 'true'
+        env:
+          VERSION: ${{ steps.nightly.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+          )
+
+          for target in "${targets[@]}"; do
+            read -r os arch <<<"${target}"
+            stage_dir="$(mktemp -d)"
+
+            GOOS="${os}" GOARCH="${arch}" go build \
+              -trimpath \
+              -ldflags "-s -w -X main.Version=${VERSION}" \
+              -o "${stage_dir}/neo" \
+              ./cmd/neo
+
+            cp LICENSE README.md "${stage_dir}/"
+
+            archive="neo_${os}_${arch}_${VERSION}.tar.gz"
+            tar -C "${stage_dir}" -czf "dist/${archive}" neo LICENSE README.md
+
+            rm -rf "${stage_dir}"
+          done
+
+          (
+            cd dist
+            for file in *.tar.gz; do
+              sha256sum "${file}"
+            done > checksums.txt
+          )
+
+      - name: Publish nightly release
+        if: steps.nightly.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIGHTLY_SHA: ${{ steps.nightly.outputs.sha }}
+          NIGHTLY_SHORT_SHA: ${{ steps.nightly.outputs.short_sha }}
+          NIGHTLY_TAG: ${{ steps.nightly.outputs.tag }}
+          NIGHTLY_VERSION: ${{ steps.nightly.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          cat > release-notes.md <<EOF
+          Nightly build from \`${NIGHTLY_SHA}\`.
+
+          - Version: \`${NIGHTLY_VERSION}\`
+          - Commit: \`${NIGHTLY_SHORT_SHA}\`
+          - Source branch: \`${{ github.event.repository.default_branch }}\`
+          EOF
+
+          gh release create "${NIGHTLY_TAG}" \
+            dist/*.tar.gz \
+            dist/checksums.txt \
+            --prerelease \
+            --target "${NIGHTLY_SHA}" \
+            --title "Nightly ${NIGHTLY_VERSION}" \
+            --notes-file release-notes.md
+
+      - name: Report skipped publish
+        if: steps.nightly.outputs.should_publish != 'true'
+        run: echo "Nightly artifacts are already current for the checked out ${{ github.event.repository.default_branch }} commit."
