@@ -25,6 +25,10 @@ func TestWorkspacePolicyModes(t *testing.T) {
 		{"readonly denies bash", "readonly", Request{ToolName: "bash", Args: map[string]any{"command": "date"}}, Deny},
 		{"readonly denies write", "readonly", Request{ToolName: "write_file", Args: map[string]any{"path": inside}}, Deny},
 		{"outside path denied", "trusted", Request{ToolName: "read_file", Args: map[string]any{"path": outside}}, Deny},
+		{"outside write denied", "trusted", Request{ToolName: "write_file", Args: map[string]any{"path": outside}}, Deny},
+		{"outside edit denied", "trusted", Request{ToolName: "edit_file", Args: map[string]any{"path": outside}}, Deny},
+		{"outside grep denied", "trusted", Request{ToolName: "grep", Args: map[string]any{"path": outside}}, Deny},
+		{"outside glob denied", "trusted", Request{ToolName: "glob", Args: map[string]any{"path": outside}}, Deny},
 	}
 
 	for _, tt := range tests {
@@ -68,5 +72,30 @@ func TestWorkspacePolicyDeniesSymlinkEscape(t *testing.T) {
 	})
 	if got.Decision != Deny {
 		t.Fatalf("decision = %v, want Deny", got.Decision)
+	}
+}
+
+func TestWorkspacePolicyDeniesMutationSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []Request{
+		{ToolName: "write_file", Args: map[string]any{"path": filepath.Join(root, "link", "new.txt")}},
+		{ToolName: "edit_file", Args: map[string]any{"path": filepath.Join(root, "link", "secret.txt")}},
+	}
+
+	for _, req := range tests {
+		t.Run(req.ToolName, func(t *testing.T) {
+			got := New("trusted", root).Decide(context.Background(), req)
+			if got.Decision != Deny {
+				t.Fatalf("decision = %v, want Deny", got.Decision)
+			}
+		})
 	}
 }
