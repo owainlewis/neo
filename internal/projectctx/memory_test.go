@@ -105,3 +105,24 @@ func TestAppendMemory_RejectsBlankEntry(t *testing.T) {
 		t.Fatal("expected blank memory to fail")
 	}
 }
+
+func TestAppendMemory_RejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "memory.md")
+	write(t, target, "# External memory\n")
+	if err := os.Symlink(target, filepath.Join(root, "memory.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := AppendMemory(root, "do not escape", time.Now()); err == nil {
+		t.Fatal("expected symlink escape to fail")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read outside target: %v", err)
+	}
+	if strings.Contains(string(got), "do not escape") {
+		t.Fatalf("outside memory target was modified:\n%s", got)
+	}
+}

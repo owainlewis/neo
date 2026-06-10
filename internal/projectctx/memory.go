@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/owainlewis/neo/internal/workspace"
 )
 
 const memoryFileName = "memory.md"
@@ -41,11 +43,15 @@ func AppendMemory(root, text string, now time.Time) (string, error) {
 		return "", fmt.Errorf("type text after /memory, for example /memory prefers table-driven tests")
 	}
 	path := filepath.Join(root, memoryFileName)
-	body, err := memoryEntryBody(path, entry, now)
+	resolvedPath, err := workspace.ResolveWithin(root, path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", memoryFileName, err)
+	}
+	body, err := memoryEntryBody(resolvedPath, entry, now)
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(resolvedPath, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil
