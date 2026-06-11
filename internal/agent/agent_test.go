@@ -292,6 +292,62 @@ func TestAgent_MaxTurnsReturnsSentinelWithPartialText(t *testing.T) {
 	assertToolUseResultsPaired(t, ag.Transcript())
 }
 
+func TestAgent_MaxOutputTokensEndsTurnWithPartialText(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{{
+		Content:    []llm.ContentBlock{{Type: "text", Text: "truncated answer"}},
+		StopReason: "max_tokens",
+	}}}
+	var events []Event
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		OnEvent: func(e Event) {
+			events = append(events, e)
+		},
+	})
+
+	out, err := ag.Send(context.Background(), "hi")
+	if !errors.Is(err, ErrMaxOutputTokens) {
+		t.Fatalf("expected ErrMaxOutputTokens, got %v", err)
+	}
+	if out != "truncated answer" {
+		t.Fatalf("expected partial text, got %q", out)
+	}
+	// The loop must not silently re-call the provider on a max_tokens stop.
+	if got := len(prov.Calls); got != 1 {
+		t.Fatalf("provider calls = %d, want 1", got)
+	}
+	sawErr := false
+	for _, e := range events {
+		if e.Kind == EventError && errors.Is(e.Err, ErrMaxOutputTokens) {
+			sawErr = true
+		}
+	}
+	if !sawErr {
+		t.Fatalf("missing max-output-tokens error event in %#v", events)
+	}
+}
+
+func TestAgent_MaxTokensWithToolCallsStillRunsTools(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content:    []llm.ContentBlock{{Type: "tool_use", ID: "call_1", Name: "echo", Input: map[string]any{"text": "pong"}}},
+			StopReason: "max_tokens",
+		},
+		llmtest.Text("done"),
+	}}
+	ag := newTestAgent(t, prov, echoTool{})
+
+	out, err := ag.Send(context.Background(), "ping")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "done" {
+		t.Fatalf("expected 'done', got %q", out)
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
 func TestAgent_ApprovalAllowsTool(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
 		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "pong"}),

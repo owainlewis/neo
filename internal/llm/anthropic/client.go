@@ -104,6 +104,28 @@ func systemPayload(req llm.Request) any {
 	return blocks
 }
 
+// wireMessages strips content blocks the Messages API does not accept — for
+// example "raw" reasoning items persisted by the OpenAI provider, which would
+// otherwise 400 when a session is resumed under this provider. Messages left
+// with no content are dropped entirely.
+func wireMessages(in []llm.Message) []llm.Message {
+	out := make([]llm.Message, 0, len(in))
+	for _, m := range in {
+		blocks := make([]llm.ContentBlock, 0, len(m.Content))
+		for _, b := range m.Content {
+			switch b.Type {
+			case "text", "tool_use", "tool_result", "image":
+				blocks = append(blocks, b)
+			}
+		}
+		if len(blocks) == 0 {
+			continue
+		}
+		out = append(out, llm.Message{Role: m.Role, Content: blocks})
+	}
+	return out
+}
+
 func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	if req.MaxTokens == 0 {
 		req.MaxTokens = 8192
@@ -111,7 +133,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 	body, err := json.Marshal(apiRequest{
 		Model:     req.Model,
 		System:    systemPayload(req),
-		Messages:  req.Messages,
+		Messages:  wireMessages(req.Messages),
 		Tools:     req.Tools,
 		MaxTokens: req.MaxTokens,
 	})

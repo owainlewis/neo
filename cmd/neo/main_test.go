@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/owainlewis/neo/internal/config"
+	"github.com/owainlewis/neo/internal/session"
 )
 
 func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.T) {
@@ -89,5 +90,31 @@ func TestChatSystem_SkipsProjectMemoryWhenDisabled(t *testing.T) {
 	}
 	if strings.Contains(system, "hidden memory") {
 		t.Fatal("disabled memory should not enter the prompt")
+	}
+}
+
+func TestSessionModel_HonorsSavedModelForSameProvider(t *testing.T) {
+	cfg := &config.Config{Provider: "openai", Model: "gpt-5.2"}
+	meta := session.Metadata{Provider: "openai", Model: "gpt-5-mini"}
+	if got := sessionModel(cfg, meta); got != "gpt-5-mini" {
+		t.Fatalf("sessionModel = %q, want saved model gpt-5-mini", got)
+	}
+}
+
+func TestSessionModel_FallsBackOnProviderMismatch(t *testing.T) {
+	cfg := &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}
+	meta := session.Metadata{Provider: "openai", Model: "gpt-5-codex"}
+	if got := sessionModel(cfg, meta); got != "claude-opus-4-8" {
+		t.Fatalf("sessionModel = %q, want config model on provider switch", got)
+	}
+}
+
+func TestSessionModel_FallsBackForLegacySessionsWithoutProvider(t *testing.T) {
+	// Sessions written before the provider field existed must not pin a model
+	// that may belong to a different backend.
+	cfg := &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}
+	meta := session.Metadata{Model: "gpt-4o"}
+	if got := sessionModel(cfg, meta); got != "claude-opus-4-8" {
+		t.Fatalf("sessionModel = %q, want config model for legacy session", got)
 	}
 }

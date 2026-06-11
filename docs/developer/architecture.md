@@ -12,7 +12,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `cmd/neo-docs/` | Deterministic developer documentation generator. |
 | `internal/agent/` | Core agent loop, transcript state, event model, tool-use continuation. |
 | `internal/auth/` | OpenAI ChatGPT/Codex device-code login, token refresh, and stored subscription credentials. |
-| `internal/compact/` | Compaction interface, no-op default, and safe split helpers for future strategies. |
+| `internal/compact/` | Compaction interface, summarizing compactor, and safe split helpers. |
 | `internal/config/` | Config discovery, defaults, and feature flags. |
 | `internal/llm/` | Provider-neutral request/response types and system prompt blocks. |
 | `internal/llm/anthropic/` | Anthropic provider adapter. |

@@ -13,6 +13,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/auth"
+	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
@@ -300,15 +301,17 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	if sess == nil {
 		var err error
 		sess, err = store.Create(ctx, session.Metadata{
-			Source: session.DefaultSource,
-			CWD:    cwd,
-			Model:  cfg.Model,
+			Source:   session.DefaultSource,
+			CWD:      cwd,
+			Model:    cfg.Model,
+			Provider: cfg.Provider,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "create session: %v\n", err)
 			os.Exit(1)
 		}
 	}
+	model := sessionModel(cfg, sess.Metadata)
 
 	// Skills are loaded once: the catalog is advertised in the system prompt
 	// (via chatSystem), and the same slice drives $name expansion in the TUI.
@@ -316,12 +319,13 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	system, systemBlocks := chatSystem(cfg, cwd, sk)
 	ag := agent.New(agent.Config{
-		Model:        cfg.Model,
+		Model:        model,
 		System:       system,
 		SystemBlocks: systemBlocks,
 		Provider:     prov,
 		Tools:        reg,
 		Policy:       permission.New(cfg.Permissions.Mode, root),
+		Compactor:    compact.NewSummarizer(prov, model),
 		Messages:     sess.Messages,
 	})
 
@@ -329,10 +333,11 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		sess.Messages = ag.Transcript()
 		sess.Metadata.CWD = cwd
 		sess.Metadata.Model = ag.Model()
+		sess.Metadata.Provider = cfg.Provider
 		return store.Save(ctx, sess)
 	}
 
-	if err := tui.Run(ctx, ag, cfg.Model, Version, sk,
+	if err := tui.Run(ctx, ag, model, Version, sk,
 		tui.WithAfterSend(saveSession),
 		tui.WithPermissionMode(cfg.Permissions.Mode),
 		tui.WithProjectMemory(root, cfg.MemoryEnabled()),
@@ -344,6 +349,21 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// sessionModel picks the model for a (possibly resumed) session: the session's
+// saved model when it was recorded under the current provider, otherwise the
+// configured default. A saved model from a different provider is never reused —
+// its ids don't transfer — and the switch is surfaced as a warning.
+func sessionModel(cfg *config.Config, meta session.Metadata) string {
+	if meta.Model != "" && meta.Provider == cfg.Provider {
+		return meta.Model
+	}
+	if meta.Provider != "" && meta.Provider != cfg.Provider {
+		fmt.Fprintf(os.Stderr, "warning: session was created with provider %s; continuing with %s model %s\n",
+			meta.Provider, cfg.Provider, cfg.Model)
+	}
+	return cfg.Model
 }
 
 func modelChoices(cfg *config.Config) []tui.ModelChoice {

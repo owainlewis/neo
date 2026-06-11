@@ -199,6 +199,11 @@ func pollDeviceToken(ctx context.Context, httpc *http.Client, code deviceCode) (
 	if err != nil {
 		return deviceToken{}, false, err
 	}
+	// The endpoint answers 403/404 while the user hasn't completed the browser
+	// approval, so both mean "still pending". The cost is that a genuinely dead
+	// device_auth_id also polls until the surrounding timeout — the API gives
+	// no way to tell the two apart, and codes expire on the same ~15 minute
+	// horizon anyway.
 	if status == http.StatusForbidden || status == http.StatusNotFound {
 		return deviceToken{}, true, nil
 	}

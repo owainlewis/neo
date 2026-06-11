@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/owainlewis/neo/internal/atomicfile"
 	"github.com/owainlewis/neo/internal/llm"
 )
 
@@ -25,12 +26,16 @@ const (
 var ErrNotFound = errors.New("session not found")
 
 type Metadata struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title,omitempty"`
-	Source    string    `json:"source"`
-	External  string    `json:"external,omitempty"`
-	CWD       string    `json:"cwd"`
-	Model     string    `json:"model"`
+	ID       string `json:"id"`
+	Title    string `json:"title,omitempty"`
+	Source   string `json:"source"`
+	External string `json:"external,omitempty"`
+	CWD      string `json:"cwd"`
+	Model    string `json:"model"`
+	// Provider records which LLM backend produced this transcript. Transcripts
+	// can carry provider-specific blocks, so resume logic uses this to decide
+	// whether the saved model still applies.
+	Provider  string    `json:"provider,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -40,6 +45,11 @@ type Session struct {
 	Messages []llm.Message `json:"messages"`
 }
 
+// Store persists sessions as one JSON file each plus an index.json summary.
+// Index mutations are read-modify-write with an atomic rename and no
+// cross-process lock — like the auth store, this assumes a single interactive
+// CLI per sessions directory; concurrent neo processes can lose index updates
+// (session files themselves are never affected).
 type Store struct {
 	dir string
 }
@@ -278,36 +288,10 @@ func upsertMetadata(idx *index, meta Metadata) {
 	idx.Sessions = append(idx.Sessions, meta)
 }
 
-func writeFileAtomic(path string, b []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create dir %s: %w", dir, err)
-	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return fmt.Errorf("chmod temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("replace %s: %w", path, err)
-	}
-	return nil
-}
-
 func writeJSONAtomic(path string, b []byte) error {
-	return writeFileAtomic(path, append(b, '\n'), 0o600)
+	// Sessions hold full transcripts (potentially sensitive file contents), so
+	// they are written 0600 like the auth store.
+	return atomicfile.Write(path, append(b, '\n'), 0o600, 0o755)
 }
 
 func cleanID(id string) (string, error) {

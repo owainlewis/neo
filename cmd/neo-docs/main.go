@@ -161,7 +161,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`cmd/neo-docs/`" + ` | Deterministic developer documentation generator. |
 | ` + "`internal/agent/`" + ` | Core agent loop, transcript state, event model, tool-use continuation. |
 | ` + "`internal/auth/`" + ` | OpenAI ChatGPT/Codex device-code login, token refresh, and stored subscription credentials. |
-| ` + "`internal/compact/`" + ` | Compaction interface, no-op default, and safe split helpers for future strategies. |
+| ` + "`internal/compact/`" + ` | Compaction interface, summarizing compactor, and safe split helpers. |
 | ` + "`internal/config/`" + ` | Config discovery, defaults, and feature flags. |
 | ` + "`internal/llm/`" + ` | Provider-neutral request/response types and system prompt blocks. |
 | ` + "`internal/llm/anthropic/`" + ` | Anthropic provider adapter. |
@@ -781,11 +781,12 @@ If the transcript gets too large, the next provider call may fail or become wast
 
 ## How Neo Solves It Today
 
-Neo has the seam but not an aggressive strategy yet:
+Neo summarizes old turns once the transcript gets large:
 
-- ` + "`compact.Compactor`" + ` is the interface.
-- ` + "`NoCompaction`" + ` is the default.
-- ` + "`SafeSplitPoint`" + ` helps future strategies avoid invalid transcript cuts.
+- ` + "`compact.Compactor`" + ` is the interface; the agent calls it before every provider call.
+- ` + "`compact.Summarizer`" + ` is wired in by the chat command. When the estimated transcript size passes a trigger (~100k tokens), it asks the provider to summarize the oldest turns and replaces them with a single user message carrying the summary. The most recent messages are kept verbatim.
+- ` + "`NoCompaction`" + ` is the fallback when no compactor is configured.
+- ` + "`SafeSplitPoint`" + ` picks the cut so strategies avoid invalid transcript splits.
 
 The important safety rule is: never keep a ` + "`tool_result`" + ` without its matching ` + "`tool_use`" + `.
 
@@ -793,9 +794,9 @@ The important safety rule is: never keep a ` + "`tool_result`" + ` without its m
 
 | Strategy | Idea | Status |
 | --- | --- | --- |
-| No compaction | Keep the transcript as-is. | Current default. |
+| No compaction | Keep the transcript as-is. | Fallback when unconfigured. |
+| Summarize old turns | Replace older conversation with a summary. | Current default (` + "`Summarizer`" + `). |
 | Sliding window | Keep only the most recent safe chunk. | Future. |
-| Summarize old turns | Replace older conversation with a summary. | Future. |
 | Token-budget compaction | Compact only when near a model's context limit. | Future, needs model catalog. |
 
 ## What Good Compaction Preserves

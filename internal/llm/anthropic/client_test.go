@@ -266,3 +266,52 @@ func TestComplete_ParsesCacheUsage(t *testing.T) {
 		t.Fatalf("usage = %+v, want %+v", resp.Usage, want)
 	}
 }
+
+func TestComplete_StripsForeignRawBlocksFromMessages(t *testing.T) {
+	var captured struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.WriteHeader(200)
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+	}))
+	defer srv.Close()
+
+	// A transcript resumed from an OpenAI session: the assistant message
+	// carries an opaque "raw" reasoning block alongside its text, plus a
+	// raw-only message that must disappear entirely.
+	_, err := newTestClient(srv).Complete(context.Background(), llm.Request{
+		Model: "m",
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "hi"}}},
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","encrypted_content":"abc"}`)},
+				{Type: "text", Text: "hello"},
+			}},
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning"}`)},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(captured.Messages) != 2 {
+		t.Fatalf("messages sent = %d, want 2 (raw-only message dropped)", len(captured.Messages))
+	}
+	for _, m := range captured.Messages {
+		for _, b := range m.Content {
+			if b.Type == "raw" {
+				t.Fatal("raw block leaked into the Anthropic request")
+			}
+		}
+	}
+}

@@ -20,7 +20,7 @@ func (Bash) Name() string { return "bash" }
 func (Bash) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "bash",
-		Description: "Run a shell command via /bin/bash -lc. Returns combined stdout+stderr. Use for git, tests, builds, file inspection beyond Read.",
+		Description: "Run a shell command via /bin/bash -c. Returns combined stdout+stderr. Use for git, tests, builds, file inspection beyond Read.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

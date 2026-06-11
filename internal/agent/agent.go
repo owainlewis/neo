@@ -25,6 +25,11 @@ const (
 
 var ErrMaxTurns = errors.New("max turns reached")
 
+// ErrMaxOutputTokens is returned when the model stops because it hit its
+// output-token limit with no tool calls to continue on. Ending the turn (with
+// the partial text) beats silently re-calling the provider until MaxTurns.
+var ErrMaxOutputTokens = errors.New("response truncated: model hit its max output tokens limit")
+
 type Event struct {
 	Kind     EventKind
 	Text     string
@@ -244,6 +249,10 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 		if resp.StopReason == "end_turn" || resp.StopReason == "stop_sequence" || resp.StopReason == "" {
 			a.emit(Event{Kind: EventDone})
 			return strings.TrimSpace(finalText.String()), nil
+		}
+		if resp.StopReason == "max_tokens" {
+			a.emit(Event{Kind: EventError, Err: ErrMaxOutputTokens})
+			return strings.TrimSpace(finalText.String()), ErrMaxOutputTokens
 		}
 	}
 	a.emit(Event{Kind: EventMaxTurnsReached, MaxTurns: a.cfg.MaxTurns, Err: ErrMaxTurns})
