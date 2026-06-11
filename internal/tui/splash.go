@@ -7,6 +7,7 @@ import (
 
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // splashBlock renders the welcome shown once at the top of every chat
@@ -76,8 +77,8 @@ func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
 
 	labelW := 0
 	for _, r := range rows {
-		if len(r[0]) > labelW {
-			labelW = len(r[0])
+		if w := ansi.StringWidth(r[0]); w > labelW {
+			labelW = w
 		}
 	}
 	metaLines := make([]string, 0, len(rows))
