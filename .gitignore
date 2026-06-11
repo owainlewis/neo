@@ -4,3 +4,4 @@
 /.agent/
 /neo
 .DS_Store
+/.neo/events.jsonl

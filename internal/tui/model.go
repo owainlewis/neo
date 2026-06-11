@@ -19,6 +19,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
@@ -35,6 +36,7 @@ type Options struct {
 	ModelChoices    []ModelChoice
 	ProjectRoot     string
 	MemoryEnabled   bool
+	StepEvents      <-chan factory.Event
 }
 
 type Option func(*Options)
@@ -66,6 +68,13 @@ func WithProjectMemory(root string, enabled bool) Option {
 	}
 }
 
+// WithStepEvents subscribes the TUI to the factory supervisor's event
+// stream, which the chat view folds into live step trees while run_step
+// executes.
+func WithStepEvents(ch <-chan factory.Event) Option {
+	return func(opts *Options) { opts.StepEvents = ch }
+}
+
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
 // loaded skill set used for $name expansion (nil when the feature is off).
 func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skills.Skill, options ...Option) error {
@@ -82,6 +91,15 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 	// Pipe agent events directly into the Bubble Tea program. This avoids a
 	// hand-rolled channel pump and the back-pressure that came with it.
 	ag.SetEventHandler(func(e agent.Event) { p.Send(agentEventMsg{ev: e}) })
+	// Supervisor events (sub-step activity during run_step) arrive the same
+	// way. The channel is already non-blocking on the producer side.
+	if opts.StepEvents != nil {
+		go func() {
+			for ev := range opts.StepEvents {
+				p.Send(stepEventMsg{ev: ev})
+			}
+		}()
+	}
 	ag.SetApprover(func(ctx context.Context, req agent.ApprovalRequest) (bool, error) {
 		reply := make(chan bool, 1)
 		p.Send(approvalRequestMsg{req: req, reply: reply})
@@ -98,6 +116,7 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 
 type sendResultMsg struct{ err error }
 type agentEventMsg struct{ ev agent.Event }
+type stepEventMsg struct{ ev factory.Event }
 type approvalRequestMsg struct {
 	req   agent.ApprovalRequest
 	reply chan bool
@@ -139,6 +158,8 @@ type model struct {
 	busy        bool
 	busySince   time.Time
 	currentTool *toolCallBlock
+	activeTree  *treeBlock         // block receiving new top-level run_step trees
+	treeIndex   map[int]*treeBlock // supervisor node id -> the block holding it
 	approval    *approvalState
 	quitting    bool
 
@@ -498,6 +519,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		cmds = append(cmds, cmd)
+		// A live tree shows elapsed time on its running nodes; repaint on
+		// the spinner's cadence so the counters don't freeze between events.
+		if m.activeTree != nil && m.activeTree.running() {
+			m.refreshViewport()
+		}
+
+	case stepEventMsg:
+		m.handleStepEvent(msg.ev)
 
 	case rotateCaptionMsg:
 		if m.busy {
@@ -810,17 +839,34 @@ func (m *model) refreshViewport() {
 func (m *model) handleEvent(e agent.Event) {
 	switch e.Kind {
 	case agent.EventAssistantText:
+		m.activeTree = nil // assistant commentary splits step trees
 		if strings.TrimSpace(e.Text) != "" {
 			m.appendBlock(textBlock{text: e.Text})
 		}
 	case agent.EventToolCall:
 		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now()}
 		m.currentTool = &tc
+		if e.Name == "run_step" {
+			// The supervisor's "start" event draws this call as a tree
+			// node; no generic tool card.
+			break
+		}
+		m.activeTree = nil
 		m.appendBlock(tc)
 	case agent.EventToolResult:
 		elapsed := time.Duration(0)
 		if m.currentTool != nil {
 			elapsed = time.Since(m.currentTool.startAt)
+		}
+		m.currentTool = nil
+		if e.Name == "run_step" {
+			// Success renders in the tree. Failures (including denials and
+			// missing steps, which never become nodes) keep an error card
+			// so the output is inspectable.
+			if e.IsError || !runStepOK(e.Text) {
+				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true, elapsed: elapsed})
+			}
+			break
 		}
 		m.appendBlock(toolResultBlock{
 			name:    e.Name,
@@ -828,7 +874,6 @@ func (m *model) handleEvent(e agent.Event) {
 			isError: e.IsError,
 			elapsed: elapsed,
 		})
-		m.currentTool = nil
 	case agent.EventError:
 		m.appendBlock(errorBlock{err: e.Err})
 	case agent.EventMaxTurnsReached:
@@ -836,6 +881,69 @@ func (m *model) handleEvent(e agent.Event) {
 	case agent.EventDone:
 		// handled when sendResultMsg arrives
 	}
+}
+
+// handleStepEvent folds the supervisor's event stream into tree blocks:
+// "start" places a node (a fresh block per top-level call unless the
+// previous block is still the active tree), "done"/"fail" settle it, and
+// everything else updates the node's live status line.
+func (m *model) handleStepEvent(ev factory.Event) {
+	switch ev.Ev.Kind {
+	case "start":
+		m.startTreeNode(ev)
+	case "done", "fail":
+		tb := m.treeIndex[ev.Node]
+		if tb == nil {
+			return
+		}
+		if n := tb.nodes[ev.Node]; n != nil && !n.done {
+			n.done = true
+			n.ok = ev.Ev.Kind == "done"
+			n.elapsed = time.Since(n.startAt)
+			n.lastLine = ""
+			m.refreshViewport()
+		}
+	case "tool", "text", "error":
+		tb := m.treeIndex[ev.Node]
+		if tb == nil {
+			return
+		}
+		if n := tb.nodes[ev.Node]; n != nil && !n.done {
+			if line := strings.TrimSpace(ev.Ev.Body); line != "" {
+				n.lastLine = line
+				m.refreshViewport()
+			}
+		}
+	}
+}
+
+// startTreeNode places a started node in a tree block. Top-level calls
+// (children of the chat agent, node 0) root a block; deeper nodes attach
+// under their parent's block wherever it lives.
+func (m *model) startTreeNode(ev factory.Event) {
+	if m.treeIndex == nil {
+		m.treeIndex = map[int]*treeBlock{}
+	}
+	node := &treeNode{id: ev.Node, parent: ev.Parent, step: ev.Step, task: ev.Task, startAt: time.Now()}
+	if ev.Parent == 0 {
+		if m.activeTree == nil || len(m.blocks) == 0 || m.blocks[len(m.blocks)-1] != block(m.activeTree) {
+			m.activeTree = newTreeBlock()
+			m.appendBlock(m.activeTree)
+		}
+		m.activeTree.roots = append(m.activeTree.roots, ev.Node)
+		m.activeTree.nodes[ev.Node] = node
+		m.treeIndex[ev.Node] = m.activeTree
+		m.refreshViewport()
+		return
+	}
+	tb := m.treeIndex[ev.Parent]
+	if tb == nil {
+		return // parent unknown (e.g. events from a pre-resume session)
+	}
+	tb.nodes[ev.Node] = node
+	tb.children[ev.Parent] = append(tb.children[ev.Parent], ev.Node)
+	m.treeIndex[ev.Node] = tb
+	m.refreshViewport()
 }
 
 func (m *model) appendTranscript(messages []llm.Message) {

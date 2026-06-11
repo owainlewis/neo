@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -96,6 +97,109 @@ func (b toolResultBlock) render(width int, _ *glamour.TermRenderer) string {
 		style = styCardErr
 	}
 	return style.Width(width - 2).Render(body + footer)
+}
+
+// treeNode is one step execution in a treeBlock: a node of the supervisor's
+// tree, reconstructed in the UI purely from the event stream.
+type treeNode struct {
+	id, parent int
+	step, task string
+	startAt    time.Time
+	done, ok   bool
+	elapsed    time.Duration
+	lastLine   string // latest activity while running
+}
+
+// treeBlock renders the supervisor subtrees spawned by the chat agent's
+// run_step calls — steps and their sub-steps, live:
+//
+//	● ship  add rate limiting to invites          2m07s
+//	├─ ✓ checks                                       4s
+//	├─ ● worker  implement limiter middleware     1m12s
+//	│     └ bash: just test
+//	└─ ✓ verify  branch vs acceptance criteria      31s
+//
+// Consecutive top-level calls share one block (their trees render as
+// siblings); assistant text in between starts a new block. It is a pointer
+// block, mutated in place as events arrive.
+type treeBlock struct {
+	nodes    map[int]*treeNode
+	children map[int][]int
+	roots    []int
+}
+
+func newTreeBlock() *treeBlock {
+	return &treeBlock{nodes: map[int]*treeNode{}, children: map[int][]int{}}
+}
+
+// running reports whether any node in the block is still in flight.
+func (b *treeBlock) running() bool {
+	for _, n := range b.nodes {
+		if !n.done {
+			return true
+		}
+	}
+	return false
+}
+
+// render draws the tree as plain styled lines, no background card: mixing
+// foreground-styled spans inside a Background style breaks the fill at
+// every inner ANSI reset, which reads as patchy off-color blocks.
+func (b *treeBlock) render(width int, _ *glamour.TermRenderer) string {
+	var sb strings.Builder
+	for _, id := range b.roots {
+		b.renderNode(&sb, id, "", true, width)
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (b *treeBlock) renderNode(sb *strings.Builder, id int, prefix string, last bool, width int) {
+	n := b.nodes[id]
+	if n == nil {
+		return
+	}
+	connector, childPrefix := "├─ ", prefix+"│  "
+	if last {
+		connector, childPrefix = "└─ ", prefix+"   "
+	}
+	if n.parent == 0 { // the chat agent's own calls are the roots
+		connector, childPrefix = "", ""
+	}
+
+	glyph := styTool.Render("●")
+	elapsed := time.Since(n.startAt)
+	if n.done {
+		elapsed = n.elapsed
+		if n.ok {
+			glyph = styAccent.Render("✓")
+		} else {
+			glyph = styErr.Render("✗")
+		}
+	}
+	task := truncate(oneLine(n.task), 44)
+	sb.WriteString(fmt.Sprintf("%s%s%s %s %s %s\n",
+		prefix, connector, glyph, padRight(n.step, 12), task, styMuted.Render(formatElapsed(elapsed))))
+	if !n.done && n.lastLine != "" {
+		sb.WriteString(childPrefix + styMuted.Render("  └ "+truncate(oneLine(n.lastLine), max(width-12, 10))) + "\n")
+	}
+	kids := b.children[id]
+	for i, k := range kids {
+		b.renderNode(sb, k, childPrefix, i == len(kids)-1, width)
+	}
+}
+
+// runStepOK reads the {"ok":…} envelope on the first line of a run_step
+// tool result. The tool returns ok=false inside the payload (with no tool
+// error) when a step fails, times out, or is denied.
+func runStepOK(text string) bool {
+	line, _, _ := strings.Cut(text, "\n")
+	var env struct {
+		Ok bool `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(line), &env); err == nil {
+		return env.Ok
+	}
+	return true // unrecognized payload: don't paint a false failure
 }
 
 // noticeBlock is a quiet one-line status note (e.g. an applied skill).

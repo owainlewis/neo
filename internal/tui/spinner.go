@@ -60,6 +60,8 @@ func toolVerb(name string, args map[string]any) string {
 		return "searching " + truncate(oneLine(stringArg(args, "pattern")), 60)
 	case "glob":
 		return "matching " + truncate(oneLine(stringArg(args, "pattern")), 60)
+	case "run_step":
+		return "step " + truncate(oneLine(stringArg(args, "name")), 40)
 	}
 	return name
 }

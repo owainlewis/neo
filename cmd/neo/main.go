@@ -15,6 +15,7 @@ import (
 	"github.com/owainlewis/neo/internal/auth"
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
+	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/llm/openai"
@@ -58,6 +59,10 @@ func main() {
 			os.Exit(2)
 		}
 		resumeSession(ctx, os.Args[2])
+	case "factory":
+		runFactory(ctx, os.Args[2:])
+	case "step":
+		runStepCmd(ctx, os.Args[2:])
 	case "login":
 		runLogin(ctx)
 	case "logout":
@@ -79,6 +84,8 @@ USAGE:
   neo chat           Interactive chat mode (explicit)
   neo sessions       List saved chat sessions
   neo resume <id>    Resume a saved chat session
+  neo factory "<goal>"     Run the autonomous factory loop (orchestrator + workers)
+  neo step <name> "<in>"   Run a single step (steps/<name>.md or executable steps/<name>)
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials
   neo help           Show this help
@@ -96,15 +103,16 @@ CONFIG:
   then run "neo login".`)
 }
 
-func newRegistry(cwd, root string) *tools.Registry {
-	return tools.NewRegistry(
+func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
+	base := []tools.Tool{
 		tools.Bash{Timeout: 2 * time.Minute, CWD: cwd},
 		tools.ReadFile{},
 		tools.WriteFile{},
 		tools.EditFile{},
 		tools.Grep{Root: root},
 		tools.Glob{Root: root},
-	)
+	}
+	return tools.NewRegistry(append(base, extra...)...)
 }
 
 // chatSystem builds the chat agent's system prompt as ordered blocks: a stable,
@@ -115,8 +123,9 @@ func newRegistry(cwd, root string) *tools.Registry {
 // back to the blocks built so far rather than failing to start.
 //
 // It returns both the flattened string and the blocks so the agent can pass
-// whichever a provider supports.
-func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []llm.SystemBlock) {
+// whichever a provider supports. stepsSection, when non-empty, is appended as
+// its own uncached block: the available steps vary per project and session.
+func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, stepsSection string) (string, []llm.SystemBlock) {
 	// Base block: static instructions + skill catalog. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
 	base := skills.Augment(chatSystemPrompt, sk)
@@ -142,6 +151,9 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []ll
 		} else if section := projectctx.MemorySection(doc); ok && section != "" {
 			blocks = append(blocks, llm.SystemBlock{Text: section})
 		}
+	}
+	if stepsSection != "" {
+		blocks = append(blocks, llm.SystemBlock{Text: stepsSection})
 	}
 
 	var b strings.Builder
@@ -296,7 +308,22 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
 	root := workspace.Root(cwd)
-	reg := newRegistry(cwd, root)
+	// The chat agent is the primary orchestrator: it gets run_step (as caller
+	// node 0) so it can delegate to steps directly from the conversation, and
+	// the system prompt advertises which steps exist so "run the validate
+	// step" or "run these steps: branch, code, review, pr" works in plain
+	// language. Sequencing is the agent's judgment, not a stored artifact.
+	var extra []tools.Tool
+	var steps string
+	var stepEvents <-chan factory.Event
+	if cwd != "" {
+		resolver := factory.Resolver{Paths: factory.DefaultStepPaths(root)}
+		var rst factory.RunStepTool
+		rst, stepEvents = chatRunStepTool(prov, cfg, cwd, root, resolver)
+		extra = append(extra, rst)
+		steps = stepsSection(resolver)
+	}
+	reg := newRegistry(cwd, root, extra...)
 
 	if sess == nil {
 		var err error
@@ -317,7 +344,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// (via chatSystem), and the same slice drives $name expansion in the TUI.
 	sk := loadSkills(cfg, cwd)
 
-	system, systemBlocks := chatSystem(cfg, cwd, sk)
+	system, systemBlocks := chatSystem(cfg, cwd, sk, steps)
 	ag := agent.New(agent.Config{
 		Model:        model,
 		System:       system,
@@ -345,6 +372,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 			sess = resumed
 		}),
 		tui.WithModelChoices(modelChoices(cfg)),
+		tui.WithStepEvents(stepEvents),
 	); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
