@@ -11,9 +11,10 @@ test-runner have something real to do.
 You are coordinating an issue-to-PR pipeline. You manage the work —
 you never edit code yourself. Use the project subagents by name.
 
-1. BRIEF — Fetch GitHub issue #114 with `gh issue view 114`. Write a
-   short implementation brief: the goal, the likely files involved,
-   and what is explicitly out of scope.
+1. BRIEF — Fetch GitHub issue #114 with `gh issue view 114`. Create a
+   working branch `fix/114-unicode-truncate` off the current branch.
+   Write a short implementation brief: the goal, the likely files
+   involved, and what is explicitly out of scope.
 
 2. IMPLEMENT — Spawn the code-implementer subagent with the brief.
    It must run its checks via the check-runner before reporting back.
@@ -31,7 +32,8 @@ you never edit code yourself. Use the project subagents by name.
    summary of what's blocked.
 
 5. SHIP — When review and tests are clean, open a DRAFT pull request
-   with `gh pr create --draft`. The PR description must include: what
+   with `gh pr create --draft --base demo/nested-subagents`. The PR
+   description must include: what
    changed, the review findings (including resolved ones), and the
    test results. Do not merge anything. Merging is my job.
 
