@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 type commandPicker struct {
@@ -153,7 +155,7 @@ func renderSlashPicker(width int, picker commandPicker) string {
 func slashPickerCommandWidth(commands []slashCommand) int {
 	width := 0
 	for _, c := range commands {
-		if n := len(slashPickerDisplayName(c.cmd)); n > width {
+		if n := ansi.StringWidth(slashPickerDisplayName(c.cmd)); n > width {
 			width = n
 		}
 	}

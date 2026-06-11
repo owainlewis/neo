@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // stringArg extracts a string value from a tool-input map by key.
@@ -25,23 +27,28 @@ func oneLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// truncate shortens s to at most n runes, appending "…" if it was cut.
+// truncate shortens s to at most n display cells, appending "…" if it was
+// cut. Width is measured in terminal cells (CJK and emoji count as 2), ANSI
+// escape sequences are skipped, and cuts land on grapheme-cluster boundaries
+// so combining marks stay attached and output is always valid UTF-8. When s
+// does not fit and n <= 1 (including n <= 0), the result is just "…".
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	if ansi.StringWidth(s) <= n {
 		return s
 	}
 	if n <= 1 {
 		return "…"
 	}
-	return s[:n-1] + "…"
+	return ansi.Truncate(s, n, "…")
 }
 
-// padRight pads s with spaces to width n (no-op if already wider).
+// padRight pads s with spaces to n display cells (no-op if already wider).
 func padRight(s string, n int) string {
-	if len(s) >= n {
+	w := ansi.StringWidth(s)
+	if w >= n {
 		return s
 	}
-	return s + strings.Repeat(" ", n-len(s))
+	return s + strings.Repeat(" ", n-w)
 }
 
 // fmtElapsed formats a duration for display in tool-result and step-row
