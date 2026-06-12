@@ -275,6 +275,7 @@ permissions:
 # to false to disable it. The core agent loop is never affected by these.
 features:
   agents_file: true   # load AGENTS.md into the system prompt
+  memory: true        # load and update project-root memory.md
   skills: true        # discover .neo/skills, advertise them, expand $name
   prompt_caching: true # cache the static system prompt prefix
 ```
