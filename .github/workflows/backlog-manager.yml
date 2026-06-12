@@ -40,6 +40,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          display_report: true
+          show_full_output: true
           prompt: |
             Use the backlog-manager skill in ${{ inputs.mode || 'apply' }}
             mode for the GitHub repo owainlewis/neo. The backlog source
@@ -55,3 +57,6 @@ jobs:
               Agent Assessment comments, closing issues with linked
               merged-PR evidence, and creating evidence-backed issues.
               Everything else is report-only.
+            - End with a compact final report containing: mode, issues
+              inspected, issues triaged, labels/comments created, proposed
+              project-board changes, and blockers.
