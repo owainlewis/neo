@@ -14,6 +14,7 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/workspace"
 )
 
@@ -80,6 +81,10 @@ func chatRunStepTool(prov llm.Provider, cfg *config.Config, cwd, root string, re
 		DefaultModel: cfg.Model,
 		Root:         root,
 		BashTimeout:  5 * time.Minute,
+		// A readonly session must not gain write access by delegating;
+		// ask-mode sessions gate at the run_step approval instead (steps
+		// run autonomously once approved). Mode is fixed at session start.
+		Mode: permission.Mode(cfg.Permissions.Mode),
 	}
 	sup := factory.NewSupervisor(runner, factory.DefaultBudget(), resolver)
 	runner.Sup = sup

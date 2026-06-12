@@ -56,6 +56,10 @@ func TestRunScriptStepFailureExitCode(t *testing.T) {
 	if res.Ok || !strings.Contains(res.Output, "boom") {
 		t.Fatalf("want ok=false with output, got %+v", res)
 	}
+	// The exit error is the caller's re-planning signal; it must survive.
+	if !strings.Contains(res.Output, "exit status 3") {
+		t.Fatalf("exit error swallowed: %+v", res)
+	}
 }
 
 func TestRunScriptStepTimeout(t *testing.T) {

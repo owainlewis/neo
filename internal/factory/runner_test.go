@@ -2,12 +2,16 @@ package factory
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
+	"github.com/owainlewis/neo/internal/permission"
 )
 
 func TestRegistryIsTheRole(t *testing.T) {
@@ -66,6 +70,40 @@ func TestRunAgentStepReportsUsage(t *testing.T) {
 	}
 	if usage != "tokens in=1000000 out=100000 cached=0" {
 		t.Fatalf("usage body = %q", usage)
+	}
+}
+
+// TestReadonlyModePropagatesToSteps guards the permission boundary: a
+// readonly session delegating a step must not gain write access through
+// the child agent.
+func TestReadonlyModePropagatesToSteps(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("t1", "write_file", map[string]any{"path": "x.txt", "content": "hi"}),
+		llmtest.Text("done"),
+	}}
+	dir := t.TempDir()
+	r := &AgentRunner{Provider: prov, DefaultModel: "m", Root: dir, Mode: permission.ModeReadonly}
+
+	events := make(chan AgentEvent, 32)
+	step := Step{Name: "w", Kind: "agent", Prompt: "Write.",
+		Tools: []string{"bash", "read_file", "write_file"}}
+	if _, err := r.RunAgentStep(context.Background(), step, dir, "write x.txt", 1, events); err != nil {
+		t.Fatal(err)
+	}
+	// The write must be denied by policy: the tool_result fed back to the
+	// model carries the denial.
+	res := prov.Calls[1].Messages
+	flat := ""
+	for _, m := range res {
+		for _, c := range m.Content {
+			flat += c.Content
+		}
+	}
+	if !strings.Contains(flat, "readonly") {
+		t.Fatalf("write_file not denied under readonly mode:\n%s", flat)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "x.txt")); err == nil {
+		t.Fatal("file was written despite readonly mode")
 	}
 }
 

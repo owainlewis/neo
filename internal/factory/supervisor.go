@@ -193,7 +193,12 @@ func (s *Supervisor) runScript(ctx context.Context, id int, path, dir, input str
 	if cctx.Err() == context.DeadlineExceeded {
 		return out + "\n[step timed out]", false
 	}
-	return out, err == nil
+	if err != nil {
+		// The exit/exec error is the caller's only re-planning signal when
+		// the script wrote nothing useful — never swallow it.
+		return out + "\n[script error: " + err.Error() + "]", false
+	}
+	return out, true
 }
 
 func (s *Supervisor) attribute(id int, ev AgentEvent) {

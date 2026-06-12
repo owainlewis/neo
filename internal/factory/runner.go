@@ -28,6 +28,13 @@ type AgentRunner struct {
 	Root         string // workspace root; bounds file tools via permission policy
 	BashTimeout  time.Duration
 
+	// Mode is the permission mode child agents run under. Steps execute
+	// autonomously (there is no approver inside a step), so "ask" cannot be
+	// honored mid-step; but "readonly" must propagate — a readonly session
+	// delegating a step must not gain write access through the side door.
+	// Empty defaults to trusted (the autonomous factory/step CLI case).
+	Mode permission.Mode
+
 	// Sup is set after NewSupervisor — the runner needs it to hand child
 	// agents a run_step tool bound to their node.
 	Sup *Supervisor
@@ -43,12 +50,16 @@ func (r *AgentRunner) RunAgentStep(ctx context.Context, step Step, dir, input st
 		maxTurns = defaultStepMaxTurns
 	}
 
+	mode := r.Mode
+	if mode == "" || mode == permission.ModeAsk {
+		mode = permission.ModeTrusted
+	}
 	ag := agent.New(agent.Config{
 		Model:     model,
 		System:    step.Prompt,
 		Provider:  r.Provider,
 		Tools:     r.registry(step, dir, nodeID),
-		Policy:    permission.New(string(permission.ModeTrusted), r.Root),
+		Policy:    permission.New(string(mode), r.Root),
 		Compactor: compact.NewSummarizer(r.Provider, model),
 		MaxTurns:  maxTurns,
 		OnEvent: func(e agent.Event) {
