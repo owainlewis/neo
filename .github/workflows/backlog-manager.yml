@@ -1,0 +1,57 @@
+# The manager loop: triage and route the backlog for humans and agents.
+#
+# Run manually from the Actions tab (choose dry-run or apply), or
+# uncomment the schedule for the real 24/7 version. Requires an
+# ANTHROPIC_API_KEY repository secret.
+#
+# Note: the default GITHUB_TOKEN cannot edit user-level Projects (v2),
+# so this loop manages issue labels and comments. Board sync needs a
+# PAT with the project scope if you want it.
+
+name: backlog-manager
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run reports only; apply makes changes"
+        required: true
+        default: "dry-run"
+        type: choice
+        options:
+          - dry-run
+          - apply
+  # Uncomment after the demo for the scheduled version (runs in apply mode):
+  # schedule:
+  #   - cron: "0 7 * * 1-5"
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Use the backlog-manager skill in ${{ inputs.mode || 'apply' }}
+            mode for the GitHub repo owainlewis/neo. The backlog source
+            of truth is GitHub Issues for this repository.
+
+            Environment constraints for this run:
+            - You are running unattended in GitHub Actions. Never wait
+              for input; record any blocker in the final report.
+            - The GITHUB_TOKEN cannot edit user-level GitHub Projects.
+              Skip project board mutations and list them in the report
+              as proposed actions instead.
+            - In apply mode the allowed mutations are: managed labels,
+              Agent Assessment comments, closing issues with linked
+              merged-PR evidence, and creating evidence-backed issues.
+              Everything else is report-only.
