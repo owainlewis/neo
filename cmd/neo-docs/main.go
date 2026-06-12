@@ -168,7 +168,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`internal/llm/anthropic/`" + ` | Anthropic provider adapter. |
 | ` + "`internal/llm/openai/`" + ` | OpenAI provider adapters for API-key Responses API calls and ChatGPT/Codex subscription calls. |
 | ` + "`internal/permission/`" + ` | Tool-call permission policy and workspace path boundary checks. |
-| ` + "`internal/projectctx/`" + ` | AGENTS.md and memory.md discovery plus prompt augmentation. |
+| ` + "`internal/projectctx/`" + ` | AGENTS.md, memory.md, and git-context discovery plus prompt augmentation. |
 | ` + "`internal/session/`" + ` | File-backed session metadata and transcripts. |
 | ` + "`internal/skills/`" + ` | Skill discovery, catalog rendering, and $name expansion. |
 | ` + "`internal/tools/`" + ` | Built-in tools exposed to the model. |
@@ -180,7 +180,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 1. ` + "`cmd/neo`" + ` loads config.
 2. ` + "`mustProvider`" + ` selects Anthropic or OpenAI. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
 3. The CLI creates or loads a session from ` + "`internal/session`" + `.
-4. Skills, AGENTS.md, and project memory are discovered when enabled.
+4. Skills, AGENTS.md, project memory, and lightweight git context are discovered when enabled.
 5. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
 6. ` + "`agent.New`" + ` receives provider, tools, permission policy, system prompt, and optional restored messages.
 7. ` + "`tui.Run`" + ` owns user interaction and saves the transcript after each send.
@@ -353,6 +353,7 @@ The flattened ` + "`Request.System`" + ` string remains available for providers 
 1. Static base instructions plus skill catalog. This block is marked cacheable when ` + "`features.prompt_caching`" + ` is enabled.
 2. Dynamic AGENTS.md project context. This block is not marked cacheable.
 3. Dynamic ` + "`memory.md`" + ` project context. This block is not marked cacheable.
+4. Dynamic git context (` + "`branch`" + `, ` + "`git status --short`" + `, ` + "`git log --oneline -5`" + `). This block is not marked cacheable.
 
 The goal is to cache stable instructions without letting changing project context evict that prefix.
 `
@@ -476,6 +477,7 @@ Neo builds the prompt in ordered blocks:
 1. A stable base prompt plus the skill catalog.
 2. Dynamic project instructions from AGENTS.md files.
 3. Dynamic project memory from ` + "`memory.md`" + ` when enabled.
+4. Dynamic git context captured at session start.
 
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use ` + "`llm.SystemBlock`" + ` values instead.
 
@@ -487,6 +489,7 @@ The flattened prompt is still available for providers that only accept a string.
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
 | ` + "`memory.md`" + ` | Durable project facts or preferences the user saved for future sessions. |
+| Git context | Branch, working tree status, and recent commits captured when the session starts in a repo. |
 
 ## How To Customize It
 
@@ -509,7 +512,7 @@ Always-loaded prompt text costs tokens every turn. Keep stable instructions shor
 ## Where To Look
 
 - ` + "`cmd/neo/main.go`" + `: chat startup and prompt assembly.
-- ` + "`internal/projectctx`" + `: AGENTS.md and memory.md discovery and rendering.
+- ` + "`internal/projectctx`" + `: AGENTS.md, memory.md, and git-context discovery and rendering.
 - ` + "`internal/skills`" + `: skill catalog and expansion.
 - ` + "`internal/llm/provider.go`" + `: ` + "`SystemBlock`" + `.
 `

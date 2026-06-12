@@ -21,6 +21,7 @@ Neo builds the prompt in ordered blocks:
 1. A stable base prompt plus the skill catalog.
 2. Dynamic project instructions from AGENTS.md files.
 3. Dynamic project memory from `memory.md` when enabled.
+4. Dynamic git context captured at session start.
 
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use `llm.SystemBlock` values instead.
 
@@ -32,6 +33,7 @@ The flattened prompt is still available for providers that only accept a string.
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
 | `memory.md` | Durable project facts or preferences the user saved for future sessions. |
+| Git context | Branch, working tree status, and recent commits captured when the session starts in a repo. |
 
 ## How To Customize It
 
@@ -54,6 +56,6 @@ Always-loaded prompt text costs tokens every turn. Keep stable instructions shor
 ## Where To Look
 
 - `cmd/neo/main.go`: chat startup and prompt assembly.
-- `internal/projectctx`: AGENTS.md and memory.md discovery and rendering.
+- `internal/projectctx`: AGENTS.md, memory.md, and git-context discovery and rendering.
 - `internal/skills`: skill catalog and expansion.
 - `internal/llm/provider.go`: `SystemBlock`.
