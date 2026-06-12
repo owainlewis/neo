@@ -117,6 +117,25 @@ func TestSlashCommand_MemoryReadonlyDoesNotWrite(t *testing.T) {
 	}
 }
 
+func TestSlashCommand_MemoryBusyDoesNotWrite(t *testing.T) {
+	m := makeTestModel()
+	m.projectRoot = t.TempDir()
+	m.busy = true
+
+	m.handleSlashCommand("/memory keep release notes in sync")
+
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "while a turn is running") {
+		t.Fatalf("unexpected error: %v", eb.err)
+	}
+	if _, err := os.Stat(filepath.Join(m.projectRoot, "memory.md")); !os.IsNotExist(err) {
+		t.Fatalf("memory file should not exist, stat err = %v", err)
+	}
+}
+
 func TestHelpBlock_HidesMemoryWhenDisabled(t *testing.T) {
 	m := makeTestModel()
 	m.memoryEnabled = false

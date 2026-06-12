@@ -642,7 +642,7 @@ func (m *model) handleSlashCommand(line string) {
 
 func slashCommandRequiresIdle(cmd string) bool {
 	switch cmd {
-	case "/clear", "/tokens", "/sessions", "/model", "/permissions":
+	case "/clear", "/tokens", "/sessions", "/model", "/permissions", "/memory":
 		return true
 	default:
 		return false
