@@ -35,6 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: anthropics/claude-code-action@v1
         with:
@@ -42,6 +44,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           display_report: true
           show_full_output: true
+          claude_args: >-
+            --allowedTools "Bash(gh:*),Bash(git:*),Read,Grep,Glob"
           prompt: |
             Use the backlog-manager skill in ${{ inputs.mode || 'apply' }}
             mode for the GitHub repo owainlewis/neo. The backlog source
@@ -57,6 +61,10 @@ jobs:
               Agent Assessment comments, closing issues with linked
               merged-PR evidence, and creating evidence-backed issues.
               Everything else is report-only.
+            - Only gh and git commands are permitted in Bash. Run one
+              command at a time; do not chain commands with && or pipe
+              into other tools. Use gh's built-in --json and --jq flags
+              instead of piping to jq.
             - End with a compact final report containing: mode, issues
               inspected, issues triaged, labels/comments created, proposed
               project-board changes, and blockers.
