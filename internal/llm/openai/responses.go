@@ -18,8 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -44,34 +42,6 @@ type apiRequest struct {
 	Include         []string    `json:"include,omitempty"`
 	Store           bool        `json:"store"`
 	Stream          bool        `json:"stream,omitempty"`
-}
-
-func debugEnabled() bool {
-	v := strings.TrimSpace(os.Getenv("NEO_OPENAI_DEBUG"))
-	if v == "" {
-		return false
-	}
-	enabled, err := strconv.ParseBool(v)
-	return err != nil || enabled
-}
-
-func debugJSON(label string, v any) {
-	if !debugEnabled() {
-		return
-	}
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[openai debug] %s: <marshal error: %v>\n", label, err)
-		return
-	}
-	fmt.Fprintf(os.Stderr, "[openai debug] %s:\n%s\n", label, b)
-}
-
-func debugHTTPResponse(prefix string, status int, raw []byte) {
-	if !debugEnabled() {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "[openai debug] %s response status=%d body=%s\n", prefix, status, string(raw))
 }
 
 func buildAPIRequest(req llm.Request, model string, stream bool, toolChoice string, requireInstructions bool) apiRequest {
