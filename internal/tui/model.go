@@ -520,6 +520,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncInputHeight()
 		}
 
+	case tea.PasteMsg:
+		if m.perms.visible || m.models.visible || m.sessions.visible || m.approval != nil {
+			break
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		cmds = append(cmds, cmd)
+		m.updateInlinePickers()
+		m.syncInputHeight()
+
 	case agentEventMsg:
 		m.handleEvent(msg.ev)
 		// Tie the dot's color to whether a tool is currently running.
