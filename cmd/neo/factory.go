@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -17,42 +16,6 @@ import (
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/workspace"
 )
-
-// runFactory drives `neo factory [flags] "<goal>"` — the autonomous loop:
-// an orchestrator agent works the goal, delegating through run_step under
-// supervisor budgets, with a live tree on stdout and an events.jsonl tee.
-func runFactory(ctx context.Context, args []string) {
-	fs := flag.NewFlagSet("factory", flag.ExitOnError)
-	budget := factory.DefaultBudget()
-	fs.IntVar(&budget.MaxDepth, "max-depth", budget.MaxDepth, "max delegation depth (orchestrator=0)")
-	fs.IntVar(&budget.MaxChildren, "max-children", budget.MaxChildren, "max child steps per node")
-	fs.IntVar(&budget.MaxAgents, "max-agents", budget.MaxAgents, "tree-wide cap on agent steps")
-	fs.DurationVar(&budget.MaxWall, "max-wall", budget.MaxWall, "wall-clock limit per agent step")
-	fs.DurationVar(&budget.ScriptTimeout, "script-timeout", budget.ScriptTimeout, "timeout per script step")
-	root := fs.String("root", "orchestrator", "root step to run")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, `usage: neo factory [flags] "<goal>"
-
-Runs the root step (default: orchestrator) against the goal. The root
-delegates via run_step to other steps: steps/<name>.md = agent prompt,
-executable steps/<name> = script. Search order: ./steps, ~/.neo/steps,
-then embedded defaults (orchestrator, worker, verify, triage).`)
-		fs.PrintDefaults()
-	}
-	_ = fs.Parse(args)
-	if fs.NArg() != 1 {
-		fs.Usage()
-		os.Exit(2)
-	}
-	goal := fs.Arg(0)
-
-	out, err := runSupervised(ctx, budget, *root, goal)
-	fmt.Println(out)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
 
 // runStepCmd drives `neo step <name> "<input>"` — run one step in isolation,
 // under the same supervisor (so nested run_step calls work), printing the

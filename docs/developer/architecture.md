@@ -14,7 +14,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `internal/auth/` | OpenAI ChatGPT/Codex device-code login, token refresh, and stored subscription credentials. |
 | `internal/compact/` | Compaction interface, summarizing compactor, and safe split helpers. |
 | `internal/config/` | Config discovery, defaults, and feature flags. |
-| `internal/factory/` | Software-factory runtime: run_step delegation, step resolver, supervisor budgets, node tree, event stream. |
+| `internal/factory/` | Workflow-step runtime: run_step delegation, step resolver, supervisor budgets, node tree, event stream. |
 | `internal/llm/` | Provider-neutral request/response types and system prompt blocks. |
 | `internal/llm/anthropic/` | Anthropic provider adapter. |
 | `internal/llm/openai/` | OpenAI provider adapters for API-key Responses API calls and ChatGPT/Codex subscription calls. |

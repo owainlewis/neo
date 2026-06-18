@@ -10,7 +10,6 @@
 | `neo chat` | Open interactive chat mode explicitly. |
 | `neo sessions` | List saved chat sessions. |
 | `neo resume <id>` | Resume a saved chat session. |
-| `neo factory "<goal>"` | Run the autonomous factory loop: an orchestrator step delegates to workers via run_step under supervisor budgets. |
 | `neo step <name> "<input>"` | Run a single step in isolation (steps/<name>.md agent prompt or executable steps/<name> script). |
 | `neo login` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
 | `neo logout` | Remove stored OpenAI subscription credentials. |

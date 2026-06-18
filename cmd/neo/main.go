@@ -25,6 +25,7 @@ import (
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/tui"
+	"github.com/owainlewis/neo/internal/workflow"
 	"github.com/owainlewis/neo/internal/workspace"
 )
 
@@ -36,7 +37,16 @@ const chatSystemPrompt = `You are neo, a focused coding agent.
 
 Operate in the user's current working directory. Use the available tools to read files,
 inspect code with bash, and make edits. Prefer small, verified changes. Run tests after
-you change code. When you finish a task, briefly summarize what changed.`
+you change code. When you finish a task, briefly summarize what changed.
+
+For multi-step tasks, or when the user says to run a workflow, create a visible
+workflow checklist with the workflow tool before doing the work. If the user
+provided numbered steps, preserve those steps. Mark each high-level item running
+before working on it, and mark it done, failed, or skipped based on the outcome.
+Do not mirror every tool call manually; Neo attaches tool and subagent activity
+to the active workflow item automatically. For workflow items that map to named
+steps, write a self-contained run_step prompt dynamically from the user's goal
+and current context; otherwise use the normal tools directly.`
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -59,8 +69,6 @@ func main() {
 			os.Exit(2)
 		}
 		resumeSession(ctx, os.Args[2])
-	case "factory":
-		runFactory(ctx, os.Args[2:])
 	case "step":
 		runStepCmd(ctx, os.Args[2:])
 	case "login":
@@ -84,7 +92,6 @@ USAGE:
   neo chat           Interactive chat mode (explicit)
   neo sessions       List saved chat sessions
   neo resume <id>    Resume a saved chat session
-  neo factory "<goal>"     Run the autonomous factory loop (orchestrator + workers)
   neo step <name> "<in>"   Run a single step (steps/<name>.md or executable steps/<name>)
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials
@@ -316,6 +323,10 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	var extra []tools.Tool
 	var steps string
 	var stepEvents <-chan factory.Event
+	var workflowEvents <-chan workflow.Event
+	wf := make(chan workflow.Event, 128)
+	workflowEvents = wf
+	extra = append(extra, workflow.Tool{Events: wf})
 	if cwd != "" {
 		resolver := factory.Resolver{Paths: factory.DefaultStepPaths(root)}
 		var rst factory.RunStepTool
@@ -373,6 +384,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		}),
 		tui.WithModelChoices(modelChoices(cfg)),
 		tui.WithStepEvents(stepEvents),
+		tui.WithWorkflowEvents(workflowEvents),
 	); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

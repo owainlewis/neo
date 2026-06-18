@@ -109,7 +109,7 @@ func pathKeys(tool string) []string {
 
 func isReadTool(tool string) bool {
 	switch tool {
-	case "read_file", "grep", "glob":
+	case "read_file", "grep", "glob", "workflow":
 		return true
 	default:
 		return false

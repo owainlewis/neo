@@ -336,6 +336,47 @@ func TestApprovalPromptRepliesFromKeypress(t *testing.T) {
 	}
 }
 
+func TestApprovalAlwaysAllowSkipsLaterPrompts(t *testing.T) {
+	m := makeTestModel()
+
+	// First call: grant "always" for this bash command.
+	reply := make(chan bool, 1)
+	m.Update(approvalRequestMsg{
+		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "go test ./..."}},
+		reply: reply,
+	})
+	if m.approval == nil {
+		t.Fatal("expected first call to prompt")
+	}
+	m.Update(keyPress('a'))
+	if got := <-reply; !got {
+		t.Fatal("expected always-allow to approve the call")
+	}
+
+	// A later go test invocation must auto-approve without a prompt.
+	reply2 := make(chan bool, 1)
+	m.Update(approvalRequestMsg{
+		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "go test -run X"}},
+		reply: reply2,
+	})
+	if m.approval != nil {
+		t.Fatal("granted command should not prompt again")
+	}
+	if got := <-reply2; !got {
+		t.Fatal("granted command should auto-approve")
+	}
+
+	// An unrelated command still prompts.
+	reply3 := make(chan bool, 1)
+	m.Update(approvalRequestMsg{
+		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "rm -rf build"}},
+		reply: reply3,
+	})
+	if m.approval == nil {
+		t.Fatal("unrelated command should still prompt")
+	}
+}
+
 func TestBangCommand_EmptyShowsHelpfulError(t *testing.T) {
 	m := makeTestModel()
 

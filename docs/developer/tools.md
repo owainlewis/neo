@@ -11,6 +11,7 @@ Neo exposes a small built-in tool surface to the model.
 | `glob` | Find files under the workspace root using a glob pattern. Supports ** for recursive matches. Returns JSON: {matches:[path],truncated,count}. |
 | `grep` | Search text files under the workspace with a regular expression. Returns JSON: {matches:[{path,line,text,context_before?,context_after?}],truncated,count}. |
 | `read_file` | Read a file from disk. Returns up to ~256KB. Use offset/limit (1-indexed line numbers) to page through larger files. |
+| `workflow` | Create or update the visible workflow checklist. Use for multi-step tasks; Neo attaches tool and subagent activity automatically. |
 | `write_file` | Write content to a file, creating parent directories. Overwrites if exists. |
 
 ## Schemas
@@ -140,6 +141,59 @@ Read a file from disk. Returns up to ~256KB. Use offset/limit (1-indexed line nu
   },
   "required": [
     "path"
+  ],
+  "type": "object"
+}
+```
+
+### `workflow`
+
+Create or update the visible workflow checklist. Use for multi-step tasks; Neo attaches tool and subagent activity automatically.
+
+```json
+{
+  "properties": {
+    "action": {
+      "enum": [
+        "create",
+        "start",
+        "complete",
+        "fail",
+        "skip",
+        "clear"
+      ],
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action"
   ],
   "type": "object"
 }

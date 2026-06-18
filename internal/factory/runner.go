@@ -32,7 +32,7 @@ type AgentRunner struct {
 	// autonomously (there is no approver inside a step), so "ask" cannot be
 	// honored mid-step; but "readonly" must propagate — a readonly session
 	// delegating a step must not gain write access through the side door.
-	// Empty defaults to trusted (the autonomous factory/step CLI case).
+	// Empty defaults to trusted (the standalone step CLI case).
 	Mode permission.Mode
 
 	// Sup is set after NewSupervisor — the runner needs it to hand child

@@ -20,6 +20,8 @@ top as independent, feature-flagged modules.
   and permissioned.
 - **Permission modes.** Choose `ask`, `trusted`, or `readonly` depending on how
   much approval you want before Neo runs tools.
+- **Visible workflows.** Ask Neo to run a workflow or provide numbered steps and
+  the TUI shows a live checklist while the agent works.
 - **AGENTS.md support.** Drop an `AGENTS.md` in your project (or `~/.neo/`) and
   its guidance is loaded into the agent's system prompt. Feature-flagged.
 - **Skills.** Reusable prompt snippets in `.neo/skills/<name>/SKILL.md`. Mention

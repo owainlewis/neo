@@ -20,6 +20,11 @@ var (
 	colCardBg  = lipgloss.Color("236")
 	colToolBg  = lipgloss.Color("235")
 	colInputBg = lipgloss.Color("234")
+	// Accent-bar colours for attention blocks. A left stripe replaces heavy
+	// background fills. colApprove is the brand blue; colWarn is a warm copper
+	// that reads as "heads up" without the old olive.
+	colApprove = colAccent
+	colWarn    = lipgloss.Color("173")
 
 	styMuted    = lipgloss.NewStyle().Foreground(colMuted)
 	styDim      = lipgloss.NewStyle().Foreground(colDim)
@@ -39,10 +44,6 @@ var (
 
 	styCardErr = lipgloss.NewStyle().
 			Background(lipgloss.Color("52")).
-			Padding(0, 1)
-
-	styCardWarn = lipgloss.NewStyle().
-			Background(lipgloss.Color("58")).
 			Padding(0, 1)
 
 	// styInputBar renders the chat input as a single solid-color block with

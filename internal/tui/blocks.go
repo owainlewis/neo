@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/workflow"
 )
 
 // block is one rendered unit in the scrollback.
@@ -26,6 +28,43 @@ func (b userBlock) render(width int, _ *glamour.TermRenderer) string {
 }
 
 type textBlock struct{ text string }
+
+// workflowBlock is the visible task plan for a multi-step user request. The
+// model updates high-level semantic status through the workflow tool; regular
+// tool and run_step events attach lightweight activity automatically.
+type workflowBlock struct {
+	title  string
+	items  []workflow.Item
+	active string
+}
+
+func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
+	var sb strings.Builder
+	title := strings.TrimSpace(b.title)
+	if title == "" {
+		title = "Workflow"
+	}
+	sb.WriteString(styAccent.Render(title) + "\n")
+	for _, item := range b.items {
+		glyph := "○"
+		switch item.Status {
+		case workflow.Running:
+			glyph = styTool.Render("●")
+		case workflow.Done:
+			glyph = styAccent.Render("✓")
+		case workflow.Failed:
+			glyph = styErr.Render("✗")
+		case workflow.Skipped:
+			glyph = styMuted.Render("-")
+		}
+		line := fmt.Sprintf("%s %s", glyph, item.Text)
+		if strings.TrimSpace(item.Detail) != "" {
+			line += styMuted.Render(" — " + truncate(oneLine(item.Detail), max(width-8, 20)))
+		}
+		sb.WriteString(line + "\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
 
 func (b textBlock) render(width int, md *glamour.TermRenderer) string {
 	if md == nil {
@@ -222,7 +261,7 @@ func (b maxTurnsBlock) render(width int, _ *glamour.TermRenderer) string {
 	if b.limit > 0 {
 		msg = fmt.Sprintf("hit turn limit (%d). Reply to continue.", b.limit)
 	}
-	return styCardWarn.Width(width - 2).Render(msg)
+	return accentCard(styMuted.Render(msg), colWarn)
 }
 
 type toolsBlock struct {
@@ -257,15 +296,15 @@ type approvalBlock struct {
 }
 
 func (b approvalBlock) render(width int, _ *glamour.TermRenderer) string {
+	head, _ := toolCardContent(b.req.ToolName, b.req.Args)
 	var sb strings.Builder
-	sb.WriteString("approve ")
-	sb.WriteString(b.req.ToolName)
-	sb.WriteString("?  y / n")
+	sb.WriteString(styAccent.Render("approve "))
+	sb.WriteString(styTool.Render(head))
 	if b.req.Preview != "" {
 		sb.WriteString("\n")
-		sb.WriteString(trimApprovalPreview(b.req.Preview))
+		sb.WriteString(styMuted.Render(trimApprovalPreview(b.req.Preview)))
 	}
-	return styCardWarn.Width(width - 2).Render(sb.String())
+	return accentCard(sb.String(), colApprove)
 }
 
 const approvalPreviewMaxLines = 18
@@ -314,6 +353,18 @@ func toolCardContent(name string, args map[string]any) (string, string) {
 		}
 	}
 	return name, ""
+}
+
+// accentCard renders content with a colored left stripe and a one-space gutter,
+// the motif used for attention blocks (approval, limits). It draws no
+// background fill, so it stays light against the scrollback.
+func accentCard(content string, barColor color.Color) string {
+	bar := lipgloss.NewStyle().Foreground(barColor).Render("▌")
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = bar + " " + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func wrap(s string, width int) string {
