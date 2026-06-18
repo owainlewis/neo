@@ -204,8 +204,31 @@ use the $review skill on my changes
 ```
 
 Project skills override global ones of the same name. This repo ships
-`$review` and `$commit` under `.neo/skills/` as working examples. Disable the
-feature by setting `skills: false` (see Configuration).
+`$review`, `$commit`, and `$coordinator-worker` under `.neo/skills/` as working
+examples. Disable the feature by setting `skills: false` (see Configuration).
+
+For a read-only coordinator-worker smoke test, try:
+
+```text
+$coordinator-worker
+
+Run a read-only coordinator-worker workflow for this repository.
+
+Goal: assess whether the current uncommitted changes are safe to commit.
+
+Workflow:
+1. Plan the assessment
+2. Inspect the current git status and diff
+3. Delegate a review of the current diff to the review step
+4. Run the test suite
+5. Summarize blockers, risks, and whether this looks safe to commit
+
+Constraints:
+- Do not edit files.
+- Do not stage or commit anything.
+- Do not run formatters.
+- Treat this as an assessment only.
+```
 
 ## Configuration
 

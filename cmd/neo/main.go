@@ -43,10 +43,13 @@ For multi-step tasks, or when the user says to run a workflow, create a visible
 workflow checklist with the workflow tool before doing the work. If the user
 provided numbered steps, preserve those steps. Mark each high-level item running
 before working on it, and mark it done, failed, or skipped based on the outcome.
-Do not mirror every tool call manually; Neo attaches tool and subagent activity
-to the active workflow item automatically. For workflow items that map to named
-steps, write a self-contained run_step prompt dynamically from the user's goal
-and current context; otherwise use the normal tools directly.`
+When the user asks for a coordinator-worker or orchestrated-agent flow, treat the
+chat agent as the coordinator: plan first, delegate suitable self-contained tasks
+to run_step workers, inspect their results, and keep the workflow statuses based
+on evidence. Do not mirror every tool call manually; Neo attaches tool and
+subagent activity to the active workflow item automatically. For workflow items
+that map to named steps, write a self-contained run_step prompt dynamically from
+the user's goal and current context; otherwise use the normal tools directly.`
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
