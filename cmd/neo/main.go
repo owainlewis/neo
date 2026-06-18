@@ -19,6 +19,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/llm/openai"
+	"github.com/owainlewis/neo/internal/llm/pinstripes"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
@@ -92,10 +93,11 @@ USAGE:
 
 CONFIG:
   Reads neo.yaml (cwd) → ~/.neo/config.yaml → embedded defaults.
-  Select a backend with the "provider" key: "anthropic" (default) or "openai".
+  Select a backend with the "provider" key: "anthropic" (default), "openai", or "pinstripes".
 
   ANTHROPIC_API_KEY    required when provider is "anthropic"
   OPENAI_API_KEY       required when provider is "openai" with api_key auth
+  PINSTRIPES_API_KEY   required when provider is "pinstripes"
 
   To use a ChatGPT subscription instead of an API key, set in neo.yaml:
     provider: openai
@@ -186,8 +188,10 @@ func mustProvider(cfg *config.Config) llm.Provider {
 		}
 	case "anthropic", "":
 		prov, err = anthropic.New()
+	case "pinstripes":
+		prov, err = pinstripes.New()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\" or \"openai\")\n", cfg.Provider)
+		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\", \"openai\", or \"pinstripes\")\n", cfg.Provider)
 		os.Exit(1)
 	}
 	if err != nil {
@@ -411,6 +415,13 @@ func modelChoices(cfg *config.Config) []tui.ModelChoice {
 			{ID: "gpt-4.1", Name: "GPT-4.1", Description: "Non-reasoning model for general coding tasks"},
 			{ID: "gpt-4o", Name: "GPT-4o", Description: "Fast multimodal GPT-4o model"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},
+		}
+	case "pinstripes":
+		return []tui.ModelChoice{
+			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", Description: "Fast, cost-efficient model ($0.10/1M tokens)"},
+			{ID: "glm-4.5-air", Name: "GLM-4.5-Air", Description: "GLM-4.5 Air model ($0.125/1M tokens)"},
+			{ID: "qwen3-35b", Name: "Qwen3-35B", Description: "Qwen3 35B model ($0.14/1M tokens)"},
+			{ID: "minimax-m2.7", Name: "MiniMax M2.7", Description: "MiniMax M2.7 with 192K context ($0.255/1M tokens)"},
 		}
 	default:
 		return []tui.ModelChoice{
