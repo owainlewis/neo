@@ -23,7 +23,7 @@ type permissionPicker struct {
 
 var permissionChoices = []permissionChoice{
 	{mode: "ask", description: "Read/search tools run automatically; bash and file mutations ask first."},
-	{mode: "trusted", description: "Built-in tools run without approval prompts; workspace path checks still apply."},
+	{mode: "trusted", description: "Built-in tools run automatically; high-risk bash commands ask first; workspace path checks still apply."},
 	{mode: "readonly", description: "Read/search tools run automatically; bash and file mutations are denied."},
 }
 

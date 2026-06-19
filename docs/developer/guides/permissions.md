@@ -20,22 +20,24 @@ Neo has three permission modes:
 
 | Mode | What happens |
 | --- | --- |
+| `trusted` | Built-in tools run automatically, except high-risk bash commands ask first. Workspace path checks still apply. |
 | `ask` | Read/search tools run automatically. Bash and file mutations ask first. |
-| `trusted` | Built-in tools run without approval prompts. Workspace path checks still apply. |
 | `readonly` | Read/search tools run. Bash and file mutations are denied. |
+
+By default, Neo uses `trusted` to avoid prompting for routine coding work while still pausing before commands such as `rm -rf`, `sudo`, recursive ownership/permission changes, `git clean -fd`, and `git reset --hard`.
 
 Configure it in `neo.yaml`:
 
 ```yaml
 permissions:
-  mode: ask
+  mode: trusted
 ```
 
-To turn approval prompts off:
+For stricter approval prompts:
 
 ```yaml
 permissions:
-  mode: trusted
+  mode: ask
 ```
 
 ## Workspace Boundaries

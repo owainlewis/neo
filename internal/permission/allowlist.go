@@ -43,6 +43,11 @@ type Allowlist struct {
 
 // Allows reports whether any rule already covers the request.
 func (a *Allowlist) Allows(req Request) bool {
+	// High-risk requests must always get a fresh explicit approval, even if the
+	// user previously granted a broad "always allow" rule in this session.
+	if explicitApprovalReason(req) != "" {
+		return false
+	}
 	for _, r := range a.rules {
 		if r.matches(req) {
 			return true

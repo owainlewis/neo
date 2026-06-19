@@ -290,11 +290,11 @@ openai_auth: api_key
 model: claude-opus-4-8
 
 # Tool permission mode:
+#   trusted  -> allow built-in tools; ask before high-risk bash commands; paths stay inside repo
 #   ask      -> allow read/search, ask before bash and file mutations
-#   trusted  -> allow built-in tools without prompts; path-shaped tools stay inside repo
 #   readonly -> allow read/search only
 permissions:
-  mode: ask
+  mode: trusted
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.
@@ -306,12 +306,12 @@ features:
 
 ### Permissions
 
-Neo defaults to `permissions.mode: ask`.
+Neo defaults to `permissions.mode: trusted`.
 
 | Mode | Behavior |
 |------|----------|
+| `trusted` | Built-in tools run automatically, except high-risk bash commands ask first |
 | `ask` | Read/search tools run automatically; bash and file mutations ask first |
-| `trusted` | Built-in tools run without approval prompts |
 | `readonly` | Read/search tools run; bash and file mutations are denied |
 
 Path-shaped tools (`read_file`, `write_file`, `edit_file`, `grep`, and `glob`)
@@ -320,8 +320,10 @@ are workspace-bound: Neo denies paths outside the workspace root even in
 
 Approved or trusted `bash` is different. It runs `/bin/bash -c` in the working
 directory with a timeout, but it is not a true filesystem sandbox. A shell
-command can still affect files outside the repo if the command does so, so keep
-`ask` mode on when you want to review shell commands first.
+command can still affect files outside the repo if the command does so. Keep
+`ask` mode on when you want to review all shell commands first; `trusted` still
+asks before high-risk commands such as `rm -rf`, `sudo`, recursive
+ownership/permission changes, `git clean -fd`, and `git reset --hard`.
 
 ## Tools
 

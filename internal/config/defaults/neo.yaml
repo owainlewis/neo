@@ -14,11 +14,11 @@ provider: anthropic
 model: claude-opus-4-8
 
 # Tool permission mode:
-#   ask      → allow read/search, ask before bash and file mutations (default)
-#   trusted  → allow built-in tools, while still denying file paths outside repo
+#   trusted  → allow built-in tools, ask before high-risk bash commands (default)
+#   ask      → allow read/search, ask before bash and file mutations
 #   readonly → allow read/search only
 permissions:
-  mode: ask
+  mode: trusted
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.

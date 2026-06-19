@@ -143,7 +143,7 @@ func parseConfig(b []byte, source string) (*Config, error) {
 		c.Model = defaultModelFor(c.Provider, c.OpenAIAuth)
 	}
 	if c.Permissions.Mode == "" {
-		c.Permissions.Mode = PermissionModeAsk
+		c.Permissions.Mode = PermissionModeTrusted
 	}
 	switch c.Permissions.Mode {
 	case PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly:

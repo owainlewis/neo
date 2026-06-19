@@ -29,11 +29,11 @@ provider: anthropic
 model: claude-opus-4-8
 
 # Tool permission mode:
-#   ask      → allow read/search, ask before bash and file mutations (default)
-#   trusted  → allow built-in tools, while still denying file paths outside repo
+#   trusted  → allow built-in tools, ask before high-risk bash commands (default)
+#   ask      → allow read/search, ask before bash and file mutations
 #   readonly → allow read/search only
 permissions:
-  mode: ask
+  mode: trusted
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.
@@ -67,10 +67,10 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 
 ## Permissions
 
-`permissions.mode` defaults to `ask`.
+`permissions.mode` defaults to `trusted`.
 
 | Mode | Effect |
 | --- | --- |
+| `trusted` | Allow built-in tools; ask before high-risk bash commands; deny path-shaped file tools outside the repo root. |
 | `ask` | Allow read/search tools inside the repo root; ask before bash and file mutations. |
-| `trusted` | Allow built-in tools, while still denying path-shaped file tools outside the repo root. |
 | `readonly` | Allow read/search tools only; deny bash and file mutations. |

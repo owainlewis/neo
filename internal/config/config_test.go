@@ -304,7 +304,7 @@ func TestFeatures_PromptCachingDefaultsOnExplicitFalseDisables(t *testing.T) {
 	})
 }
 
-func TestPermissions_DefaultsToAsk(t *testing.T) {
+func TestPermissions_DefaultsToTrusted(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
 		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
@@ -312,8 +312,8 @@ func TestPermissions_DefaultsToAsk(t *testing.T) {
 		if err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		if cfg.Permissions.Mode != PermissionModeAsk {
-			t.Fatalf("permissions.mode = %q, want %q", cfg.Permissions.Mode, PermissionModeAsk)
+		if cfg.Permissions.Mode != PermissionModeTrusted {
+			t.Fatalf("permissions.mode = %q, want %q", cfg.Permissions.Mode, PermissionModeTrusted)
 		}
 	})
 }
