@@ -10,11 +10,11 @@ import (
 // RenderTree is a pure function: Snapshot -> one text frame. Stdlib only,
 // so it drops into any view layer with one call.
 //
-//	● orchestrator  work the backlog: owainlewis/app             3m12s
-//	├─ ● worker     #12 invite teammate by email                 2m07s
+//	● agent  work the backlog: owainlewis/app                  3m12s
+//	├─ ● agent  #12 invite teammate by email                    2m07s
 //	│  │  bash: just test
-//	│  └─ ✓ verify  PR #34 vs acceptance criteria                  31s
-//	└─ ✗ worker     #13 rate limiting (timeout after 10m)       10m00s
+//	│  └─ ✓ agent  PR #34 vs acceptance criteria                   31s
+//	└─ ✗ agent  #13 rate limiting (timeout after 10m)           10m00s
 func RenderTree(nodes []NodeView) string {
 	byParent := map[int][]NodeView{}
 	for _, n := range nodes {

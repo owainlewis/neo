@@ -85,7 +85,7 @@ func TestMissingStepIsLegibleDenial(t *testing.T) {
 func TestListBuiltin(t *testing.T) {
 	sup, dir := newTestSupervisor(t, nil, testBudget(), map[string]string{"custom.md": "Hi."})
 	res := sup.RunStep(context.Background(), 0, dir, "list", "")
-	if !res.Ok || !strings.Contains(res.Output, "custom") || !strings.Contains(res.Output, "worker") {
+	if !res.Ok || !strings.Contains(res.Output, "custom") || strings.Contains(res.Output, "worker") {
 		t.Fatalf("list result: %+v", res)
 	}
 }
@@ -246,19 +246,22 @@ drained:
 	}
 }
 
-func TestRunStepToolEnvelope(t *testing.T) {
-	sup, dir := newTestSupervisor(t, nil, testBudget(), map[string]string{
-		"checks": "#!/bin/sh\necho GREEN\n",
-	})
-	tool := RunStepTool{Sup: sup, CallerNode: 0, Dir: dir}
-	out, err := tool.Run(context.Background(), map[string]any{"name": "checks", "input": "42"})
+func TestAgentToolEnvelope(t *testing.T) {
+	sup, dir := newTestSupervisor(t, scriptedAgent{run: func(_ context.Context, step Step, _ string, input string, _ int, _ chan<- AgentEvent) (string, error) {
+		if step.Name != "agent" || !strings.Contains(input, "check this") {
+			return "unexpected input", nil
+		}
+		return "subagent report", nil
+	}}, testBudget(), nil)
+	tool := AgentTool{Sup: sup, CallerNode: 0, Dir: dir}
+	out, err := tool.Run(context.Background(), map[string]any{"prompt": "check this"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, "GREEN") {
+	if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, "subagent report") {
 		t.Fatalf("tool output: %q", out)
 	}
 	if _, err := tool.Run(context.Background(), map[string]any{}); err == nil {
-		t.Fatal("missing name should error")
+		t.Fatal("missing prompt should error")
 	}
 }

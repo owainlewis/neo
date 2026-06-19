@@ -219,7 +219,7 @@ Goal: assess whether the current uncommitted changes are safe to commit.
 Workflow:
 1. Plan the assessment
 2. Inspect the current git status and diff
-3. Delegate a review of the current diff to the review step
+3. Delegate a review of the current diff to a subagent
 4. Run the test suite
 5. Summarize blockers, risks, and whether this looks safe to commit
 

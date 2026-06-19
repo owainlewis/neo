@@ -50,7 +50,7 @@ func TestChatSystem_IncludesProjectMemoryAsDistinctDynamicBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, "")
+	system, blocks := chatSystem(&config.Config{}, cwd, nil)
 
 	if len(blocks) != 2 {
 		t.Fatalf("system blocks = %d, want 2", len(blocks))
@@ -83,7 +83,7 @@ func TestChatSystem_SkipsProjectMemoryWhenDisabled(t *testing.T) {
 	}
 	disabled := false
 
-	system, blocks := chatSystem(&config.Config{Features: config.Features{Memory: &disabled}}, cwd, nil, "")
+	system, blocks := chatSystem(&config.Config{Features: config.Features{Memory: &disabled}}, cwd, nil)
 
 	if len(blocks) != 1 {
 		t.Fatalf("system blocks = %d, want 1", len(blocks))

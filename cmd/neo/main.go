@@ -45,11 +45,11 @@ provided numbered steps, preserve those steps. Mark each high-level item running
 before working on it, and mark it done, failed, or skipped based on the outcome.
 When the user asks for a coordinator-worker or orchestrated-agent flow, treat the
 chat agent as the coordinator: plan first, delegate suitable self-contained tasks
-to run_step workers, inspect their results, and keep the workflow statuses based
-on evidence. Do not mirror every tool call manually; Neo attaches tool and
-subagent activity to the active workflow item automatically. For workflow items
-that map to named steps, write a self-contained run_step prompt dynamically from
-the user's goal and current context; otherwise use the normal tools directly.`
+to subagents with the agent tool, inspect their results, and keep workflow
+statuses based on evidence. Do not mirror every tool call manually; Neo attaches
+tool and subagent activity to the active workflow item automatically. Write
+subagent prompts dynamically from the user's goal and current context; use the
+normal tools directly when delegation is unnecessary.`
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -72,8 +72,6 @@ func main() {
 			os.Exit(2)
 		}
 		resumeSession(ctx, os.Args[2])
-	case "step":
-		runStepCmd(ctx, os.Args[2:])
 	case "login":
 		runLogin(ctx)
 	case "logout":
@@ -95,7 +93,6 @@ USAGE:
   neo chat           Interactive chat mode (explicit)
   neo sessions       List saved chat sessions
   neo resume <id>    Resume a saved chat session
-  neo step <name> "<in>"   Run a single step (steps/<name>.md or executable steps/<name>)
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials
   neo help           Show this help
@@ -131,11 +128,7 @@ func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
 // it this way lets prompt caching reuse the base across turns and sessions while
 // the project tail varies. Discovery errors are non-fatal — they warn and fall
 // back to the blocks built so far rather than failing to start.
-//
-// It returns both the flattened string and the blocks so the agent can pass
-// whichever a provider supports. stepsSection, when non-empty, is appended as
-// its own uncached block: the available steps vary per project and session.
-func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, stepsSection string) (string, []llm.SystemBlock) {
+func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []llm.SystemBlock) {
 	// Base block: static instructions + skill catalog. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
 	base := skills.Augment(chatSystemPrompt, sk)
@@ -161,9 +154,6 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, stepsSection 
 		} else if section := projectctx.MemorySection(doc); ok && section != "" {
 			blocks = append(blocks, llm.SystemBlock{Text: section})
 		}
-	}
-	if stepsSection != "" {
-		blocks = append(blocks, llm.SystemBlock{Text: stepsSection})
 	}
 
 	var b strings.Builder
@@ -318,24 +308,20 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
 	root := workspace.Root(cwd)
-	// The chat agent is the primary orchestrator: it gets run_step (as caller
-	// node 0) so it can delegate to steps directly from the conversation, and
-	// the system prompt advertises which steps exist so "run the validate
-	// step" or "run these steps: branch, code, review, pr" works in plain
-	// language. Sequencing is the agent's judgment, not a stored artifact.
+	// The chat agent is the primary coordinator. It gets the agent tool (as
+	// caller node 0) so it can spawn amnesiac subagents with self-contained
+	// prompts directly from the conversation. Sequencing is the agent's
+	// judgment, not a stored workflow artifact.
 	var extra []tools.Tool
-	var steps string
 	var stepEvents <-chan factory.Event
 	var workflowEvents <-chan workflow.Event
 	wf := make(chan workflow.Event, 128)
 	workflowEvents = wf
 	extra = append(extra, workflow.Tool{Events: wf})
 	if cwd != "" {
-		resolver := factory.Resolver{Paths: factory.DefaultStepPaths(root)}
-		var rst factory.RunStepTool
-		rst, stepEvents = chatRunStepTool(prov, cfg, cwd, root, resolver)
-		extra = append(extra, rst)
-		steps = stepsSection(resolver)
+		var at factory.AgentTool
+		at, stepEvents = chatAgentTool(prov, cfg, cwd, root)
+		extra = append(extra, at)
 	}
 	reg := newRegistry(cwd, root, extra...)
 
@@ -358,7 +344,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// (via chatSystem), and the same slice drives $name expansion in the TUI.
 	sk := loadSkills(cfg, cwd)
 
-	system, systemBlocks := chatSystem(cfg, cwd, sk, steps)
+	system, systemBlocks := chatSystem(cfg, cwd, sk)
 	ag := agent.New(agent.Config{
 		Model:        model,
 		System:       system,

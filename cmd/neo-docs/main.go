@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/workflow"
@@ -78,6 +79,7 @@ func buildPages() ([]page, error) {
 
 func toolSpecs() []llm.ToolSpec {
 	reg := tools.NewRegistry(
+		factory.AgentTool{},
 		tools.Bash{Timeout: 2 * time.Minute},
 		tools.ReadFile{},
 		tools.WriteFile{},
@@ -165,7 +167,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`internal/auth/`" + ` | OpenAI ChatGPT/Codex device-code login, token refresh, and stored subscription credentials. |
 | ` + "`internal/compact/`" + ` | Compaction interface, summarizing compactor, and safe split helpers. |
 | ` + "`internal/config/`" + ` | Config discovery, defaults, and feature flags. |
-| ` + "`internal/factory/`" + ` | Workflow-step runtime: run_step delegation, step resolver, supervisor budgets, node tree, event stream. |
+| ` + "`internal/factory/`" + ` | Subagent runtime for the chat ` + "`agent`" + ` tool: supervisor budgets, node tree, and event stream. |
 | ` + "`internal/llm/`" + ` | Provider-neutral request/response types and system prompt blocks. |
 | ` + "`internal/llm/anthropic/`" + ` | Anthropic provider adapter. |
 | ` + "`internal/llm/openai/`" + ` | OpenAI provider adapters for API-key Responses API calls and ChatGPT/Codex subscription calls. |
@@ -204,7 +206,6 @@ func cliPage() string {
 | ` + "`neo chat`" + ` | Open interactive chat mode explicitly. |
 | ` + "`neo sessions`" + ` | List saved chat sessions. |
 | ` + "`neo resume <id>`" + ` | Resume a saved chat session. |
-| ` + "`neo step <name> \"<input>\"`" + ` | Run a single step in isolation (steps/<name>.md agent prompt or executable steps/<name> script). |
 | ` + "`neo login`" + ` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
 | ` + "`neo logout`" + ` | Remove stored OpenAI subscription credentials. |
 | ` + "`neo help`" + ` | Print usage. |

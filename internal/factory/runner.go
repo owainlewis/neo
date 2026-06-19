@@ -36,7 +36,7 @@ type AgentRunner struct {
 	Mode permission.Mode
 
 	// Sup is set after NewSupervisor — the runner needs it to hand child
-	// agents a run_step tool bound to their node.
+	// agents an agent tool bound to their node.
 	Sup *Supervisor
 }
 
@@ -81,9 +81,9 @@ func (r *AgentRunner) RunAgentStep(ctx context.Context, step Step, dir, input st
 	return out, err
 }
 
-// registry builds the step's tool set. An empty frontmatter list means
-// observation-only; run_step is only present when explicitly granted, bound
-// to this node so children attribute to it.
+// registry builds the subagent's tool set. An empty frontmatter list means
+// observation-only for legacy static steps; dynamic chat subagents pass an
+// explicit tool list.
 func (r *AgentRunner) registry(step Step, dir string, nodeID int) *tools.Registry {
 	bashTimeout := r.BashTimeout
 	if bashTimeout <= 0 {
@@ -96,7 +96,7 @@ func (r *AgentRunner) registry(step Step, dir string, nodeID int) *tools.Registr
 		tools.EditFile{},
 		tools.Grep{Root: r.Root},
 		tools.Glob{Root: r.Root},
-		RunStepTool{Sup: r.Sup, CallerNode: nodeID, Dir: dir},
+		AgentTool{Sup: r.Sup, CallerNode: nodeID, Dir: dir},
 	)
 	allowed := step.Tools
 	if len(allowed) == 0 {
@@ -107,14 +107,14 @@ func (r *AgentRunner) registry(step Step, dir string, nodeID int) *tools.Registr
 
 // translate maps core agent loop events onto the factory event stream.
 // Tool results are dropped unless they errored — the call line is the
-// interesting signal for a status display. run_step calls are dropped too:
-// the child step's own start event renders it.
+// interesting signal for a status display. agent calls are dropped too:
+// the child subagent's own start event renders it.
 func translate(e agent.Event) (AgentEvent, bool) {
 	switch e.Kind {
 	case agent.EventAssistantText:
 		return AgentEvent{Kind: "text", Body: e.Text}, true
 	case agent.EventToolCall:
-		if e.Name == "run_step" {
+		if e.Name == "agent" {
 			return AgentEvent{}, false
 		}
 		return AgentEvent{Kind: "tool", Body: summarize(e.Name, e.Args)}, true

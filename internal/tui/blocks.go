@@ -31,7 +31,7 @@ type textBlock struct{ text string }
 
 // workflowBlock is the visible task plan for a multi-step user request. The
 // model updates high-level semantic status through the workflow tool; regular
-// tool and run_step events attach lightweight activity automatically.
+// tool and agent events attach lightweight activity automatically.
 type workflowBlock struct {
 	title  string
 	items  []workflow.Item
@@ -150,7 +150,7 @@ type treeNode struct {
 }
 
 // treeBlock renders the supervisor subtrees spawned by the chat agent's
-// run_step calls — steps and their sub-steps, live:
+// agent calls — subagents and their nested subagents, live:
 //
 //	● ship  add rate limiting to invites          2m07s
 //	├─ ✓ checks                                       4s
@@ -227,7 +227,7 @@ func (b *treeBlock) renderNode(sb *strings.Builder, id int, prefix string, last 
 	}
 }
 
-// runStepOK reads the {"ok":…} envelope on the first line of a run_step
+// runStepOK reads the {"ok":…} envelope on the first line of an agent
 // tool result. The tool returns ok=false inside the payload (with no tool
 // error) when a step fails, times out, or is denied.
 func runStepOK(text string) bool {

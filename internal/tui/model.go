@@ -73,8 +73,8 @@ func WithProjectMemory(root string, enabled bool) Option {
 }
 
 // WithStepEvents subscribes the TUI to the factory supervisor's event
-// stream, which the chat view folds into live step trees while run_step
-// executes.
+// stream, which the chat view folds into live subagent trees while agent
+// calls execute.
 func WithStepEvents(ch <-chan factory.Event) Option {
 	return func(opts *Options) { opts.StepEvents = ch }
 }
@@ -99,7 +99,7 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 	// Pipe agent events directly into the Bubble Tea program. This avoids a
 	// hand-rolled channel pump and the back-pressure that came with it.
 	ag.SetEventHandler(func(e agent.Event) { p.Send(agentEventMsg{ev: e}) })
-	// Supervisor events (sub-step activity during run_step) arrive the same
+	// Supervisor events (subagent activity during agent calls) arrive the same
 	// way. The channel is already non-blocking on the producer side.
 	if opts.StepEvents != nil {
 		go func() {
@@ -176,7 +176,7 @@ type model struct {
 	currentTool         *toolCallBlock
 	workflow            *workflowBlock
 	autoWorkflowPending bool
-	activeTree          *treeBlock         // block receiving new top-level run_step trees
+	activeTree          *treeBlock         // block receiving new top-level subagent trees
 	treeIndex           map[int]*treeBlock // supervisor node id -> the block holding it
 	approval            *approvalState
 	// allow holds the rules the user granted via "always allow" during this
@@ -910,7 +910,7 @@ func (m *model) refreshViewport() {
 func (m *model) handleEvent(e agent.Event) {
 	switch e.Kind {
 	case agent.EventAssistantText:
-		m.activeTree = nil // assistant commentary splits step trees
+		m.activeTree = nil // assistant commentary splits subagent trees
 		if strings.TrimSpace(e.Text) != "" {
 			m.appendBlock(textBlock{text: e.Text})
 		}
@@ -923,7 +923,7 @@ func (m *model) handleEvent(e agent.Event) {
 		m.noteWorkflowActivity(toolActivity(e.Name, e.Args))
 		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now()}
 		m.currentTool = &tc
-		if e.Name == "run_step" {
+		if e.Name == "agent" {
 			// The supervisor's "start" event draws this call as a tree
 			// node; no generic tool card.
 			break
@@ -939,9 +939,8 @@ func (m *model) handleEvent(e agent.Event) {
 			elapsed = time.Since(m.currentTool.startAt)
 		}
 		m.currentTool = nil
-		if e.Name == "run_step" {
-			// Success renders in the tree. Failures (including denials and
-			// missing steps, which never become nodes) keep an error card
+		if e.Name == "agent" {
+			// Success renders in the tree. Failures/denials keep an error card
 			// so the output is inspectable.
 			if e.IsError || !runStepOK(e.Text) {
 				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true, elapsed: elapsed})
@@ -1094,9 +1093,9 @@ func toolActivity(name string, args map[string]any) string {
 		if pat, ok := args["pattern"].(string); ok && strings.TrimSpace(pat) != "" {
 			return "glob " + pat
 		}
-	case "run_step":
-		if step, ok := args["name"].(string); ok && strings.TrimSpace(step) != "" {
-			return "run step " + step
+	case "agent":
+		if prompt, ok := args["prompt"].(string); ok && strings.TrimSpace(prompt) != "" {
+			return "agent " + oneLine(prompt)
 		}
 	}
 	return name
