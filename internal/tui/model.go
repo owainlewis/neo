@@ -133,6 +133,7 @@ type sendResultMsg struct{ err error }
 type agentEventMsg struct{ ev agent.Event }
 type stepEventMsg struct{ ev factory.Event }
 type workflowEventMsg struct{ ev workflow.Event }
+type branchMsg struct{ branch string }
 type approvalRequestMsg struct {
 	req   agent.ApprovalRequest
 	reply chan bool
@@ -175,6 +176,7 @@ type model struct {
 	busySince           time.Time
 	currentTool         *toolCallBlock
 	workflow            *workflowBlock
+	workflowVisible     bool
 	autoWorkflowPending bool
 	activeTree          *treeBlock         // block receiving new top-level subagent trees
 	treeIndex           map[int]*treeBlock // supervisor node id -> the block holding it
@@ -504,6 +506,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.layout()
 				break
 			}
+			if m.workflow != nil {
+				m.workflowVisible = !m.workflowVisible
+				m.layout()
+				break
+			}
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
@@ -558,6 +565,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil && !errors.Is(msg.err, context.Canceled) && !errors.Is(msg.err, agent.ErrMaxTurns) {
 			m.appendBlock(errorBlock{err: msg.err})
 		}
+		cmds = append(cmds, refreshBranch())
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -574,6 +582,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workflowEventMsg:
 		m.handleWorkflowEvent(msg.ev)
+
+	case branchMsg:
+		if strings.TrimSpace(msg.branch) != "" {
+			m.branch = msg.branch
+		}
 
 	case rotateCaptionMsg:
 		if m.busy {
@@ -877,7 +890,7 @@ func (m *model) appendBlock(b block) {
 }
 
 func (m *model) workflowPanelView() string {
-	if m.workflow == nil {
+	if m.workflow == nil || !m.workflowVisible {
 		return ""
 	}
 	return m.workflow.render(m.width, nil)
@@ -994,6 +1007,7 @@ func (m *model) maybeStartWorkflowFromUserText(text string) {
 		return
 	}
 	m.workflow = &workflowBlock{title: "Workflow", items: items}
+	m.workflowVisible = true
 	m.autoWorkflowPending = true
 	m.layout()
 	m.refreshViewport()
@@ -1002,6 +1016,7 @@ func (m *model) maybeStartWorkflowFromUserText(text string) {
 func (m *model) handleWorkflowEvent(ev workflow.Event) {
 	if ev.Action == "clear" {
 		m.workflow = nil
+		m.workflowVisible = true
 		m.layout()
 		m.refreshViewport()
 		return
@@ -1019,6 +1034,7 @@ func (m *model) handleWorkflowEvent(ev workflow.Event) {
 		m.autoWorkflowPending = false
 		wb := &workflowBlock{title: ev.State.Title, items: ev.State.Items}
 		m.workflow = wb
+		m.workflowVisible = true
 		m.layout()
 		m.refreshViewport()
 		return
@@ -1235,6 +1251,12 @@ func shortPaths(paths []string) []string {
 		out[i] = filepath.Base(p)
 	}
 	return out
+}
+
+func refreshBranch() tea.Cmd {
+	return func() tea.Msg {
+		return branchMsg{branch: gitBranch()}
+	}
 }
 
 func gitBranch() string {
