@@ -154,6 +154,7 @@ Slash commands keep common actions out of the chat transcript:
 | `/tokens` | Show token usage for the session |
 | `/model` | Pick the active model for this session |
 | `/sessions` | Browse saved sessions |
+| `/memory <text>` | Append a project memory entry |
 | `/clear` | Clear the current transcript |
 
 Small examples:
@@ -162,6 +163,7 @@ Small examples:
 /model              # open the model picker
 /permissions        # switch between ask, trusted, readonly
 /sessions           # resume a saved session for this workspace
+/memory prefer table-driven tests   # append a project memory entry
 !git status         # run a shell command through Neo's bash tool
 read @README        # type @ to search workspace files, then tab/enter to insert
 ```
