@@ -106,6 +106,23 @@ func TestLoad_OpenAIProviderGetsOpenAIDefaultModel(t *testing.T) {
 	})
 }
 
+func TestLoad_OpenRouterProviderGetsOpenRouterDefaultModel(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: openrouter\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Provider != "openrouter" {
+			t.Fatalf("provider: got %q want openrouter", cfg.Provider)
+		}
+		if cfg.Model != defaultOpenRouterModel {
+			t.Fatalf("model: got %q want %q", cfg.Model, defaultOpenRouterModel)
+		}
+	})
+}
+
 func TestLoad_OpenAIDefaultsToAPIKeyAuth(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)

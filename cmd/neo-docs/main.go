@@ -171,6 +171,8 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`internal/llm/`" + ` | Provider-neutral request/response types and system prompt blocks. |
 | ` + "`internal/llm/anthropic/`" + ` | Anthropic provider adapter. |
 | ` + "`internal/llm/openai/`" + ` | OpenAI provider adapters for API-key Responses API calls and ChatGPT/Codex subscription calls. |
+| ` + "`internal/llm/chatcompletions/`" + ` | Reusable OpenAI-compatible Chat Completions adapter. |
+| ` + "`internal/llm/openrouter/`" + ` | OpenRouter provider setup and defaults. |
 | ` + "`internal/permission/`" + ` | Tool-call permission policy and workspace path boundary checks. |
 | ` + "`internal/projectctx/`" + ` | AGENTS.md and memory.md discovery plus prompt augmentation. |
 | ` + "`internal/session/`" + ` | File-backed session metadata and transcripts. |
@@ -182,7 +184,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 ## Chat Startup Flow
 
 1. ` + "`cmd/neo`" + ` loads config.
-2. ` + "`mustProvider`" + ` selects Anthropic or OpenAI. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
+2. ` + "`mustProvider`" + ` selects Anthropic, OpenAI, or OpenRouter. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
 3. The CLI creates or loads a session from ` + "`internal/session`" + `.
 4. Skills, AGENTS.md, and project memory are discovered when enabled.
 5. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
@@ -214,6 +216,7 @@ func cliPage() string {
 
 - ` + "`ANTHROPIC_API_KEY`" + ` is required when ` + "`provider: anthropic`" + `.
 - ` + "`OPENAI_API_KEY`" + ` is required when ` + "`provider: openai`" + ` uses ` + "`openai_auth: api_key`" + `.
+- ` + "`OPENROUTER_API_KEY`" + ` is required when ` + "`provider: openrouter`" + `.
 - ` + "`openai_auth: subscription`" + ` uses stored ChatGPT/Codex device-code credentials created by ` + "`neo login`" + ` instead of an API key.
 
 ## Runtime Notes
@@ -250,6 +253,7 @@ First hit wins. Config files are not merged.
 | ` + "`provider: anthropic`" + ` | ` + "`ANTHROPIC_API_KEY`" + ` | ` + "`internal/llm/anthropic`" + ` |
 | ` + "`provider: openai`" + ` with ` + "`openai_auth: api_key`" + ` | ` + "`OPENAI_API_KEY`" + ` | ` + "`internal/llm/openai.Client`" + ` |
 | ` + "`provider: openai`" + ` with ` + "`openai_auth: subscription`" + ` | ChatGPT/Codex device-code credentials from ` + "`~/.neo/auth.json`" + ` | ` + "`internal/llm/openai.CodexClient`" + ` |
+| ` + "`provider: openrouter`" + ` | ` + "`OPENROUTER_API_KEY`" + ` | ` + "`internal/llm/openrouter`" + ` |
 
 Subscription credentials are created with ` + "`neo login`" + ` and removed with ` + "`neo logout`" + `. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 
@@ -666,7 +670,7 @@ A provider is the adapter between Neo and a model API. Neo speaks its own small 
 
 ## The Problem
 
-Different model APIs use different request shapes, response shapes, tool-call formats, auth methods, retry behavior, and token accounting.
+Different model APIs use different request shapes, response shapes, tool-call formats, auth methods, retry behavior, and token accounting. OpenRouter uses an OpenAI-compatible Chat Completions shape while OpenAI itself uses the newer Responses API in Neo.
 
 Neo should not bake any one provider into the agent loop.
 
@@ -690,6 +694,7 @@ The core loop sends an ` + "`llm.Request`" + `. The provider returns an ` + "`ll
 | ` + "`provider: anthropic`" + ` | ` + "`ANTHROPIC_API_KEY`" + ` | ` + "`internal/llm/anthropic`" + ` |
 | ` + "`provider: openai`" + ` + ` + "`openai_auth: api_key`" + ` | ` + "`OPENAI_API_KEY`" + ` | ` + "`internal/llm/openai.Client`" + ` |
 | ` + "`provider: openai`" + ` + ` + "`openai_auth: subscription`" + ` | ` + "`neo login`" + ` device-code credentials | ` + "`internal/llm/openai.CodexClient`" + ` |
+| ` + "`provider: openrouter`" + ` | ` + "`OPENROUTER_API_KEY`" + ` | ` + "`internal/llm/openrouter`" + ` |
 
 ## How Models Are Chosen
 
@@ -709,6 +714,8 @@ In the TUI, ` + "`/model`" + ` opens a model picker. It changes the active model
 - ` + "`internal/llm/provider.go`" + `: provider-neutral types.
 - ` + "`internal/llm/anthropic`" + `: Anthropic adapter.
 - ` + "`internal/llm/openai`" + `: OpenAI adapters.
+- ` + "`internal/llm/chatcompletions`" + `: reusable OpenAI-compatible Chat Completions translation.
+- ` + "`internal/llm/openrouter`" + `: OpenRouter adapter wiring.
 - ` + "`internal/auth`" + `: subscription credential storage and refresh.
 - ` + "`cmd/neo/main.go`" + `: provider selection.
 `
