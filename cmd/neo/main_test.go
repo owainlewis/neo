@@ -1,17 +1,19 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/owainlewis/neo/internal/config"
+	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/session"
 )
 
 func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.T) {
-	choices := modelChoices(&config.Config{
+	choices := modelChoices(context.Background(), &config.Config{
 		Provider:   "openai",
 		OpenAIAuth: config.OpenAIAuthSubscription,
 	})
@@ -25,7 +27,7 @@ func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.
 }
 
 func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
-	choices := modelChoices(&config.Config{
+	choices := modelChoices(context.Background(), &config.Config{
 		Provider:   "openai",
 		OpenAIAuth: config.OpenAIAuthAPIKey,
 	})
@@ -37,23 +39,26 @@ func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
 	}
 }
 
-func TestModelChoices_OpenRouterListsOpenRouterModels(t *testing.T) {
-	choices := modelChoices(&config.Config{Provider: "openrouter"})
+func TestModelChoices_OpenRouterFallsBackWhenCatalogueUnavailable(t *testing.T) {
+	// Point the picker at an unroutable network so the live fetch fails fast;
+	// the picker must still return the provider default rather than nothing.
+	t.Setenv("OPENROUTER_API_KEY", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already-cancelled context forces the fetch to fail immediately
+
+	choices := modelChoices(ctx, &config.Config{Provider: "openrouter"})
 	if len(choices) == 0 {
-		t.Fatal("expected openrouter model choices")
+		t.Fatal("expected a fallback openrouter model choice")
 	}
-	want := []string{"anthropic/claude-sonnet-4.5", "openai/gpt-4o", "google/gemini-2.5-pro"}
-	for _, id := range want {
-		found := false
-		for _, choice := range choices {
-			if choice.ID == id {
-				found = true
-				break
-			}
+	found := false
+	for _, choice := range choices {
+		if choice.ID == openrouter.DefaultModel {
+			found = true
+			break
 		}
-		if !found {
-			t.Fatalf("missing OpenRouter model choice %q in %#v", id, choices)
-		}
+	}
+	if !found {
+		t.Fatalf("fallback choices missing default %q: %#v", openrouter.DefaultModel, choices)
 	}
 }
 
