@@ -37,6 +37,26 @@ func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
 	}
 }
 
+func TestModelChoices_OpenRouterListsOpenRouterModels(t *testing.T) {
+	choices := modelChoices(&config.Config{Provider: "openrouter"})
+	if len(choices) == 0 {
+		t.Fatal("expected openrouter model choices")
+	}
+	want := []string{"anthropic/claude-sonnet-4.5", "openai/gpt-4o", "google/gemini-2.5-pro"}
+	for _, id := range want {
+		found := false
+		for _, choice := range choices {
+			if choice.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing OpenRouter model choice %q in %#v", id, choices)
+		}
+	}
+}
+
 func TestChatSystem_IncludesProjectMemoryAsDistinctDynamicBlock(t *testing.T) {
 	root := t.TempDir()
 	cwd := filepath.Join(root, "pkg")

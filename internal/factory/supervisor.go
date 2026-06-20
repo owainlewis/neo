@@ -143,7 +143,10 @@ const dynamicAgentSystemPrompt = `You are a focused subagent spawned by Neo's ch
 
 You have no memory of the parent conversation except the prompt you receive. Follow that prompt exactly, use tools as needed, and return a concise report with evidence. Do not commit changes unless explicitly asked.`
 
-var dynamicAgentTools = []string{"bash", "read_file", "write_file", "edit_file", "grep", "glob", "agent"}
+// dynamicAgentTools is the default role for chat-spawned subagents. It
+// intentionally omits "agent" so subagents cannot spawn further subagents
+// unless a future explicit role opts into that power.
+var dynamicAgentTools = []string{"bash", "read_file", "write_file", "edit_file", "grep", "glob"}
 
 // admit is the cage: depth and fanout for every step; agent-count only for
 // agent steps (scripts are cheap; their cost is wall time, capped by

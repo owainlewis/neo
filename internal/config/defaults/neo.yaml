@@ -1,9 +1,10 @@
 # neo default configuration.
 # Override by creating ./neo.yaml in a project, or ~/.neo/config.yaml globally.
 
-# LLM backend: "anthropic" (default) or "openai".
-# anthropic → requires ANTHROPIC_API_KEY
-# openai    → uses the Responses API; auth via openai_auth (below)
+# LLM backend: "anthropic" (default), "openai", or "openrouter".
+# anthropic  → requires ANTHROPIC_API_KEY
+# openai     → uses the Responses API; auth via openai_auth (below)
+# openrouter → uses Chat Completions via OPENROUTER_API_KEY
 provider: anthropic
 
 # How the "openai" provider authenticates (ignored for other providers):

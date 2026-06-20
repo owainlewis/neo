@@ -19,6 +19,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/llm/openai"
+	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
@@ -99,10 +100,11 @@ USAGE:
 
 CONFIG:
   Reads neo.yaml (cwd) → ~/.neo/config.yaml → embedded defaults.
-  Select a backend with the "provider" key: "anthropic" (default) or "openai".
+  Select a backend with the "provider" key: "anthropic" (default), "openai", or "openrouter".
 
   ANTHROPIC_API_KEY    required when provider is "anthropic"
   OPENAI_API_KEY       required when provider is "openai" with api_key auth
+  OPENROUTER_API_KEY   required when provider is "openrouter"
 
   To use a ChatGPT subscription instead of an API key, set in neo.yaml:
     provider: openai
@@ -184,10 +186,12 @@ func mustProvider(cfg *config.Config) llm.Provider {
 		} else {
 			prov, err = openai.New()
 		}
+	case "openrouter":
+		prov, err = openrouter.New()
 	case "anthropic", "":
 		prov, err = anthropic.New()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\" or \"openai\")\n", cfg.Provider)
+		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\", \"openai\", or \"openrouter\")\n", cfg.Provider)
 		os.Exit(1)
 	}
 	if err != nil {
@@ -412,6 +416,13 @@ func modelChoices(cfg *config.Config) []tui.ModelChoice {
 			{ID: "gpt-4.1", Name: "GPT-4.1", Description: "Non-reasoning model for general coding tasks"},
 			{ID: "gpt-4o", Name: "GPT-4o", Description: "Fast multimodal GPT-4o model"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},
+		}
+	case "openrouter":
+		return []tui.ModelChoice{
+			{ID: "anthropic/claude-sonnet-4.5", Name: "Claude Sonnet 4.5 (OpenRouter)", Description: "Default OpenRouter model"},
+			{ID: "openai/gpt-4o", Name: "GPT-4o (OpenRouter)", Description: "OpenAI GPT-4o via OpenRouter"},
+			{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro (OpenRouter)", Description: "Google Gemini Pro via OpenRouter"},
+			{ID: "deepseek/deepseek-chat-v3.1", Name: "DeepSeek Chat v3.1 (OpenRouter)", Description: "Lower-cost coding-capable model via OpenRouter"},
 		}
 	default:
 		return []tui.ModelChoice{

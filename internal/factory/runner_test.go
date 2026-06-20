@@ -24,10 +24,17 @@ func TestRegistryIsTheRole(t *testing.T) {
 	}
 
 	workerLike := Step{Name: "worker", Kind: "agent",
-		Tools: []string{"bash", "read_file", "write_file", "edit_file", "agent"}}
+		Tools: []string{"bash", "read_file", "write_file", "edit_file"}}
 	names = r.registry(workerLike, t.TempDir(), 1).Names()
-	if !slices.Contains(names, "agent") || !slices.Contains(names, "write_file") {
+	if slices.Contains(names, "agent") || !slices.Contains(names, "write_file") {
 		t.Fatalf("worker registry = %v", names)
+	}
+
+	// Static step definitions can still explicitly opt into nested delegation.
+	nestedLike := Step{Name: "nested", Kind: "agent", Tools: []string{"read_file", "agent"}}
+	names = r.registry(nestedLike, t.TempDir(), 1).Names()
+	if !slices.Contains(names, "agent") || !slices.Contains(names, "read_file") {
+		t.Fatalf("nested registry = %v", names)
 	}
 
 	// No frontmatter tools = observation only, never agent delegation.
@@ -35,6 +42,12 @@ func TestRegistryIsTheRole(t *testing.T) {
 	names = r.registry(bare, t.TempDir(), 1).Names()
 	if slices.Contains(names, "write_file") || slices.Contains(names, "agent") {
 		t.Fatalf("default registry too permissive: %v", names)
+	}
+}
+
+func TestDynamicAgentToolsOmitNestedAgentDelegation(t *testing.T) {
+	if slices.Contains(dynamicAgentTools, "agent") {
+		t.Fatalf("dynamic chat subagents should not receive nested agent delegation by default: %v", dynamicAgentTools)
 	}
 }
 

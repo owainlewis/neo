@@ -35,8 +35,9 @@ type AgentRunner struct {
 	// Empty defaults to trusted (the standalone step CLI case).
 	Mode permission.Mode
 
-	// Sup is set after NewSupervisor — the runner needs it to hand child
-	// agents an agent tool bound to their node.
+	// Sup is set after NewSupervisor. It is used only when a step explicitly
+	// opts into the agent tool; dynamic chat subagents do not get nested
+	// delegation by default.
 	Sup *Supervisor
 }
 
