@@ -393,6 +393,43 @@ Note "defined and runnable," not "active." Most loops are not running; they are 
 
 One naming note: in Claude Code, `/loop` is the *timer* command. In neo, `/loop <name>` runs a defined loop. That is a deliberate divergence (neo collapses the verbs into one runner), so call it out for anyone coming from Claude Code.
 
+### TUI workflow checklist
+
+Neo already has a visible workflow checklist (`internal/workflow`) that the chat model can update with `create`, `start`, `complete`, `fail`, `skip`, and `clear` events. Use that for interactive loop runs.
+
+The workflow checklist is the live display layer, not the source of truth. The loop runner still owns durable state, budgets, verifier results, reports, and resume data. When a loop runs through `/loop <name>`, a thin adapter publishes loop events into the existing workflow event channel.
+
+```
+Loop runner
+  -> loop events: preflight, verify, iteration, blocked, report
+  -> TUI adapter
+  -> workflow.Event
+  -> existing visible checklist panel
+```
+
+For `/loop docs-drift`, the initial checklist can be:
+
+```
+Loop: docs-drift
+[pending] Preflight
+[pending] Initial verifier
+[pending] Iteration 1 / 3
+[pending] Verify result
+[pending] Final report
+```
+
+During the run, item detail carries the useful evidence:
+
+```
+[done] Preflight - clean worktree, budget ok
+[failed] Initial verifier - check-docs.sh failed
+[running] Iteration 1 / 3 - editing docs/setup.md
+[running] Verify result - go test ./... passed, prompt verifier running
+[done] Final report - passed by command+prompt
+```
+
+This makes the loop visibly bounded and inspectable. Budget progress, verification, stalls, and final status all have a place in the UI, and Neo's existing tool/subagent activity can keep attaching to the active workflow item. The CLI does not need this layer; it stays JSON-only.
+
 ---
 
 ## 11. How this maps to the code already written
@@ -412,13 +449,14 @@ This is an extension of the `internal/loops` package from earlier, not a rewrite
 | Scope resolver | new | local-then-global lookup, `--global`, scoped state paths |
 | `neo loop new` generator | new | inspect repo, draft a file, confirm verifier + budget |
 | Slash commands | new | `/loops` picker and `/loop <name>` with a live indicator |
+| TUI workflow checklist | `internal/workflow`, TUI workflow panel | publish loop lifecycle events into the existing checklist |
 | First-run trust gate | new | confirm a project-local loop's command on first use |
 | Skip gate | new | run `verify()` once before the loop |
 | Report emitter | new | the JSON in section 9 |
 
 `RunGoal` already is the core run algorithm for the verifier-stop case. The new work is
 the definition file and loader, the two scopes, the generator, the command verifier, the
-slash commands, and the report.
+slash commands, the workflow checklist adapter, and the report.
 
 ---
 
@@ -441,7 +479,7 @@ quick, unbounded-feeling shortcut it is.
 
 ## 13. Build order
 
-- **v1 (the minimum useful shape):** the definition file with validation and the six-part objective, `boundaries` enforced at the tool layer, local + global scopes with local-first resolution, `neo loop new` to generate one from a sentence, `neo loop run`, the `/loops` picker and `/loop <name>`, `trigger: manual`, command and/or prompt verifier (command-first), a budget that refuses empty, the skip gate, blocked via `GitSignal` plus the zero-tool-call check, the JSON report with `blocker`/`next_step`, the per-iteration state snapshot, and the first-run trust gate for project-local loops. Most of this wires the existing `internal/loops` code to a file loader, a scope resolver, a generator, and a report emitter.
+- **v1 (the minimum useful shape):** the definition file with validation and the six-part objective, `boundaries` enforced at the tool layer, local + global scopes with local-first resolution, `neo loop new` to generate one from a sentence, `neo loop run`, the `/loops` picker and `/loop <name>`, workflow checklist updates for interactive runs, `trigger: manual`, command and/or prompt verifier (command-first), a budget that refuses empty, the skip gate, blocked via `GitSignal` plus the zero-tool-call check, the JSON report with `blocker`/`next_step`, the per-iteration state snapshot, and the first-run trust gate for project-local loops. Most of this wires the existing `internal/loops` code to a file loader, a scope resolver, a generator, a workflow adapter, and a report emitter.
 - **v2:** `neo loop resume`, worktree isolation, `trigger: interval` and `trigger: schedule` with `neo loop schedule`, `pause`/`resume`.
 - **Deferred:** parallel loops, a shared artifact/log layer (the outer loop), any database.
 
