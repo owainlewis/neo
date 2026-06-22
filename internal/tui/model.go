@@ -22,6 +22,7 @@ import (
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
@@ -86,6 +87,7 @@ func WithWorkflowEvents(ch <-chan workflow.Event) Option {
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
 // loaded skill set used for $name expansion (nil when the feature is off).
 func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skills.Skill, options ...Option) error {
+	logx.Debug("tui start", "model", model, "skills", len(sk))
 	opts := Options{}
 	for _, option := range options {
 		option(&opts)
@@ -126,6 +128,11 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 		}
 	})
 	_, err = p.Run()
+	if err != nil {
+		logx.Debug("tui exit", "error", err.Error())
+	} else {
+		logx.Debug("tui exit", "error", "")
+	}
 	return err
 }
 
@@ -354,6 +361,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.approval != nil {
 			switch msg.String() {
 			case "ctrl+c", "ctrl+d":
+				logx.Debug("tui quit during approval", "tool", m.approval.req.ToolName)
 				m.finishApproval(false)
 				if m.sendCancel != nil {
 					m.sendCancel()
@@ -375,6 +383,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "ctrl+c", "ctrl+d":
+			logx.Debug("tui quit requested", "busy", m.busy)
 			if m.sendCancel != nil {
 				m.sendCancel()
 			}
@@ -393,6 +402,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Soft interrupt: cancel the in-flight turn without quitting.
 			if m.busy && m.sendCancel != nil {
+				logx.Debug("tui send canceled", "mode", "soft_interrupt")
 				m.sendCancel()
 			}
 		case "enter":
@@ -547,6 +557,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case approvalRequestMsg:
+		logx.Debug("tui approval requested", "tool", msg.req.ToolName, "reason", msg.req.Reason)
 		req := permission.Request{ToolName: msg.req.ToolName, Args: msg.req.Args}
 		if m.allow.Allows(req) {
 			msg.reply <- true
@@ -779,8 +790,10 @@ func (m *model) finishApproval(ok bool) {
 	}
 	m.approval.reply <- ok
 	if ok {
+		logx.Debug("tui approval answered", "tool", m.approval.req.ToolName, "approved", true)
 		m.appendBlock(noticeBlock{text: "approved " + m.approval.req.ToolName})
 	} else {
+		logx.Debug("tui approval answered", "tool", m.approval.req.ToolName, "approved", false)
 		m.appendBlock(noticeBlock{text: "denied " + m.approval.req.ToolName})
 	}
 	m.approval = nil
@@ -1223,6 +1236,7 @@ func (m *model) appendTranscript(messages []llm.Message) {
 func (m *model) startSend(text string, images []string) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.sendCancel = cancel
+	logx.Debug("tui send start", "images", len(images), "text", logx.SafeString(text, 240))
 	return func() tea.Msg {
 		_, err := m.ag.SendWith(ctx, text, images)
 		if m.afterSend != nil {
@@ -1237,6 +1251,7 @@ func (m *model) startSend(text string, images []string) tea.Cmd {
 func (m *model) startTool(name string, input map[string]any) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.sendCancel = cancel
+	logx.Debug("tui tool start", "name", name, "args", logx.SafeAny(input))
 	return func() tea.Msg {
 		m.ag.RunTool(ctx, name, input)
 		return sendResultMsg{}

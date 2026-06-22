@@ -13,6 +13,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/retry"
+	"github.com/owainlewis/neo/internal/logx"
 )
 
 // codexEndpoint is the ChatGPT/Codex subscription backend. It speaks the same
@@ -61,11 +62,17 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 		model = DefaultCodexModel
 	}
 	apiReq := buildAPIRequest(req, model, true, "auto", true)
-	debugJSON("codex request", apiReq)
 	body, err := json.Marshal(apiReq)
 	if err != nil {
 		return nil, err
 	}
+	logx.Debug("provider request",
+		"provider", c.Name(),
+		"model", model,
+		"messages", len(req.Messages),
+		"tools", len(req.Tools),
+		"payload", logx.PayloadValue(string(body)),
+	)
 
 	maxRetries := c.MaxRetries
 	if maxRetries < 0 {
@@ -78,16 +85,27 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		logx.Debug("provider attempt", "provider", c.Name(), "attempt", attempt+1, "max_attempts", maxRetries+1)
 		raw, status, retryAfter, err := c.doRequest(ctx, body)
 		if err != nil {
 			lastErr = err
 			if ctx.Err() != nil {
+				logx.Debug("provider request canceled", "provider", c.Name(), "error", ctx.Err().Error())
 				return nil, ctx.Err()
 			}
 			if attempt == maxRetries {
+				logx.Debug("provider transport failed", "provider", c.Name(), "attempt", attempt+1, "error", err.Error())
 				return nil, err
 			}
-			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retry.Absent())); err != nil {
+			delay := retry.Delay(baseDelay, attempt, retry.Absent())
+			logx.Debug("provider retry scheduled",
+				"provider", c.Name(),
+				"attempt", attempt+1,
+				"reason", "transport_error",
+				"delay", delay.String(),
+				"error", err.Error(),
+			)
+			if err := sleep(ctx, delay); err != nil {
 				return nil, err
 			}
 			continue
@@ -96,18 +114,42 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 		if status == 429 || status >= 500 {
 			lastErr = fmt.Errorf("openai-codex %d: %s", status, string(raw))
 			if attempt == maxRetries {
+				logx.Debug("provider retries exhausted",
+					"provider", c.Name(),
+					"status", status,
+					"body", logx.PayloadValue(string(raw)),
+				)
 				return nil, lastErr
 			}
-			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retryAfter)); err != nil {
+			delay := retry.Delay(baseDelay, attempt, retryAfter)
+			logx.Debug("provider retry scheduled",
+				"provider", c.Name(),
+				"attempt", attempt+1,
+				"reason", "http_retryable",
+				"status", status,
+				"delay", delay.String(),
+				"retry_after_present", retryAfter.Present,
+				"body", logx.PayloadValue(string(raw)),
+			)
+			if err := sleep(ctx, delay); err != nil {
 				return nil, err
 			}
 			continue
 		}
 		if status >= 400 {
-			debugHTTPResponse("openai-codex", status, raw)
+			logx.Debug("provider client error",
+				"provider", c.Name(),
+				"status", status,
+				"body", logx.PayloadValue(string(raw)),
+			)
 			return nil, fmt.Errorf("openai-codex %d: %s", status, string(raw))
 		}
 
+		logx.Debug("provider response",
+			"provider", c.Name(),
+			"status", status,
+			"response", logx.PayloadValue(string(raw)),
+		)
 		return parseCodexStream(raw)
 	}
 	return nil, lastErr

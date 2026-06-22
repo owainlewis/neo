@@ -20,6 +20,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/llm/openai"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
+	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
@@ -53,8 +54,14 @@ subagent prompts dynamically from the user's goal and current context; use the
 normal tools directly when delegation is unnecessary.`
 
 func main() {
+	if err := logx.InitFromEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: NEO_LOG: %v\n", err)
+	}
+	defer func() { _ = logx.Close() }()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	logx.Debug("neo start", "args", logx.SafeAny(os.Args[1:]))
 
 	// `neo` with no subcommand defaults to chat — the common case.
 	if len(os.Args) < 2 {
@@ -80,6 +87,7 @@ func main() {
 	case "-h", "--help", "help":
 		printUsage()
 	default:
+		logx.Debug("neo unknown command", "command", os.Args[1])
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
 		os.Exit(2)

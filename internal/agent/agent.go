@@ -8,6 +8,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
@@ -186,6 +187,12 @@ func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []stri
 	if len(content) == 0 {
 		return "", nil
 	}
+	logx.Debug("agent turn queued",
+		"model", a.cfg.Model,
+		"messages_before", len(a.messages),
+		"images", len(imagePaths),
+		"text", logx.SafeString(text, 240),
+	)
 	a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: content})
 	return a.run(ctx)
 }
@@ -193,8 +200,16 @@ func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []stri
 func (a *Agent) run(ctx context.Context) (string, error) {
 	var finalText strings.Builder
 	for turn := 0; turn < a.cfg.MaxTurns; turn++ {
+		logx.Debug("agent turn start",
+			"turn", turn+1,
+			"max_turns", a.cfg.MaxTurns,
+			"messages", len(a.messages),
+			"provider", a.cfg.Provider.Name(),
+			"model", a.cfg.Model,
+		)
 		compacted, err := a.cfg.Compactor.Compact(ctx, a.messages)
 		if err != nil {
+			logx.Debug("agent compaction error", "turn", turn+1, "error", err.Error())
 			a.emit(Event{Kind: EventError, Err: err})
 			return "", err
 		}
@@ -207,10 +222,17 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			Tools:        a.cfg.Tools.Specs(),
 		})
 		if err != nil {
+			logx.Debug("agent provider error", "turn", turn+1, "error", err.Error())
 			a.emit(Event{Kind: EventError, Err: err})
 			return "", err
 		}
 		a.usage = addUsage(a.usage, resp.Usage)
+		logx.Debug("agent provider response",
+			"turn", turn+1,
+			"stop_reason", resp.StopReason,
+			"content_blocks", len(resp.Content),
+			"usage", resp.Usage,
+		)
 
 		// Build the assistant message and any matching tool_results, but do not
 		// commit either to the transcript until both are ready. This guarantees
@@ -247,21 +269,26 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 		}
 
 		if resp.StopReason == "end_turn" || resp.StopReason == "stop_sequence" || resp.StopReason == "" {
+			logx.Debug("agent turn complete", "turn", turn+1, "stop_reason", resp.StopReason)
 			a.emit(Event{Kind: EventDone})
 			return strings.TrimSpace(finalText.String()), nil
 		}
 		if resp.StopReason == "max_tokens" {
+			logx.Debug("agent max output tokens", "turn", turn+1)
 			a.emit(Event{Kind: EventError, Err: ErrMaxOutputTokens})
 			return strings.TrimSpace(finalText.String()), ErrMaxOutputTokens
 		}
 	}
+	logx.Debug("agent max turns reached", "max_turns", a.cfg.MaxTurns)
 	a.emit(Event{Kind: EventMaxTurnsReached, MaxTurns: a.cfg.MaxTurns, Err: ErrMaxTurns})
 	return strings.TrimSpace(finalText.String()), ErrMaxTurns
 }
 
 func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) (string, bool) {
+	logx.Debug("tool call", "name", name, "args", logx.SafeAny(input))
 	t, ok := a.cfg.Tools.Get(name)
 	if !ok {
+		logx.Debug("tool lookup failed", "name", name)
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
 	if a.cfg.Policy != nil {
@@ -271,9 +298,11 @@ func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) 
 			if decision.Reason == "" {
 				decision.Reason = "permission policy denied this tool call"
 			}
+			logx.Debug("tool denied", "name", name, "reason", decision.Reason)
 			return decision.Reason, true
 		case permission.Ask:
 			if a.cfg.Approve == nil {
+				logx.Debug("tool approval missing approver", "name", name)
 				return "permission approval required but no approver is configured", true
 			}
 			approved, err := a.cfg.Approve(ctx, ApprovalRequest{
@@ -283,17 +312,26 @@ func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) 
 				Preview:  Preview(name, input),
 			})
 			if err != nil {
+				logx.Debug("tool approval error", "name", name, "error", err.Error())
 				return fmt.Sprintf("approval error: %v", err), true
 			}
 			if !approved {
+				logx.Debug("tool denied by user", "name", name)
 				return "user denied this tool call", true
 			}
+			logx.Debug("tool approved", "name", name)
 		}
 	}
 	out, err := t.Run(ctx, input)
 	if err != nil {
+		logx.Debug("tool error",
+			"name", name,
+			"error", err.Error(),
+			"output", logx.PayloadValue(out),
+		)
 		return fmt.Sprintf("error: %v\n%s", err, out), true
 	}
+	logx.Debug("tool result", "name", name, "output", logx.PayloadValue(out))
 	return out, false
 }
 
