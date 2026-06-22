@@ -46,7 +46,7 @@ type WorkspacePolicy struct {
 
 func New(mode, root string) WorkspacePolicy {
 	if mode == "" {
-		mode = string(ModeAsk)
+		mode = string(ModeTrusted)
 	}
 	absRoot, err := filepath.Abs(root)
 	if err == nil {
@@ -57,10 +57,18 @@ func New(mode, root string) WorkspacePolicy {
 
 func (p WorkspacePolicy) Decide(_ context.Context, req Request) Result {
 	if p.Mode == "" {
-		p.Mode = ModeAsk
+		p.Mode = ModeTrusted
 	}
 	if reason := p.pathDenial(req); reason != "" {
 		return Result{Decision: Deny, Reason: reason}
+	}
+	if reason := explicitApprovalReason(req); reason != "" {
+		switch p.Mode {
+		case ModeReadonly:
+			// Readonly denies mutating tools outright below.
+		default:
+			return Result{Decision: Ask, Reason: reason}
+		}
 	}
 	switch p.Mode {
 	case ModeReadonly:
@@ -109,11 +117,148 @@ func pathKeys(tool string) []string {
 
 func isReadTool(tool string) bool {
 	switch tool {
-	case "read_file", "grep", "glob":
+	case "read_file", "grep", "glob", "workflow":
 		return true
 	default:
 		return false
 	}
+}
+
+func explicitApprovalReason(req Request) string {
+	if req.ToolName != "bash" {
+		return ""
+	}
+	cmd, ok := stringArg(req.Args, "command")
+	if !ok {
+		return ""
+	}
+	if reason := dangerousBashReason(cmd); reason != "" {
+		return reason
+	}
+	return ""
+}
+
+func dangerousBashReason(cmd string) string {
+	for _, segment := range shellSegments(cmd) {
+		fields := shellFields(segment)
+		if len(fields) == 0 {
+			continue
+		}
+		fields = skipEnvAssignments(fields)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case "sudo":
+			return "sudo command requires approval"
+		case "rm":
+			if rmRecursiveForce(fields[1:]) {
+				return "recursive forced removal requires approval"
+			}
+		case "chmod", "chown", "chgrp":
+			if hasRecursiveFlag(fields[1:]) {
+				return fields[0] + " recursive change requires approval"
+			}
+		case "git":
+			if dangerousGit(fields[1:]) {
+				return "destructive git command requires approval"
+			}
+		}
+	}
+	return ""
+}
+
+func shellSegments(cmd string) []string {
+	return strings.FieldsFunc(cmd, func(r rune) bool {
+		switch r {
+		case ';', '&', '|', '\n':
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func shellFields(segment string) []string {
+	fields := strings.Fields(segment)
+	for i, f := range fields {
+		fields[i] = strings.Trim(f, "'\"")
+	}
+	return fields
+}
+
+func skipEnvAssignments(fields []string) []string {
+	for len(fields) > 0 && strings.Contains(fields[0], "=") && !strings.HasPrefix(fields[0], "-") {
+		fields = fields[1:]
+	}
+	return fields
+}
+
+func rmRecursiveForce(args []string) bool {
+	recursive := false
+	force := false
+	for _, arg := range args {
+		switch arg {
+		case "--recursive":
+			recursive = true
+		case "--force":
+			force = true
+		default:
+			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+				recursive = recursive || strings.ContainsAny(arg, "rR")
+				force = force || strings.Contains(arg, "f")
+			}
+		}
+	}
+	return recursive && force
+}
+
+func hasRecursiveFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--recursive" || arg == "-R" {
+			return true
+		}
+		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, "R") {
+			return true
+		}
+	}
+	return false
+}
+
+func dangerousGit(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	if args[0] == "reset" {
+		for _, arg := range args[1:] {
+			if arg == "--hard" {
+				return true
+			}
+		}
+	}
+	if args[0] == "clean" {
+		force := false
+		dirs := false
+		dryRun := false
+		for _, arg := range args[1:] {
+			if arg == "--dry-run" || arg == "-n" {
+				dryRun = true
+			}
+			if arg == "--force" {
+				force = true
+			}
+			if arg == "-d" {
+				dirs = true
+			}
+			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+				force = force || strings.Contains(arg, "f")
+				dirs = dirs || strings.Contains(arg, "d")
+				dryRun = dryRun || strings.Contains(arg, "n")
+			}
+		}
+		return force && dirs && !dryRun
+	}
+	return false
 }
 
 func stringArg(args map[string]any, key string) (string, bool) {

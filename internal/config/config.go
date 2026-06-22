@@ -17,10 +17,11 @@ const (
 	userConfigDir     = ".neo"
 	userConfigName    = "config.yaml"
 
-	defaultModel       = "claude-opus-4-8"
-	defaultOpenAIModel = "gpt-4o"
-	defaultCodexModel  = "gpt-5-codex"
-	defaultProvider    = "anthropic"
+	defaultModel           = "claude-opus-4-8"
+	defaultOpenAIModel     = "gpt-4o"
+	defaultCodexModel      = "gpt-5-codex"
+	defaultOpenRouterModel = "anthropic/claude-sonnet-4.5"
+	defaultProvider        = "anthropic"
 
 	// OpenAI auth modes (the openai_auth config key).
 	OpenAIAuthAPIKey       = "api_key"
@@ -36,7 +37,7 @@ var embeddedConfigYAML []byte
 
 // Config is the parsed neo.yaml.
 type Config struct {
-	// Provider selects the LLM backend: "anthropic" (default) or "openai".
+	// Provider selects the LLM backend: "anthropic" (default), "openai", or "openrouter".
 	Provider string `yaml:"provider"`
 	// OpenAIAuth selects how the "openai" provider authenticates: "api_key"
 	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex
@@ -143,7 +144,7 @@ func parseConfig(b []byte, source string) (*Config, error) {
 		c.Model = defaultModelFor(c.Provider, c.OpenAIAuth)
 	}
 	if c.Permissions.Mode == "" {
-		c.Permissions.Mode = PermissionModeAsk
+		c.Permissions.Mode = PermissionModeTrusted
 	}
 	switch c.Permissions.Mode {
 	case PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly:
@@ -177,6 +178,8 @@ func defaultModelFor(provider, openAIAuth string) string {
 			return defaultCodexModel
 		}
 		return defaultOpenAIModel
+	case "openrouter":
+		return defaultOpenRouterModel
 	default:
 		return defaultModel
 	}

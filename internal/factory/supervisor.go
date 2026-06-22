@@ -15,9 +15,9 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 )
 
-// StepAgent runs a resolved agent step against an input in dir, streaming
+// StepAgent runs a resolved agent prompt against an input in dir, streaming
 // events, returning the final message. NodeID identifies the execution so
-// child run_step calls attribute correctly.
+// child agent calls attribute correctly.
 type StepAgent interface {
 	RunAgentStep(ctx context.Context, step Step, dir, input string, nodeID int, events chan<- AgentEvent) (string, error)
 }
@@ -65,8 +65,7 @@ func NewSupervisor(agent StepAgent, b Budget, resolver Resolver) *Supervisor {
 }
 
 // Run starts the root step with the user's goal and blocks until the tree
-// finishes. Everything below the root happens through run_step calls the
-// root agent makes. Close(Events) afterwards is the caller's choice.
+// finishes. Close(Events) afterwards is the caller's choice.
 func (s *Supervisor) Run(ctx context.Context, dir, rootStep, goal string) (string, error) {
 	res := s.RunStep(ctx, 0, dir, rootStep, goal)
 	if !res.Ok {
@@ -75,7 +74,7 @@ func (s *Supervisor) Run(ctx context.Context, dir, rootStep, goal string) (strin
 	return res.Output, nil
 }
 
-// RunStep resolves and executes a named step on behalf of caller node.
+// RunStep resolves and executes a named legacy step on behalf of caller node.
 // Both kinds become nodes in the tree (so the UI shows everything); only
 // agent steps consume the agent budget. Denials and failures return
 // as results with the reason — the calling agent reads why and re-plans.
@@ -111,6 +110,43 @@ func (s *Supervisor) RunStep(ctx context.Context, caller int, dir, name, input s
 	return StepResult{Ok: ok, Output: out, Kind: step.Kind,
 		Took: time.Since(start).Round(time.Second).String()}
 }
+
+// RunAgentPrompt starts a fresh subagent with a self-contained prompt. This is
+// the chat-native delegation path: no named/static step file is involved, but
+// the execution still participates in the supervisor tree and budgets.
+func (s *Supervisor) RunAgentPrompt(ctx context.Context, caller int, dir, prompt string) StepResult {
+	start := time.Now()
+	fail := func(msg string) StepResult {
+		return StepResult{Ok: false, Output: msg, Kind: "agent", Took: "0s"}
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return fail("agent: missing required input: prompt")
+	}
+	step := Step{
+		Name:   "agent",
+		Kind:   "agent",
+		Prompt: dynamicAgentSystemPrompt,
+		Tools:  dynamicAgentTools,
+	}
+	if err := s.admit(caller, step.Kind); err != nil {
+		return fail(err.Error())
+	}
+	id := s.register(caller, step.Name, step.Kind, prompt)
+	s.attribute(id, AgentEvent{Kind: "start"})
+	out, ok := s.runAgent(ctx, id, step, dir, prompt)
+	s.finish(id, out, ok)
+	return StepResult{Ok: ok, Output: out, Kind: step.Kind,
+		Took: time.Since(start).Round(time.Second).String()}
+}
+
+const dynamicAgentSystemPrompt = `You are a focused subagent spawned by Neo's chat coordinator.
+
+You have no memory of the parent conversation except the prompt you receive. Follow that prompt exactly, use tools as needed, and return a concise report with evidence. Do not commit changes unless explicitly asked.`
+
+// dynamicAgentTools is the default role for chat-spawned subagents. It
+// intentionally omits "agent" so subagents cannot spawn further subagents
+// unless a future explicit role opts into that power.
+var dynamicAgentTools = []string{"bash", "read_file", "write_file", "edit_file", "grep", "glob"}
 
 // admit is the cage: depth and fanout for every step; agent-count only for
 // agent steps (scripts are cheap; their cost is wall time, capped by
@@ -258,43 +294,66 @@ func (s *Supervisor) Snapshot() []NodeView {
 	return views
 }
 
-// RunStepTool exposes run_step to the model through neo's tool registry.
-// Granted per role by step-prompt frontmatter. CallerNode is bound per
-// agent-loop instance so children attribute correctly.
-type RunStepTool struct {
+// AgentTool exposes subagent delegation to the model through neo's tool registry.
+// CallerNode is bound per agent-loop instance so children attribute correctly.
+type AgentTool struct {
 	Sup        *Supervisor
 	CallerNode int
 	Dir        string
 }
 
-func (RunStepTool) Name() string { return "run_step" }
+func (AgentTool) Name() string { return "agent" }
 
-func (RunStepTool) Spec() llm.ToolSpec {
+func (AgentTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
-		Name: "run_step",
-		Description: `Run a named step (a sub-agent or script) with an input; returns {"ok","output","kind","took"}.
-The step has NO memory of this conversation — include everything it needs in input.
-ok=false: the step failed, timed out, or was denied (output says why; re-plan).
-ok=true: it completed — judge the output's content yourself.
-Enumerate available steps with name "list".`,
+		Name: "agent",
+		Description: `Spawn a fresh subagent with a self-contained prompt; returns {"ok","output","kind","took"}.
+The subagent has NO memory of this conversation — include everything it needs in the prompt.
+ok=false: the subagent failed, timed out, or was denied (output says why; re-plan).
+ok=true: it completed — judge the output's content yourself.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"name":  map[string]any{"type": "string", "description": "Bare step name, e.g. worker, verify, triage, checks, list"},
-				"input": map[string]any{"type": "string", "description": "Self-contained task input for the step"},
+				"prompt":      map[string]any{"type": "string", "description": "Self-contained prompt for the subagent"},
+				"max_retries": map[string]any{"type": "integer", "description": "Optional retry count for subagent execution failures only; does not judge task success"},
 			},
-			"required": []string{"name"},
+			"required": []string{"prompt"},
 		},
 	}
 }
 
-func (t RunStepTool) Run(ctx context.Context, input map[string]any) (string, error) {
-	name, _ := input["name"].(string)
-	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("run_step: missing required input: name")
+func (t AgentTool) Run(ctx context.Context, input map[string]any) (string, error) {
+	prompt, _ := input["prompt"].(string)
+	if strings.TrimSpace(prompt) == "" {
+		return "", fmt.Errorf("agent: missing required input: prompt")
 	}
-	task, _ := input["input"].(string)
-	res := t.Sup.RunStep(ctx, t.CallerNode, t.Dir, name, task)
+	maxRetries := parseRetryCount(input["max_retries"])
+	var res StepResult
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		res = t.Sup.RunAgentPrompt(ctx, t.CallerNode, t.Dir, prompt)
+		if res.Ok || attempt == maxRetries {
+			break
+		}
+	}
 	return fmt.Sprintf("{\"ok\":%t,\"kind\":%q,\"took\":%q}\n%s",
 		res.Ok, res.Kind, res.Took, res.Output), nil
+}
+
+func parseRetryCount(v any) int {
+	var n int
+	switch x := v.(type) {
+	case int:
+		n = x
+	case int64:
+		n = int(x)
+	case float64:
+		n = int(x)
+	}
+	if n < 0 {
+		return 0
+	}
+	if n > 5 {
+		return 5
+	}
+	return n
 }

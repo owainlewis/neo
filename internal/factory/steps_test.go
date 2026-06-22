@@ -90,45 +90,13 @@ Step one.`, 0o644)
 	}
 }
 
-func TestResolveProjectOverridesEmbedded(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "worker.md"), "Custom worker.", 0o644)
-
-	st, err := Resolver{Paths: []string{dir}}.Resolve("worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Prompt != "Custom worker." {
-		t.Fatalf("project step did not override embedded: %q", st.Prompt)
-	}
-}
-
-func TestResolveEmbeddedDefaults(t *testing.T) {
+func TestResolverHasNoEmbeddedDefaults(t *testing.T) {
 	r := Resolver{}
-	for _, name := range []string{"orchestrator", "worker", "verify", "triage"} {
-		st, err := r.Resolve(name)
-		if err != nil {
-			t.Fatalf("embedded %s: %v", name, err)
-		}
-		if st.Kind != "agent" || st.Prompt == "" || len(st.Tools) == 0 {
-			t.Fatalf("embedded %s incomplete: %+v", name, st)
-		}
+	if names := r.List(); len(names) != 0 {
+		t.Fatalf("default static steps should not be advertised: %v", names)
 	}
-	// Only the orchestrator and worker may delegate.
-	for name, want := range map[string]bool{"orchestrator": true, "worker": true, "verify": false, "triage": false} {
-		st, _ := r.Resolve(name)
-		if got := slices.Contains(st.Tools, "run_step"); got != want {
-			t.Errorf("%s run_step grant = %v, want %v", name, got, want)
-		}
-	}
-	// Read-only roles must not carry write tools.
-	for _, name := range []string{"verify", "triage"} {
-		st, _ := r.Resolve(name)
-		for _, tool := range st.Tools {
-			if tool == "write_file" || tool == "edit_file" {
-				t.Errorf("%s grants %s; verification must be read-only", name, tool)
-			}
-		}
+	if _, err := r.Resolve("worker"); err == nil {
+		t.Fatal("worker should not resolve without a project step")
 	}
 }
 
@@ -139,11 +107,6 @@ func TestCatalog(t *testing.T) {
 description: "a custom step"
 ---
 Hi.`, 0o644)
-	// Project worker overrides the embedded default.
-	writeFile(t, filepath.Join(dir, "worker.md"), `---
-description: "project worker"
----
-Work.`, 0o644)
 
 	cat := Resolver{Paths: []string{dir}}.Catalog()
 	byName := map[string]Step{}
@@ -156,26 +119,25 @@ Work.`, 0o644)
 	if st := byName["checks"]; st.Kind != "script" || st.Description != "" {
 		t.Fatalf("checks = %+v", st)
 	}
-	if st := byName["worker"]; st.Description != "project worker" {
-		t.Fatalf("project step did not win: %+v", st)
-	}
-	// Embedded defaults all carry descriptions.
-	for _, name := range []string{"orchestrator", "verify", "triage"} {
-		if byName[name].Description == "" {
-			t.Errorf("embedded %s has no description", name)
-		}
+	if _, ok := byName["worker"]; ok {
+		t.Fatalf("embedded worker should not appear in catalog: %+v", byName["worker"])
 	}
 }
 
-func TestListIncludesAllSources(t *testing.T) {
+func TestListIncludesProjectSourcesOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "checks"), "#!/bin/sh\n", 0o755)
 	writeFile(t, filepath.Join(dir, "custom.md"), "Hi.", 0o644)
 
 	names := Resolver{Paths: []string{dir}}.List()
-	for _, want := range []string{"checks", "custom", "orchestrator", "worker", "verify", "triage"} {
+	for _, want := range []string{"checks", "custom"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("List() missing %q: %v", want, names)
+		}
+	}
+	for _, gone := range []string{"orchestrator", "worker", "verify", "triage"} {
+		if slices.Contains(names, gone) {
+			t.Errorf("List() unexpectedly includes %q: %v", gone, names)
 		}
 	}
 }

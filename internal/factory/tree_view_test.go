@@ -8,17 +8,17 @@ import (
 
 func TestRenderTreeShape(t *testing.T) {
 	nodes := []NodeView{
-		{ID: 1, Parent: 0, Step: "orchestrator", Kind: "agent", Task: "work the backlog", Elapsed: 3*time.Minute + 12*time.Second, LastLine: "run_step: worker"},
-		{ID: 2, Parent: 1, Step: "worker", Kind: "agent", Task: "#12 invite teammate", Elapsed: 2 * time.Minute, LastLine: "bash: just test"},
-		{ID: 3, Parent: 2, Step: "verify", Kind: "agent", Task: "PR #34", Done: true, Elapsed: 31 * time.Second},
+		{ID: 1, Parent: 0, Step: "agent", Kind: "agent", Task: "work the backlog", Elapsed: 3*time.Minute + 12*time.Second, LastLine: "agent: review PR #34"},
+		{ID: 2, Parent: 1, Step: "agent", Kind: "agent", Task: "#12 invite teammate", Elapsed: 2 * time.Minute, LastLine: "bash: just test"},
+		{ID: 3, Parent: 2, Step: "agent", Kind: "agent", Task: "PR #34", Done: true, Elapsed: 31 * time.Second},
 		{ID: 4, Parent: 1, Step: "checks", Kind: "script", Task: "34", Done: true, Err: "CHECKS FAILING", Elapsed: 2 * time.Second},
 	}
 	out := RenderTree(nodes)
 
 	for _, want := range []string{
-		"● orchestrator",
-		"├─ ● worker",
-		"└─ ✓ verify",
+		"● agent",
+		"├─ ● agent",
+		"└─ ✓ agent",
 		"└─ ✗ checks",
 		"bash: just test",
 		"3m12s",
@@ -28,7 +28,7 @@ func TestRenderTreeShape(t *testing.T) {
 		}
 	}
 	// Done nodes don't show a status line; live ones do.
-	if strings.Count(out, "run_step: worker") != 1 {
+	if strings.Count(out, "agent: review PR #34") != 1 {
 		t.Errorf("live root should show its last line once:\n%s", out)
 	}
 }

@@ -119,7 +119,7 @@ func TestPermissionsGuideExplainsModes(t *testing.T) {
 		"`ask`",
 		"`trusted`",
 		"`readonly`",
-		"To turn approval prompts off",
+		"high-risk bash commands ask first",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("permissions guide missing %q", want)

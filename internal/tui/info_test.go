@@ -117,6 +117,25 @@ func TestSlashCommand_MemoryReadonlyDoesNotWrite(t *testing.T) {
 	}
 }
 
+func TestSlashCommand_MemoryBusyDoesNotWrite(t *testing.T) {
+	m := makeTestModel()
+	m.projectRoot = t.TempDir()
+	m.busy = true
+
+	m.handleSlashCommand("/memory keep release notes in sync")
+
+	eb, ok := m.blocks[0].(errorBlock)
+	if !ok {
+		t.Fatalf("expected errorBlock, got %T", m.blocks[0])
+	}
+	if !strings.Contains(eb.err.Error(), "while a turn is running") {
+		t.Fatalf("unexpected error: %v", eb.err)
+	}
+	if _, err := os.Stat(filepath.Join(m.projectRoot, "memory.md")); !os.IsNotExist(err) {
+		t.Fatalf("memory file should not exist, stat err = %v", err)
+	}
+}
+
 func TestHelpBlock_HidesMemoryWhenDisabled(t *testing.T) {
 	m := makeTestModel()
 	m.memoryEnabled = false
@@ -314,6 +333,47 @@ func TestApprovalPromptRepliesFromKeypress(t *testing.T) {
 	}
 	if m.approval != nil {
 		t.Fatal("expected approval to clear")
+	}
+}
+
+func TestApprovalAlwaysAllowSkipsLaterPrompts(t *testing.T) {
+	m := makeTestModel()
+
+	// First call: grant "always" for this bash command.
+	reply := make(chan bool, 1)
+	m.Update(approvalRequestMsg{
+		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "go test ./..."}},
+		reply: reply,
+	})
+	if m.approval == nil {
+		t.Fatal("expected first call to prompt")
+	}
+	m.Update(keyPress('a'))
+	if got := <-reply; !got {
+		t.Fatal("expected always-allow to approve the call")
+	}
+
+	// A later go test invocation must auto-approve without a prompt.
+	reply2 := make(chan bool, 1)
+	m.Update(approvalRequestMsg{
+		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "go test -run X"}},
+		reply: reply2,
+	})
+	if m.approval != nil {
+		t.Fatal("granted command should not prompt again")
+	}
+	if got := <-reply2; !got {
+		t.Fatal("granted command should auto-approve")
+	}
+
+	// An unrelated command still prompts.
+	reply3 := make(chan bool, 1)
+	m.Update(approvalRequestMsg{
+		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "rm -rf build"}},
+		reply: reply3,
+	})
+	if m.approval == nil {
+		t.Fatal("unrelated command should still prompt")
 	}
 }
 

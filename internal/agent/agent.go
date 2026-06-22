@@ -72,7 +72,7 @@ type Agent struct {
 
 func New(cfg Config) *Agent {
 	if cfg.MaxTurns == 0 {
-		cfg.MaxTurns = 50
+		cfg.MaxTurns = 100
 	}
 	if cfg.Tools == nil {
 		cfg.Tools = tools.NewRegistry()

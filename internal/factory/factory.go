@@ -1,8 +1,8 @@
-// Package factory turns neo into a software factory: an AI orchestrator
-// plans and delegates via a single tool (run_step); steps are either agent
-// prompts or scripts, indistinguishable to the caller; a Go supervisor
-// enforces budgets and streams every event to the UI; GitHub Issues hold
-// all durable state (the steps talk to it with gh via bash).
+// Package factory supervises chat-spawned subagents. The public model-facing
+// surface is the agent tool: the coordinator writes a self-contained prompt,
+// the supervisor enforces depth/fanout/agent/time budgets, and the UI receives
+// an event tree for live progress. Legacy project-local step resolution remains
+// internal support code, but default named steps are no longer advertised.
 //
 // Division of labor:
 //
@@ -21,7 +21,7 @@ import (
 // Budget is the cage. Enforced by the runtime regardless of what any agent
 // asks for. Agent-count is tree-wide; the rest are per node.
 type Budget struct {
-	MaxDepth      int           // orchestrator=0, workers=1, sub-workers=2
+	MaxDepth      int           // coordinator=0, children=1, grandchildren=2
 	MaxChildren   int           // per node
 	MaxAgents     int           // tree-wide cap on agent steps
 	MaxWall       time.Duration // per agent step
@@ -39,7 +39,7 @@ func DefaultBudget() Budget {
 	}
 }
 
-// AgentEvent is one observation from a running step. Lifecycle kinds frame
+// AgentEvent is one observation from a running agent. Lifecycle kinds frame
 // each node: "start" when it registers, then "done" (completed) or "fail"
 // (errored, timed out, denied) exactly once at the end. Everything in
 // between ("tool", "text", "error", "usage") is status.
@@ -62,7 +62,7 @@ type Event struct {
 	Ev     AgentEvent `json:"ev"`
 }
 
-// Node is one step execution in the tree — agent or script.
+// Node is one subagent/script execution in the tree.
 type Node struct {
 	ID      int
 	Parent  int // 0 = the root's virtual parent

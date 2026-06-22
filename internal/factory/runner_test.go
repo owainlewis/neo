@@ -24,17 +24,30 @@ func TestRegistryIsTheRole(t *testing.T) {
 	}
 
 	workerLike := Step{Name: "worker", Kind: "agent",
-		Tools: []string{"bash", "read_file", "write_file", "edit_file", "run_step"}}
+		Tools: []string{"bash", "read_file", "write_file", "edit_file"}}
 	names = r.registry(workerLike, t.TempDir(), 1).Names()
-	if !slices.Contains(names, "run_step") || !slices.Contains(names, "write_file") {
+	if slices.Contains(names, "agent") || !slices.Contains(names, "write_file") {
 		t.Fatalf("worker registry = %v", names)
 	}
 
-	// No frontmatter tools = observation only, never run_step.
+	// Static step definitions can still explicitly opt into nested delegation.
+	nestedLike := Step{Name: "nested", Kind: "agent", Tools: []string{"read_file", "agent"}}
+	names = r.registry(nestedLike, t.TempDir(), 1).Names()
+	if !slices.Contains(names, "agent") || !slices.Contains(names, "read_file") {
+		t.Fatalf("nested registry = %v", names)
+	}
+
+	// No frontmatter tools = observation only, never agent delegation.
 	bare := Step{Name: "bare", Kind: "agent"}
 	names = r.registry(bare, t.TempDir(), 1).Names()
-	if slices.Contains(names, "write_file") || slices.Contains(names, "run_step") {
+	if slices.Contains(names, "write_file") || slices.Contains(names, "agent") {
 		t.Fatalf("default registry too permissive: %v", names)
+	}
+}
+
+func TestDynamicAgentToolsOmitNestedAgentDelegation(t *testing.T) {
+	if slices.Contains(dynamicAgentTools, "agent") {
+		t.Fatalf("dynamic chat subagents should not receive nested agent delegation by default: %v", dynamicAgentTools)
 	}
 }
 
@@ -113,10 +126,10 @@ func TestTranslateStatusLines(t *testing.T) {
 	if !ok || ev.Body != "$ just test" {
 		t.Fatalf("bash status = %+v", ev)
 	}
-	// run_step calls are dropped: the child's own start event renders it.
-	if _, ok := translate(agent.Event{Kind: agent.EventToolCall, Name: "run_step",
-		Args: map[string]any{"name": "verify"}}); ok {
-		t.Fatal("run_step call should not produce a status event")
+	// agent calls are dropped: the child's own start event renders it.
+	if _, ok := translate(agent.Event{Kind: agent.EventToolCall, Name: "agent",
+		Args: map[string]any{"prompt": "verify"}}); ok {
+		t.Fatal("agent call should not produce a status event")
 	}
 	ev, ok = translate(agent.Event{Kind: agent.EventToolCall, Name: "read_file",
 		Args: map[string]any{"path": "main.go"}})

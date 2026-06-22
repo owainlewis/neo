@@ -19,12 +19,14 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
 	"github.com/owainlewis/neo/internal/llm/openai"
+	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/tui"
+	"github.com/owainlewis/neo/internal/workflow"
 	"github.com/owainlewis/neo/internal/workspace"
 )
 
@@ -36,7 +38,19 @@ const chatSystemPrompt = `You are neo, a focused coding agent.
 
 Operate in the user's current working directory. Use the available tools to read files,
 inspect code with bash, and make edits. Prefer small, verified changes. Run tests after
-you change code. When you finish a task, briefly summarize what changed.`
+you change code. When you finish a task, briefly summarize what changed.
+
+For multi-step tasks, or when the user says to run a workflow, create a visible
+workflow checklist with the workflow tool before doing the work. If the user
+provided numbered steps, preserve those steps. Mark each high-level item running
+before working on it, and mark it done, failed, or skipped based on the outcome.
+When the user asks for a coordinator-worker or orchestrated-agent flow, treat the
+chat agent as the coordinator: plan first, delegate suitable self-contained tasks
+to subagents with the agent tool, inspect their results, and keep workflow
+statuses based on evidence. Do not mirror every tool call manually; Neo attaches
+tool and subagent activity to the active workflow item automatically. Write
+subagent prompts dynamically from the user's goal and current context; use the
+normal tools directly when delegation is unnecessary.`
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -59,10 +73,6 @@ func main() {
 			os.Exit(2)
 		}
 		resumeSession(ctx, os.Args[2])
-	case "factory":
-		runFactory(ctx, os.Args[2:])
-	case "step":
-		runStepCmd(ctx, os.Args[2:])
 	case "login":
 		runLogin(ctx)
 	case "logout":
@@ -84,18 +94,17 @@ USAGE:
   neo chat           Interactive chat mode (explicit)
   neo sessions       List saved chat sessions
   neo resume <id>    Resume a saved chat session
-  neo factory "<goal>"     Run the autonomous factory loop (orchestrator + workers)
-  neo step <name> "<in>"   Run a single step (steps/<name>.md or executable steps/<name>)
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials
   neo help           Show this help
 
 CONFIG:
   Reads neo.yaml (cwd) → ~/.neo/config.yaml → embedded defaults.
-  Select a backend with the "provider" key: "anthropic" (default) or "openai".
+  Select a backend with the "provider" key: "anthropic" (default), "openai", or "openrouter".
 
   ANTHROPIC_API_KEY    required when provider is "anthropic"
   OPENAI_API_KEY       required when provider is "openai" with api_key auth
+  OPENROUTER_API_KEY   required when provider is "openrouter"
 
   To use a ChatGPT subscription instead of an API key, set in neo.yaml:
     provider: openai
@@ -119,13 +128,9 @@ func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
 // cacheable base (the static instructions plus the skill catalog) followed by
 // uncached dynamic session context blocks. Splitting it this way lets prompt
 // caching reuse the base across turns and sessions while the project tail
-// varies. Discovery errors are non-fatal — they warn and fall back to the
-// blocks built so far rather than failing to start.
-//
-// It returns both the flattened string and the blocks so the agent can pass
-// whichever a provider supports. stepsSection, when non-empty, is appended as
-// its own uncached block: the available steps vary per project and session.
-func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, stepsSection string) (string, []llm.SystemBlock) {
+// varies. Discovery errors are non-fatal, warning and falling back to the blocks
+// built so far rather than failing to start.
+func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []llm.SystemBlock) {
 	// Base block: static instructions + skill catalog. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
 	base := skills.Augment(chatSystemPrompt, sk)
@@ -157,10 +162,6 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, stepsSection 
 			blocks = append(blocks, llm.SystemBlock{Text: section})
 		}
 	}
-	if stepsSection != "" {
-		blocks = append(blocks, llm.SystemBlock{Text: stepsSection})
-	}
-
 	var b strings.Builder
 	for _, blk := range blocks {
 		b.WriteString(blk.Text)
@@ -189,10 +190,12 @@ func mustProvider(cfg *config.Config) llm.Provider {
 		} else {
 			prov, err = openai.New()
 		}
+	case "openrouter":
+		prov, err = openrouter.New()
 	case "anthropic", "":
 		prov, err = anthropic.New()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\" or \"openai\")\n", cfg.Provider)
+		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\", \"openai\", or \"openrouter\")\n", cfg.Provider)
 		os.Exit(1)
 	}
 	if err != nil {
@@ -313,20 +316,20 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
 	root := workspace.Root(cwd)
-	// The chat agent is the primary orchestrator: it gets run_step (as caller
-	// node 0) so it can delegate to steps directly from the conversation, and
-	// the system prompt advertises which steps exist so "run the validate
-	// step" or "run these steps: branch, code, review, pr" works in plain
-	// language. Sequencing is the agent's judgment, not a stored artifact.
+	// The chat agent is the primary coordinator. It gets the agent tool (as
+	// caller node 0) so it can spawn amnesiac subagents with self-contained
+	// prompts directly from the conversation. Sequencing is the agent's
+	// judgment, not a stored workflow artifact.
 	var extra []tools.Tool
-	var steps string
 	var stepEvents <-chan factory.Event
+	var workflowEvents <-chan workflow.Event
+	wf := make(chan workflow.Event, 128)
+	workflowEvents = wf
+	extra = append(extra, workflow.Tool{Events: wf})
 	if cwd != "" {
-		resolver := factory.Resolver{Paths: factory.DefaultStepPaths(root)}
-		var rst factory.RunStepTool
-		rst, stepEvents = chatRunStepTool(prov, cfg, cwd, root, resolver)
-		extra = append(extra, rst)
-		steps = stepsSection(resolver)
+		var at factory.AgentTool
+		at, stepEvents = chatAgentTool(prov, cfg, cwd, root)
+		extra = append(extra, at)
 	}
 	reg := newRegistry(cwd, root, extra...)
 
@@ -349,7 +352,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// (via chatSystem), and the same slice drives $name expansion in the TUI.
 	sk := loadSkills(cfg, cwd)
 
-	system, systemBlocks := chatSystem(cfg, cwd, sk, steps)
+	system, systemBlocks := chatSystem(cfg, cwd, sk)
 	ag := agent.New(agent.Config{
 		Model:        model,
 		System:       system,
@@ -376,8 +379,9 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		tui.WithSessions(store, sess, func(resumed *session.Session) {
 			sess = resumed
 		}),
-		tui.WithModelChoices(modelChoices(cfg)),
+		tui.WithModelChoices(modelChoices(ctx, cfg)),
 		tui.WithStepEvents(stepEvents),
+		tui.WithWorkflowEvents(workflowEvents),
 	); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -399,7 +403,7 @@ func sessionModel(cfg *config.Config, meta session.Metadata) string {
 	return cfg.Model
 }
 
-func modelChoices(cfg *config.Config) []tui.ModelChoice {
+func modelChoices(ctx context.Context, cfg *config.Config) []tui.ModelChoice {
 	switch cfg.Provider {
 	case "openai":
 		if cfg.SubscriptionAuth() {
@@ -417,11 +421,43 @@ func modelChoices(cfg *config.Config) []tui.ModelChoice {
 			{ID: "gpt-4o", Name: "GPT-4o", Description: "Fast multimodal GPT-4o model"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},
 		}
+	case "openrouter":
+		return openRouterModelChoices(ctx)
 	default:
 		return []tui.ModelChoice{
 			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Description: "Default Anthropic model"},
 		}
 	}
+}
+
+// openRouterModelChoices fetches the live OpenRouter model catalogue. Model ids
+// move fast, so the picker is populated from OpenRouter's /models endpoint rather
+// than a hardcoded list. On failure (offline, timeout, API change) it falls back
+// to the provider default so the picker still works. The fetch is time-boxed so
+// startup never hangs on a slow network.
+func openRouterModelChoices(ctx context.Context) []tui.ModelChoice {
+	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	models, err := openrouter.Models(fetchCtx, nil)
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not fetch OpenRouter models (%v); using default\n", err)
+		}
+		return []tui.ModelChoice{
+			{ID: openrouter.DefaultModel, Name: openrouter.DefaultModel, Description: "Default OpenRouter model"},
+		}
+	}
+
+	choices := make([]tui.ModelChoice, 0, len(models))
+	for _, m := range models {
+		name := m.Name
+		if name == "" {
+			name = m.ID
+		}
+		choices = append(choices, tui.ModelChoice{ID: m.ID, Name: name, Description: m.Description})
+	}
+	return choices
 }
 
 func listSessions(ctx context.Context) {

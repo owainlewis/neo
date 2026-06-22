@@ -6,14 +6,45 @@ Neo exposes a small built-in tool surface to the model.
 
 | Tool | Description |
 | --- | --- |
+| `agent` | Spawn a fresh subagent with a self-contained prompt; returns {"ok","output","kind","took"}.
+The subagent has NO memory of this conversation — include everything it needs in the prompt.
+ok=false: the subagent failed, timed out, or was denied (output says why; re-plan).
+ok=true: it completed — judge the output's content yourself. |
 | `bash` | Run a shell command via /bin/bash -c. Returns combined stdout+stderr. Use for git, tests, builds, file inspection beyond Read. |
 | `edit_file` | Replace exactly one occurrence of old_string with new_string in a file. Fails if old_string is missing or appears more than once. |
 | `glob` | Find files under the workspace root using a glob pattern. Supports ** for recursive matches. Returns JSON: {matches:[path],truncated,count}. |
 | `grep` | Search text files under the workspace with a regular expression. Returns JSON: {matches:[{path,line,text,context_before?,context_after?}],truncated,count}. |
 | `read_file` | Read a file from disk. Returns up to ~256KB. Use offset/limit (1-indexed line numbers) to page through larger files. |
+| `workflow` | Create or update the visible workflow checklist. Use for multi-step tasks; Neo attaches tool and subagent activity automatically. |
 | `write_file` | Write content to a file, creating parent directories. Overwrites if exists. |
 
 ## Schemas
+
+### `agent`
+
+Spawn a fresh subagent with a self-contained prompt; returns {"ok","output","kind","took"}.
+The subagent has NO memory of this conversation — include everything it needs in the prompt.
+ok=false: the subagent failed, timed out, or was denied (output says why; re-plan).
+ok=true: it completed — judge the output's content yourself.
+
+```json
+{
+  "properties": {
+    "max_retries": {
+      "description": "Optional retry count for subagent execution failures only; does not judge task success",
+      "type": "integer"
+    },
+    "prompt": {
+      "description": "Self-contained prompt for the subagent",
+      "type": "string"
+    }
+  },
+  "required": [
+    "prompt"
+  ],
+  "type": "object"
+}
+```
 
 ### `bash`
 
@@ -140,6 +171,59 @@ Read a file from disk. Returns up to ~256KB. Use offset/limit (1-indexed line nu
   },
   "required": [
     "path"
+  ],
+  "type": "object"
+}
+```
+
+### `workflow`
+
+Create or update the visible workflow checklist. Use for multi-step tasks; Neo attaches tool and subagent activity automatically.
+
+```json
+{
+  "properties": {
+    "action": {
+      "enum": [
+        "create",
+        "start",
+        "complete",
+        "fail",
+        "skip",
+        "clear"
+      ],
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action"
   ],
   "type": "object"
 }

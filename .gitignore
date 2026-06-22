@@ -5,3 +5,4 @@
 /neo
 .DS_Store
 /.neo/events.jsonl
+/.codex-worktrees/

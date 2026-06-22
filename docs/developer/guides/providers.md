@@ -8,7 +8,7 @@ A provider is the adapter between Neo and a model API. Neo speaks its own small 
 
 ## The Problem
 
-Different model APIs use different request shapes, response shapes, tool-call formats, auth methods, retry behavior, and token accounting.
+Different model APIs use different request shapes, response shapes, tool-call formats, auth methods, retry behavior, and token accounting. OpenRouter uses an OpenAI-compatible Chat Completions shape while OpenAI itself uses the newer Responses API in Neo.
 
 Neo should not bake any one provider into the agent loop.
 
@@ -32,6 +32,7 @@ The core loop sends an `llm.Request`. The provider returns an `llm.Response`. Ev
 | `provider: anthropic` | `ANTHROPIC_API_KEY` | `internal/llm/anthropic` |
 | `provider: openai` + `openai_auth: api_key` | `OPENAI_API_KEY` | `internal/llm/openai.Client` |
 | `provider: openai` + `openai_auth: subscription` | `neo login` device-code credentials | `internal/llm/openai.CodexClient` |
+| `provider: openrouter` | `OPENROUTER_API_KEY` | `internal/llm/openrouter` |
 
 ## How Models Are Chosen
 
@@ -51,5 +52,7 @@ In the TUI, `/model` opens a model picker. It changes the active model for the c
 - `internal/llm/provider.go`: provider-neutral types.
 - `internal/llm/anthropic`: Anthropic adapter.
 - `internal/llm/openai`: OpenAI adapters.
+- `internal/llm/chatcompletions`: reusable OpenAI-compatible Chat Completions translation.
+- `internal/llm/openrouter`: OpenRouter adapter wiring.
 - `internal/auth`: subscription credential storage and refresh.
 - `cmd/neo/main.go`: provider selection.
