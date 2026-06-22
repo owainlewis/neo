@@ -126,10 +126,10 @@ func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
 
 // chatSystem builds the chat agent's system prompt as ordered blocks: a stable,
 // cacheable base (the static instructions plus the skill catalog) followed by
-// dynamic project context (AGENTS.md) kept in its own, uncached block. Splitting
-// it this way lets prompt caching reuse the base across turns and sessions while
-// the project tail varies. Discovery errors are non-fatal — they warn and fall
-// back to the blocks built so far rather than failing to start.
+// uncached dynamic session context blocks. Splitting it this way lets prompt
+// caching reuse the base across turns and sessions while the project tail
+// varies. Discovery errors are non-fatal, warning and falling back to the blocks
+// built so far rather than failing to start.
 func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []llm.SystemBlock) {
 	// Base block: static instructions + skill catalog. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
@@ -157,7 +157,11 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []ll
 			blocks = append(blocks, llm.SystemBlock{Text: section})
 		}
 	}
-
+	if doc, ok := projectctx.LoadGitContext(cwd); ok {
+		if section := projectctx.GitSection(doc); section != "" {
+			blocks = append(blocks, llm.SystemBlock{Text: section})
+		}
+	}
 	var b strings.Builder
 	for _, blk := range blocks {
 		b.WriteString(blk.Text)

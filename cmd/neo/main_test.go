@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,6 +119,55 @@ func TestChatSystem_SkipsProjectMemoryWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestChatSystem_IncludesGitContextAsDistinctDynamicBlock(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	runGit(t, root, "config", "user.name", "Neo Test")
+	runGit(t, root, "config", "user.email", "neo@example.com")
+	cwd := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "tracked.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "pkg/tracked.txt")
+	runGit(t, root, "commit", "-m", "seed commit")
+	if err := os.WriteFile(filepath.Join(cwd, "tracked.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	system, blocks := chatSystem(&config.Config{}, cwd, nil)
+
+	if len(blocks) != 2 {
+		t.Fatalf("system blocks = %d, want 2", len(blocks))
+	}
+	if blocks[1].Cache {
+		t.Fatal("expected git block to stay dynamic")
+	}
+	for _, want := range []string{"# Git context", "Branch: main", "M tracked.txt", "seed commit"} {
+		if !strings.Contains(blocks[1].Text, want) {
+			t.Fatalf("git block missing %q\n---\n%s", want, blocks[1].Text)
+		}
+	}
+	if !strings.Contains(system, blocks[1].Text) {
+		t.Fatal("flattened system prompt missing git block")
+	}
+}
+
+func TestChatSystem_SkipsGitContextOutsideRepo(t *testing.T) {
+	cwd := t.TempDir()
+
+	system, blocks := chatSystem(&config.Config{}, cwd, nil)
+
+	if len(blocks) != 1 {
+		t.Fatalf("system blocks = %d, want 1", len(blocks))
+	}
+	if strings.Contains(system, "# Git context") {
+		t.Fatal("git context should be skipped outside a repo")
+	}
+}
+
 func TestSessionModel_HonorsSavedModelForSameProvider(t *testing.T) {
 	cfg := &config.Config{Provider: "openai", Model: "gpt-5.2"}
 	meta := session.Metadata{Provider: "openai", Model: "gpt-5-mini"}
@@ -141,5 +191,14 @@ func TestSessionModel_FallsBackForLegacySessionsWithoutProvider(t *testing.T) {
 	meta := session.Metadata{Model: "gpt-4o"}
 	if got := sessionModel(cfg, meta); got != "claude-opus-4-8" {
 		t.Fatalf("sessionModel = %q, want config model for legacy session", got)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }

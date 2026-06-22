@@ -12,7 +12,7 @@ func TestArchitecturePageDocumentsProviderAndAuthModules(t *testing.T) {
 		"`internal/llm/anthropic/` | Anthropic provider adapter.",
 		"`internal/llm/openai/` | OpenAI provider adapters",
 		"`internal/auth/` | OpenAI ChatGPT/Codex device-code login",
-		"`internal/projectctx/` | AGENTS.md and memory.md discovery plus prompt augmentation.",
+		"`internal/projectctx/` | AGENTS.md, memory.md, and git-context discovery plus prompt augmentation.",
 		"`openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials",
 	} {
 		if !strings.Contains(page, want) {
@@ -63,6 +63,7 @@ func TestPromptCachingPageDocumentsMemoryAsDynamicTail(t *testing.T) {
 		"Static base instructions plus skill catalog",
 		"Dynamic AGENTS.md project context",
 		"Dynamic `memory.md` project context",
+		"Dynamic git context",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("prompt caching page missing %q", want)
