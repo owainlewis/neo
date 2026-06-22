@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,9 +23,11 @@ import (
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
+	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
+	"github.com/owainlewis/neo/internal/workflow"
 	"github.com/owainlewis/neo/internal/workspace"
 )
 
@@ -38,6 +41,7 @@ type Options struct {
 	ProjectRoot     string
 	MemoryEnabled   bool
 	StepEvents      <-chan factory.Event
+	WorkflowEvents  <-chan workflow.Event
 }
 
 type Option func(*Options)
@@ -70,10 +74,14 @@ func WithProjectMemory(root string, enabled bool) Option {
 }
 
 // WithStepEvents subscribes the TUI to the factory supervisor's event
-// stream, which the chat view folds into live step trees while run_step
-// executes.
+// stream, which the chat view folds into live subagent trees while agent
+// calls execute.
 func WithStepEvents(ch <-chan factory.Event) Option {
 	return func(opts *Options) { opts.StepEvents = ch }
+}
+
+func WithWorkflowEvents(ch <-chan workflow.Event) Option {
+	return func(opts *Options) { opts.WorkflowEvents = ch }
 }
 
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
@@ -93,12 +101,19 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 	// Pipe agent events directly into the Bubble Tea program. This avoids a
 	// hand-rolled channel pump and the back-pressure that came with it.
 	ag.SetEventHandler(func(e agent.Event) { p.Send(agentEventMsg{ev: e}) })
-	// Supervisor events (sub-step activity during run_step) arrive the same
+	// Supervisor events (subagent activity during agent calls) arrive the same
 	// way. The channel is already non-blocking on the producer side.
 	if opts.StepEvents != nil {
 		go func() {
 			for ev := range opts.StepEvents {
 				p.Send(stepEventMsg{ev: ev})
+			}
+		}()
+	}
+	if opts.WorkflowEvents != nil {
+		go func() {
+			for ev := range opts.WorkflowEvents {
+				p.Send(workflowEventMsg{ev: ev})
 			}
 		}()
 	}
@@ -124,6 +139,8 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 type sendResultMsg struct{ err error }
 type agentEventMsg struct{ ev agent.Event }
 type stepEventMsg struct{ ev factory.Event }
+type workflowEventMsg struct{ ev workflow.Event }
+type branchMsg struct{ branch string }
 type approvalRequestMsg struct {
 	req   agent.ApprovalRequest
 	reply chan bool
@@ -162,13 +179,20 @@ type model struct {
 	blocks []block
 	md     *glamour.TermRenderer
 
-	busy        bool
-	busySince   time.Time
-	currentTool *toolCallBlock
-	activeTree  *treeBlock         // block receiving new top-level run_step trees
-	treeIndex   map[int]*treeBlock // supervisor node id -> the block holding it
-	approval    *approvalState
-	quitting    bool
+	busy                bool
+	busySince           time.Time
+	currentTool         *toolCallBlock
+	workflow            *workflowBlock
+	workflowVisible     bool
+	autoWorkflowPending bool
+	activeTree          *treeBlock         // block receiving new top-level subagent trees
+	treeIndex           map[int]*treeBlock // supervisor node id -> the block holding it
+	approval            *approvalState
+	// allow holds the rules the user granted via "always allow" during this
+	// session. It is consulted before prompting, so a granted tool/command
+	// stops asking. It is intentionally not persisted.
+	allow    permission.Allowlist
+	quitting bool
 
 	// cancel for the currently in-flight Send, if any.
 	sendCancel context.CancelFunc
@@ -346,6 +370,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case "y", "Y":
 				m.finishApproval(true)
+			case "a", "A":
+				req := permission.Request{ToolName: m.approval.req.ToolName, Args: m.approval.req.Args}
+				rule := permission.RuleFor(req)
+				m.allow.Add(rule)
+				m.finishApproval(true)
+				m.appendBlock(noticeBlock{text: "won't ask again for " + rule.Label() + " this session"})
 			case "n", "N", "esc":
 				m.finishApproval(false)
 			}
@@ -425,6 +455,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// attachments on the message, the rest stays as text.
 			text, images := extractImagePaths(text)
 			m.appendBlock(userBlock{text: rawInput})
+			m.maybeStartWorkflowFromUserText(text)
 			if len(images) > 0 {
 				m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
 			}
@@ -485,6 +516,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.layout()
 				break
 			}
+			if m.workflow != nil {
+				m.workflowVisible = !m.workflowVisible
+				m.layout()
+				break
+			}
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
@@ -501,6 +537,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncInputHeight()
 		}
 
+	case tea.PasteMsg:
+		if m.perms.visible || m.models.visible || m.sessions.visible || m.approval != nil {
+			break
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		cmds = append(cmds, cmd)
+		m.updateInlinePickers()
+		m.syncInputHeight()
+
 	case agentEventMsg:
 		m.handleEvent(msg.ev)
 		// Tie the dot's color to whether a tool is currently running.
@@ -512,6 +558,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case approvalRequestMsg:
 		logx.Debug("tui approval requested", "tool", msg.req.ToolName, "reason", msg.req.Reason)
+		req := permission.Request{ToolName: msg.req.ToolName, Args: msg.req.Args}
+		if m.allow.Allows(req) {
+			msg.reply <- true
+			break
+		}
 		m.approval = &approvalState{req: msg.req, reply: msg.reply}
 		m.appendBlock(approvalBlock{req: msg.req})
 
@@ -525,6 +576,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil && !errors.Is(msg.err, context.Canceled) && !errors.Is(msg.err, agent.ErrMaxTurns) {
 			m.appendBlock(errorBlock{err: msg.err})
 		}
+		cmds = append(cmds, refreshBranch())
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -538,6 +590,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case stepEventMsg:
 		m.handleStepEvent(msg.ev)
+
+	case workflowEventMsg:
+		m.handleWorkflowEvent(msg.ev)
+
+	case branchMsg:
+		if strings.TrimSpace(msg.branch) != "" {
+			m.branch = msg.branch
+		}
 
 	case rotateCaptionMsg:
 		if m.busy {
@@ -574,14 +634,22 @@ func (m *model) View() tea.View {
 	status := m.statusLine()
 	footer := m.footerLine()
 	picker := m.inlinePickerView()
-	inputBar := styInputBar.Width(m.width).Render(m.input.View())
+	// While an approval is pending the input is inert (all keys route to the
+	// y/a/n handler), so the composer is replaced by a focused action bar.
+	bottom := styInputBar.Width(m.width).Render(m.input.View())
+	if m.approval != nil {
+		bottom = m.approvalBarView()
+	}
 
-	parts := []string{
-		m.viewport.View(),
+	parts := []string{m.viewport.View()}
+	if workflow := m.workflowPanelView(); workflow != "" {
+		parts = append(parts, workflow, "")
+	}
+	parts = append(parts,
 		status,
 		"",
-		inputBar,
-	}
+		bottom,
+	)
 	if picker != "" {
 		parts = append(parts, picker)
 	}
@@ -808,7 +876,8 @@ func (m *model) layout() {
 	} else if m.files.visible && len(m.files.matches) > 0 {
 		pickerHeight = len(m.files.matches) + 1
 	}
-	chrome := inputHeight + pickerHeight + 4 // status + footer lines + margin above/below input
+	workflowHeight := m.workflowPanelHeight()
+	chrome := inputHeight + pickerHeight + workflowHeight + 4 // status + footer lines + margin above/below input
 	vpH := m.height - chrome
 	if vpH < 3 {
 		vpH = 3
@@ -833,6 +902,21 @@ func (m *model) appendBlock(b block) {
 	m.refreshViewport()
 }
 
+func (m *model) workflowPanelView() string {
+	if m.workflow == nil || !m.workflowVisible {
+		return ""
+	}
+	return m.workflow.render(m.width, nil)
+}
+
+func (m *model) workflowPanelHeight() int {
+	panel := m.workflowPanelView()
+	if panel == "" {
+		return 0
+	}
+	return strings.Count(panel, "\n") + 2 // panel lines plus one-line margin before status
+}
+
 func (m *model) refreshViewport() {
 	if m.width == 0 {
 		return
@@ -852,14 +936,20 @@ func (m *model) refreshViewport() {
 func (m *model) handleEvent(e agent.Event) {
 	switch e.Kind {
 	case agent.EventAssistantText:
-		m.activeTree = nil // assistant commentary splits step trees
+		m.activeTree = nil // assistant commentary splits subagent trees
 		if strings.TrimSpace(e.Text) != "" {
 			m.appendBlock(textBlock{text: e.Text})
 		}
 	case agent.EventToolCall:
+		if e.Name == "workflow" {
+			// The workflow tool mutates the checklist through workflowEventMsg;
+			// don't show a duplicate generic tool card.
+			break
+		}
+		m.noteWorkflowActivity(toolActivity(e.Name, e.Args))
 		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now()}
 		m.currentTool = &tc
-		if e.Name == "run_step" {
+		if e.Name == "agent" {
 			// The supervisor's "start" event draws this call as a tree
 			// node; no generic tool card.
 			break
@@ -867,14 +957,16 @@ func (m *model) handleEvent(e agent.Event) {
 		m.activeTree = nil
 		m.appendBlock(tc)
 	case agent.EventToolResult:
+		if e.Name == "workflow" {
+			break
+		}
 		elapsed := time.Duration(0)
 		if m.currentTool != nil {
 			elapsed = time.Since(m.currentTool.startAt)
 		}
 		m.currentTool = nil
-		if e.Name == "run_step" {
-			// Success renders in the tree. Failures (including denials and
-			// missing steps, which never become nodes) keep an error card
+		if e.Name == "agent" {
+			// Success renders in the tree. Failures/denials keep an error card
 			// so the output is inspectable.
 			if e.IsError || !runStepOK(e.Text) {
 				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true, elapsed: elapsed})
@@ -894,6 +986,148 @@ func (m *model) handleEvent(e agent.Event) {
 	case agent.EventDone:
 		// handled when sendResultMsg arrives
 	}
+}
+
+var (
+	numberedWorkflowLine = regexp.MustCompile(`^\s*(?:[-*]\s*)?(\d+)[.)]\s+(.+?)\s*$`)
+	bulletWorkflowLine   = regexp.MustCompile(`^\s*[-*]\s+(.+?)\s*$`)
+)
+
+func (m *model) maybeStartWorkflowFromUserText(text string) {
+	lower := strings.ToLower(text)
+	if !strings.Contains(lower, "workflow") {
+		return
+	}
+	var items []workflow.Item
+	for _, line := range strings.Split(text, "\n") {
+		match := numberedWorkflowLine.FindStringSubmatch(line)
+		if len(match) == 3 {
+			itemText := strings.TrimSpace(match[2])
+			if itemText != "" {
+				items = append(items, workflow.Item{ID: match[1], Text: itemText, Status: workflow.Pending})
+			}
+			continue
+		}
+		match = bulletWorkflowLine.FindStringSubmatch(line)
+		if len(match) == 2 {
+			itemText := strings.TrimSpace(match[1])
+			if itemText != "" {
+				items = append(items, workflow.Item{ID: fmt.Sprint(len(items) + 1), Text: itemText, Status: workflow.Pending})
+			}
+		}
+	}
+	if len(items) < 2 {
+		return
+	}
+	m.workflow = &workflowBlock{title: "Workflow", items: items}
+	m.workflowVisible = true
+	m.autoWorkflowPending = true
+	m.layout()
+	m.refreshViewport()
+}
+
+func (m *model) handleWorkflowEvent(ev workflow.Event) {
+	if ev.Action == "clear" {
+		m.workflow = nil
+		m.workflowVisible = true
+		m.layout()
+		m.refreshViewport()
+		return
+	}
+	if ev.Action == "create" {
+		if m.autoWorkflowPending && m.workflow != nil {
+			m.workflow.title = ev.State.Title
+			m.workflow.items = ev.State.Items
+			m.workflow.active = ""
+			m.autoWorkflowPending = false
+			m.layout()
+			m.refreshViewport()
+			return
+		}
+		m.autoWorkflowPending = false
+		wb := &workflowBlock{title: ev.State.Title, items: ev.State.Items}
+		m.workflow = wb
+		m.workflowVisible = true
+		m.layout()
+		m.refreshViewport()
+		return
+	}
+	if m.workflow == nil {
+		return
+	}
+	for i := range m.workflow.items {
+		if m.workflow.items[i].ID != ev.ID {
+			continue
+		}
+		switch ev.Action {
+		case "start":
+			m.workflow.active = ev.ID
+			m.workflow.items[i].Status = workflow.Running
+		case "complete":
+			if m.workflow.active == ev.ID {
+				m.workflow.active = ""
+			}
+			m.workflow.items[i].Status = workflow.Done
+		case "fail":
+			if m.workflow.active == ev.ID {
+				m.workflow.active = ""
+			}
+			m.workflow.items[i].Status = workflow.Failed
+		case "skip":
+			if m.workflow.active == ev.ID {
+				m.workflow.active = ""
+			}
+			m.workflow.items[i].Status = workflow.Skipped
+		}
+		if ev.Detail != "" {
+			m.workflow.items[i].Detail = ev.Detail
+		}
+		m.refreshViewport()
+		return
+	}
+}
+
+func (m *model) noteWorkflowActivity(detail string) {
+	if m.workflow == nil || m.workflow.active == "" || strings.TrimSpace(detail) == "" {
+		return
+	}
+	for i := range m.workflow.items {
+		if m.workflow.items[i].ID == m.workflow.active {
+			m.workflow.items[i].Detail = detail
+			m.refreshViewport()
+			return
+		}
+	}
+}
+
+func toolActivity(name string, args map[string]any) string {
+	switch name {
+	case "bash":
+		if cmd, ok := args["command"].(string); ok && strings.TrimSpace(cmd) != "" {
+			return "$ " + oneLine(cmd)
+		}
+	case "read_file", "write_file":
+		if p, ok := args["path"].(string); ok && strings.TrimSpace(p) != "" {
+			return name + " " + p
+		}
+	case "edit_file":
+		if p, ok := args["path"].(string); ok && strings.TrimSpace(p) != "" {
+			return "edit " + p
+		}
+	case "grep":
+		if pat, ok := args["pattern"].(string); ok && strings.TrimSpace(pat) != "" {
+			return "grep " + pat
+		}
+	case "glob":
+		if pat, ok := args["pattern"].(string); ok && strings.TrimSpace(pat) != "" {
+			return "glob " + pat
+		}
+	case "agent":
+		if prompt, ok := args["prompt"].(string); ok && strings.TrimSpace(prompt) != "" {
+			return "agent " + oneLine(prompt)
+		}
+	}
+	return name
 }
 
 // handleStepEvent folds the supervisor's event stream into tree blocks:
@@ -1032,6 +1266,12 @@ func shortPaths(paths []string) []string {
 		out[i] = filepath.Base(p)
 	}
 	return out
+}
+
+func refreshBranch() tea.Cmd {
+	return func() tea.Msg {
+		return branchMsg{branch: gitBranch()}
+	}
 }
 
 func gitBranch() string {

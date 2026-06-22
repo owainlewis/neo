@@ -3,12 +3,13 @@
 [![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Neo is a fast, minimalist coding agent written in Go.
+Neo is a terminal-first coding agent written in Go for people who want an
+inspectable, fast local tool instead of a hidden browser workflow.
 
-An interactive terminal UI lets you chat with the agent directly — watch it read
-files, run commands, and make edits in real time. The codebase is intentionally
-small and modular: a policy-free core agent loop, with capabilities layered on
-top as independent, feature-flagged modules.
+Run `neo` to open an interactive terminal UI where you can watch the agent read
+files, run commands, and make edits in real time. The codebase stays small on
+purpose: a policy-free core loop, with file, shell, session, and prompt features
+layered on as independent modules.
 
 ![neo splash screen](docs/screenshot.png)
 
@@ -20,6 +21,8 @@ top as independent, feature-flagged modules.
   and permissioned.
 - **Permission modes.** Choose `ask`, `trusted`, or `readonly` depending on how
   much approval you want before Neo runs tools.
+- **Visible workflows.** Ask Neo to run a workflow or provide numbered steps and
+  the TUI shows a live checklist while the agent works.
 - **AGENTS.md support.** Drop an `AGENTS.md` in your project (or `~/.neo/`) and
   its guidance is loaded into the agent's system prompt. Feature-flagged.
 - **Skills.** Reusable prompt snippets in `.neo/skills/<name>/SKILL.md`. Mention
@@ -27,19 +30,18 @@ top as independent, feature-flagged modules.
 - **Modular core.** The agent loop knows nothing about coding, files, or project
   context — capabilities are injected and can be toggled in config.
 
-## Quick Start
+## Install
 
-**Prerequisites:** Choose one model backend:
+Choose the path that fits your setup:
 
-- Anthropic: create an [Anthropic API key](https://console.anthropic.com/) and
-  set `ANTHROPIC_API_KEY`.
-- OpenAI API key: create an [OpenAI API key](https://platform.openai.com/api-keys),
-  set `provider: openai`, and set `OPENAI_API_KEY`.
-- OpenAI subscription: set `provider: openai` and
-  `openai_auth: subscription`, then run `neo login` and enter the printed
-  device code in your browser.
+| Method | Best for | Command |
+|------|------|------|
+| One-line installer | Most users; downloads a release binary when available | `curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh \| bash` |
+| Homebrew | macOS users already using Homebrew | `brew install --cask owainlewis/tap/neo` |
+| `go install` | Go users who want Neo on their existing `$GOBIN` path | `go install github.com/owainlewis/neo/cmd/neo@latest` |
+| Manual build | Contributors or anyone who wants a local checkout | `just build` or `go build -o neo ./cmd/neo` |
 
-### One-line install (recommended)
+### One-line installer
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash
@@ -47,7 +49,8 @@ curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | ba
 
 The script auto-detects your OS and architecture, downloads the matching
 pre-built release archive from GitHub Releases, verifies its checksum when
-available, and installs it to `~/.local/bin`.
+available, and installs it into the first writable directory it finds from
+`~/.local/bin`, `~/bin`, or `/usr/local/bin`.
 If no pre-built binary is available for your platform it falls back to
 `go install` (requires Go 1.25+).
 
@@ -61,67 +64,153 @@ curl -fsSL .../install.sh | bash -s -- --version v1.2.3
 curl -fsSL .../install.sh | bash -s -- --bin-dir /usr/local/bin
 ```
 
+If none of those directories exist and are writable, the installer creates and
+uses `~/.local/bin`.
+
 ### Homebrew
 
 ```bash
 brew install --cask owainlewis/tap/neo
 ```
 
-### Manual install
-
-```bash
-git clone https://github.com/owainlewis/neo.git
-cd neo
-just build                          # or: go build -o neo ./cmd/neo
-export ANTHROPIC_API_KEY="sk-ant-..."
-./neo                               # opens the chat TUI (default)
-```
-
-For OpenAI API-key auth, create `neo.yaml` with `provider: openai` and set
-`OPENAI_API_KEY`. For OpenAI subscription auth, create `neo.yaml` with
-`provider: openai` and `openai_auth: subscription`, then run `./neo login`
-before starting chat.
-
-`just build` stamps the current git description into the binary as the
-version shown on the splash screen (use `just print-version` to preview).
-
-Install onto your `$GOBIN` path:
+### `go install`
 
 ```bash
 go install github.com/owainlewis/neo/cmd/neo@latest
 neo
 ```
 
+### Manual build
+
+```bash
+git clone https://github.com/owainlewis/neo.git
+cd neo
+just build                          # or: go build -o neo ./cmd/neo
+```
+
+`just build` stamps the current git description into the binary as the version
+shown on the splash screen. Run `just print-version` to preview the stamped
+value.
+
+## Quick Start
+
+Follow this once and you should be able to reach your first chat from the
+README alone.
+
+### 1. Choose a backend
+
+Neo defaults to Anthropic. Use OpenAI only when you set `provider: openai`.
+
+| Backend | What you need | Config | Extra step |
+|------|------|------|------|
+| Anthropic | `ANTHROPIC_API_KEY` | No config required | None |
+| OpenAI API key | `OPENAI_API_KEY` | `provider: openai` | None |
+| OpenAI subscription | ChatGPT/Codex subscription | `provider: openai` and `openai_auth: subscription` | Run `neo login` once |
+
+If you are using OpenAI with an API key, you do not need `neo login`.
+`neo login` is only for the device-code subscription flow.
+
+### 2. Set credentials
+
+Anthropic:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+OpenAI API key:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+OpenAI subscription:
+
+```bash
+neo login
+```
+
+`neo login` prints a device-code URL and one-time code, then stores the
+subscription credentials in `~/.neo/auth.json`.
+
+### 3. Create `neo.yaml` only if you need OpenAI
+
+Anthropic users can skip this step because `provider: anthropic` is the default.
+
+OpenAI API key:
+
+```yaml
+provider: openai
+openai_auth: api_key
+```
+
+OpenAI subscription:
+
+```yaml
+provider: openai
+openai_auth: subscription
+```
+
+Neo reads the first config file it finds in this order:
+
+1. `./neo.yaml`
+2. `~/.neo/config.yaml`
+3. Embedded defaults
+
+### 4. Start your first chat
+
+```bash
+neo
+```
+
+`neo` and `neo chat` open the same interactive terminal UI. Once it starts, try
+a first prompt like:
+
+If you built Neo locally but did not install it onto your `PATH`, run `./neo`
+instead.
+
+```text
+Summarize this repository and suggest a good first change.
+```
+
+### Common commands
+
+| Command | What it does |
+|------|------|
+| `neo` | Open interactive chat mode |
+| `neo chat` | Open interactive chat mode explicitly |
+| `neo sessions` | List saved chats |
+| `neo resume <id>` | Resume a saved chat |
+| `neo login` | Set up OpenAI subscription auth |
+| `neo logout` | Remove stored OpenAI subscription credentials |
+| `neo help` | Show CLI help |
+
+### Common config flags
+
+| Key | Default | Meaning |
+|------|------|------|
+| `provider` | `anthropic` | Select `anthropic` or `openai` |
+| `openai_auth` | `api_key` when using OpenAI | Choose `api_key` or `subscription` |
+| `permissions.mode` | `ask` | Prompt before bash and file mutations |
+| `features.agents_file` | `true` | Load `AGENTS.md` instructions |
+| `features.skills` | `true` | Enable `.neo/skills` discovery and `$name` expansion |
+| `features.prompt_caching` | `true` | Cache the stable system prompt prefix when supported |
+
 ## Usage
 
 ```bash
-# Interactive terminal chat (default)
 neo
 
-# Same thing, explicit
 neo chat
 
-neo help
-
-# Saved sessions
 neo sessions
 neo resume <session-id>
 
-# OpenAI subscription auth
 neo login
 neo logout
+
+neo help
 ```
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `neo` / `neo chat` | Open the interactive terminal coding agent |
-| `neo sessions` | List saved chat sessions |
-| `neo resume <id>` | Resume a saved chat session |
-| `neo login` | Log in to an OpenAI ChatGPT/Codex subscription |
-| `neo logout` | Remove stored OpenAI subscription credentials |
-| `neo help` | Show CLI help |
 
 ## Sessions
 
@@ -152,6 +241,7 @@ Slash commands keep common actions out of the chat transcript:
 | `/tokens` | Show token usage for the session |
 | `/model` | Pick the active model for this session |
 | `/sessions` | Browse saved sessions |
+| `/memory <text>` | Append a project memory entry |
 | `/clear` | Clear the current transcript |
 
 Small examples:
@@ -160,6 +250,7 @@ Small examples:
 /model              # open the model picker
 /permissions        # switch between ask, trusted, readonly
 /sessions           # resume a saved session for this workspace
+/memory prefer table-driven tests   # append a project memory entry
 !git status         # run a shell command through Neo's bash tool
 read @README        # type @ to search workspace files, then tab/enter to insert
 ```
@@ -202,48 +293,50 @@ use the $review skill on my changes
 ```
 
 Project skills override global ones of the same name. This repo ships
-`$review` and `$commit` under `.neo/skills/` as working examples. Disable the
-feature by setting `skills: false` (see Configuration).
+`$review`, `$commit`, and `$coordinator-worker` under `.neo/skills/` as working
+examples. Disable the feature by setting `skills: false` (see Configuration).
+
+For a read-only coordinator-worker smoke test, try:
+
+```text
+$coordinator-worker
+
+Run a read-only coordinator-worker workflow for this repository.
+
+Goal: assess whether the current uncommitted changes are safe to commit.
+
+Workflow:
+1. Plan the assessment
+2. Inspect the current git status and diff
+3. Delegate a review of the current diff to a subagent
+4. Run the test suite
+5. Summarize blockers, risks, and whether this looks safe to commit
+
+Constraints:
+- Do not edit files.
+- Do not stage or commit anything.
+- Do not run formatters.
+- Treat this as an assessment only.
+```
 
 ## Configuration
 
-Neo looks for a config file in this order:
+Neo defaults to Anthropic. Set `provider: openai` if you want OpenAI instead.
+Config files are not merged; the first file found wins.
 
-1. `./neo.yaml` — project config
-2. `~/.neo/config.yaml` — user config
-3. Embedded defaults — no file required to get started
-
-Neo defaults to Anthropic. Use `provider: openai` to switch to OpenAI.
-
-Anthropic setup:
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-OpenAI API-key setup:
+OpenAI API key:
 
 ```yaml
 provider: openai
 openai_auth: api_key
 ```
 
-```bash
-export OPENAI_API_KEY="sk-..."
-```
-
-OpenAI subscription setup:
+OpenAI subscription:
 
 ```yaml
 provider: openai
 openai_auth: subscription
 ```
-
-```bash
-neo login
-```
-
-Use `neo logout` to remove stored subscription credentials.
 
 **`neo.yaml` reference:**
 
@@ -265,28 +358,29 @@ openai_auth: api_key
 model: claude-opus-4-8
 
 # Tool permission mode:
+#   trusted  -> allow built-in tools; ask before high-risk bash commands; paths stay inside repo
 #   ask      -> allow read/search, ask before bash and file mutations
-#   trusted  -> allow built-in tools without prompts; path-shaped tools stay inside repo
 #   readonly -> allow read/search only
 permissions:
-  mode: ask
+  mode: trusted
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.
 features:
   agents_file: true   # load AGENTS.md into the system prompt
+  memory: true        # load and update project-root memory.md
   skills: true        # discover .neo/skills, advertise them, expand $name
   prompt_caching: true # cache the static system prompt prefix
 ```
 
 ### Permissions
 
-Neo defaults to `permissions.mode: ask`.
+Neo defaults to `permissions.mode: trusted`.
 
 | Mode | Behavior |
 |------|----------|
+| `trusted` | Built-in tools run automatically, except high-risk bash commands ask first |
 | `ask` | Read/search tools run automatically; bash and file mutations ask first |
-| `trusted` | Built-in tools run without approval prompts |
 | `readonly` | Read/search tools run; bash and file mutations are denied |
 
 Path-shaped tools (`read_file`, `write_file`, `edit_file`, `grep`, and `glob`)
@@ -295,8 +389,10 @@ are workspace-bound: Neo denies paths outside the workspace root even in
 
 Approved or trusted `bash` is different. It runs `/bin/bash -c` in the working
 directory with a timeout, but it is not a true filesystem sandbox. A shell
-command can still affect files outside the repo if the command does so, so keep
-`ask` mode on when you want to review shell commands first.
+command can still affect files outside the repo if the command does so. Keep
+`ask` mode on when you want to review all shell commands first; `trusted` still
+asks before high-risk commands such as `rm -rf`, `sudo`, recursive
+ownership/permission changes, `git clean -fd`, and `git reset --hard`.
 
 ## Tools
 
@@ -329,14 +425,18 @@ internal/tui/           Bubble Tea terminal UI
 
 ## Developer Docs
 
-Developer docs live in `docs/developer/` and are generated from repository code and defaults:
+If you want to use Neo, the README should be enough to get you started.
+If you want to contribute, start with [docs/developer/index.md](docs/developer/index.md).
+Those docs are generated from repository code and defaults, so regenerate them
+instead of editing them by hand:
 
 ```bash
 go run ./cmd/neo-docs
 go run ./cmd/neo-docs --check
 ```
 
-Neo is pointed at these docs through `AGENTS.md`, so local agent sessions can read the same developer reference humans use.
+Neo is pointed at these docs through `AGENTS.md`, so local agent sessions can
+read the same developer reference humans use.
 For background on the safety and observability milestone behind the current
 tooling, see [docs/robust-core-plan.md](docs/robust-core-plan.md).
 

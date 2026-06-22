@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/owainlewis/neo/internal/permission"
 )
 
 type permissionChoice struct {
@@ -21,7 +23,7 @@ type permissionPicker struct {
 
 var permissionChoices = []permissionChoice{
 	{mode: "ask", description: "Read/search tools run automatically; bash and file mutations ask first."},
-	{mode: "trusted", description: "Built-in tools run without approval prompts; workspace path checks still apply."},
+	{mode: "trusted", description: "Built-in tools run automatically; high-risk bash commands ask first; workspace path checks still apply."},
 	{mode: "readonly", description: "Read/search tools run automatically; bash and file mutations are denied."},
 }
 
@@ -74,6 +76,26 @@ func (m *model) selectCurrentPermission() {
 	m.permissionMode = choice.mode
 	m.blocks = append(m.blocks, noticeBlock{text: "permissions: " + choice.mode})
 	m.closePermissionPicker()
+}
+
+// approvalBarView renders the action bar shown in place of the composer while a
+// tool call awaits approval. The pending command itself is shown by the
+// approval card in the scrollback, so the bar carries only the choices. It uses
+// foreground-only styling (no background card) to avoid background bleed across
+// the inner styled segments, and pads to the input bar's footprint so the
+// layout does not jump.
+func (m *model) approvalBarView() string {
+	req := m.approval.req
+	label := permission.RuleFor(permission.Request{ToolName: req.ToolName, Args: req.Args}).Label()
+
+	choices := strings.Join([]string{
+		styTool.Render("y") + styMuted.Render(" yes"),
+		styTool.Render("a") + styMuted.Render(" always allow "+label),
+		styTool.Render("n") + styMuted.Render(" no"),
+		styTool.Render("esc") + styMuted.Render(" deny"),
+	}, "    ")
+	line := styAccent.Render("approve?") + "  " + choices
+	return lipgloss.NewStyle().Padding(1, 1).Render(line)
 }
 
 func (m *model) currentPermissionMode() string {

@@ -1,17 +1,20 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/owainlewis/neo/internal/config"
+	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/session"
 )
 
 func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.T) {
-	choices := modelChoices(&config.Config{
+	choices := modelChoices(context.Background(), &config.Config{
 		Provider:   "openai",
 		OpenAIAuth: config.OpenAIAuthSubscription,
 	})
@@ -25,7 +28,7 @@ func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.
 }
 
 func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
-	choices := modelChoices(&config.Config{
+	choices := modelChoices(context.Background(), &config.Config{
 		Provider:   "openai",
 		OpenAIAuth: config.OpenAIAuthAPIKey,
 	})
@@ -34,6 +37,29 @@ func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
 		if strings.Contains(choice.ID, "codex") {
 			t.Fatalf("api-key model picker should not list Codex model %q", choice.ID)
 		}
+	}
+}
+
+func TestModelChoices_OpenRouterFallsBackWhenCatalogueUnavailable(t *testing.T) {
+	// Point the picker at an unroutable network so the live fetch fails fast;
+	// the picker must still return the provider default rather than nothing.
+	t.Setenv("OPENROUTER_API_KEY", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already-cancelled context forces the fetch to fail immediately
+
+	choices := modelChoices(ctx, &config.Config{Provider: "openrouter"})
+	if len(choices) == 0 {
+		t.Fatal("expected a fallback openrouter model choice")
+	}
+	found := false
+	for _, choice := range choices {
+		if choice.ID == openrouter.DefaultModel {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("fallback choices missing default %q: %#v", openrouter.DefaultModel, choices)
 	}
 }
 
@@ -50,7 +76,7 @@ func TestChatSystem_IncludesProjectMemoryAsDistinctDynamicBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, "")
+	system, blocks := chatSystem(&config.Config{}, cwd, nil)
 
 	if len(blocks) != 2 {
 		t.Fatalf("system blocks = %d, want 2", len(blocks))
@@ -83,13 +109,62 @@ func TestChatSystem_SkipsProjectMemoryWhenDisabled(t *testing.T) {
 	}
 	disabled := false
 
-	system, blocks := chatSystem(&config.Config{Features: config.Features{Memory: &disabled}}, cwd, nil, "")
+	system, blocks := chatSystem(&config.Config{Features: config.Features{Memory: &disabled}}, cwd, nil)
 
 	if len(blocks) != 1 {
 		t.Fatalf("system blocks = %d, want 1", len(blocks))
 	}
 	if strings.Contains(system, "hidden memory") {
 		t.Fatal("disabled memory should not enter the prompt")
+	}
+}
+
+func TestChatSystem_IncludesGitContextAsDistinctDynamicBlock(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	runGit(t, root, "config", "user.name", "Neo Test")
+	runGit(t, root, "config", "user.email", "neo@example.com")
+	cwd := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "tracked.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "pkg/tracked.txt")
+	runGit(t, root, "commit", "-m", "seed commit")
+	if err := os.WriteFile(filepath.Join(cwd, "tracked.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	system, blocks := chatSystem(&config.Config{}, cwd, nil)
+
+	if len(blocks) != 2 {
+		t.Fatalf("system blocks = %d, want 2", len(blocks))
+	}
+	if blocks[1].Cache {
+		t.Fatal("expected git block to stay dynamic")
+	}
+	for _, want := range []string{"# Git context", "Branch: main", "M tracked.txt", "seed commit"} {
+		if !strings.Contains(blocks[1].Text, want) {
+			t.Fatalf("git block missing %q\n---\n%s", want, blocks[1].Text)
+		}
+	}
+	if !strings.Contains(system, blocks[1].Text) {
+		t.Fatal("flattened system prompt missing git block")
+	}
+}
+
+func TestChatSystem_SkipsGitContextOutsideRepo(t *testing.T) {
+	cwd := t.TempDir()
+
+	system, blocks := chatSystem(&config.Config{}, cwd, nil)
+
+	if len(blocks) != 1 {
+		t.Fatalf("system blocks = %d, want 1", len(blocks))
+	}
+	if strings.Contains(system, "# Git context") {
+		t.Fatal("git context should be skipped outside a repo")
 	}
 }
 
@@ -116,5 +191,14 @@ func TestSessionModel_FallsBackForLegacySessionsWithoutProvider(t *testing.T) {
 	meta := session.Metadata{Model: "gpt-4o"}
 	if got := sessionModel(cfg, meta); got != "claude-opus-4-8" {
 		t.Fatalf("sessionModel = %q, want config model for legacy session", got)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }

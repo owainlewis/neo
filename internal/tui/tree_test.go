@@ -109,20 +109,20 @@ func TestTreeGroupsConsecutiveRootsAndSplitsOnText(t *testing.T) {
 	}
 }
 
-func TestTreeRunStepResultSuppressedOnSuccessCardOnFailure(t *testing.T) {
+func TestTreeAgentResultSuppressedOnSuccessCardOnFailure(t *testing.T) {
 	m := makeTestModel()
 
 	// Success: the tree is the record; no result card.
-	m.handleStepEvent(stepEv(1, 0, "checks", "start", "", ""))
-	m.handleStepEvent(stepEv(1, 0, "checks", "done", "GREEN", ""))
-	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "run_step",
-		Text: "{\"ok\":true,\"kind\":\"script\",\"took\":\"1s\"}\nGREEN"})
+	m.handleStepEvent(stepEv(1, 0, "agent", "start", "", ""))
+	m.handleStepEvent(stepEv(1, 0, "agent", "done", "GREEN", ""))
+	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "agent",
+		Text: "{\"ok\":true,\"kind\":\"agent\",\"took\":\"1s\"}\nGREEN"})
 	if len(m.blocks) != 1 {
 		t.Fatalf("success should add no card: %d blocks", len(m.blocks))
 	}
 
 	// Denial: no node ever started, so the error card is the only record.
-	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "run_step",
+	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "agent",
 		Text: "{\"ok\":false,\"kind\":\"agent\",\"took\":\"0s\"}\ndenied: max depth"})
 	card, ok := m.blocks[len(m.blocks)-1].(toolResultBlock)
 	if !ok || !card.isError || !strings.Contains(card.text, "denied: max depth") {
@@ -130,14 +130,14 @@ func TestTreeRunStepResultSuppressedOnSuccessCardOnFailure(t *testing.T) {
 	}
 }
 
-func TestTreeRunStepCallEmitsNoGenericCard(t *testing.T) {
+func TestTreeAgentCallEmitsNoGenericCard(t *testing.T) {
 	m := makeTestModel()
-	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "run_step",
-		Args: map[string]any{"name": "checks", "input": ""}})
+	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "agent",
+		Args: map[string]any{"prompt": "run checks"}})
 	if len(m.blocks) != 0 {
-		t.Fatalf("run_step call should not render a tool card: %d blocks", len(m.blocks))
+		t.Fatalf("agent call should not render a tool card: %d blocks", len(m.blocks))
 	}
-	if m.currentTool == nil || m.currentTool.name != "run_step" {
+	if m.currentTool == nil || m.currentTool.name != "agent" {
 		t.Fatal("status line should still track the in-flight call")
 	}
 }

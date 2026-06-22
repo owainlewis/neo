@@ -1,127 +1,38 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"flag"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/permission"
-	"github.com/owainlewis/neo/internal/workspace"
 )
 
-// runFactory drives `neo factory [flags] "<goal>"` — the autonomous loop:
-// an orchestrator agent works the goal, delegating through run_step under
-// supervisor budgets, with a live tree on stdout and an events.jsonl tee.
-func runFactory(ctx context.Context, args []string) {
-	fs := flag.NewFlagSet("factory", flag.ExitOnError)
-	budget := factory.DefaultBudget()
-	fs.IntVar(&budget.MaxDepth, "max-depth", budget.MaxDepth, "max delegation depth (orchestrator=0)")
-	fs.IntVar(&budget.MaxChildren, "max-children", budget.MaxChildren, "max child steps per node")
-	fs.IntVar(&budget.MaxAgents, "max-agents", budget.MaxAgents, "tree-wide cap on agent steps")
-	fs.DurationVar(&budget.MaxWall, "max-wall", budget.MaxWall, "wall-clock limit per agent step")
-	fs.DurationVar(&budget.ScriptTimeout, "script-timeout", budget.ScriptTimeout, "timeout per script step")
-	root := fs.String("root", "orchestrator", "root step to run")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, `usage: neo factory [flags] "<goal>"
-
-Runs the root step (default: orchestrator) against the goal. The root
-delegates via run_step to other steps: steps/<name>.md = agent prompt,
-executable steps/<name> = script. Search order: ./steps, ~/.neo/steps,
-then embedded defaults (orchestrator, worker, verify, triage).`)
-		fs.PrintDefaults()
-	}
-	_ = fs.Parse(args)
-	if fs.NArg() != 1 {
-		fs.Usage()
-		os.Exit(2)
-	}
-	goal := fs.Arg(0)
-
-	out, err := runSupervised(ctx, budget, *root, goal)
-	fmt.Println(out)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
-
-// runStepCmd drives `neo step <name> "<input>"` — run one step in isolation,
-// under the same supervisor (so nested run_step calls work), printing the
-// final output. The fast path for iterating on step prompts.
-func runStepCmd(ctx context.Context, args []string) {
-	if len(args) != 2 {
-		fmt.Fprintln(os.Stderr, `usage: neo step <name> "<input>"`)
-		os.Exit(2)
-	}
-	budget := factory.DefaultBudget()
-	out, err := runSupervised(ctx, budget, args[0], args[1])
-	fmt.Println(out)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
-
-// chatRunStepTool builds the run_step tool for an interactive chat session:
-// the chat agent is caller node 0, so every delegation it makes becomes a
-// root of the supervisor's tree. Events tee to .neo/events.jsonl and to the
-// returned channel (the TUI's live checklist) for the session's lifetime.
-func chatRunStepTool(prov llm.Provider, cfg *config.Config, cwd, root string, resolver factory.Resolver) (factory.RunStepTool, <-chan factory.Event) {
+// chatAgentTool builds the agent tool for an interactive chat session: the
+// chat agent is caller node 0, so every subagent it spawns becomes a root of
+// the supervisor's tree. Events tee to .neo/events.jsonl and to the returned
+// channel for the TUI's live subagent tree.
+func chatAgentTool(prov llm.Provider, cfg *config.Config, cwd, root string) (factory.AgentTool, <-chan factory.Event) {
 	runner := &factory.AgentRunner{
 		Provider:     prov,
 		DefaultModel: cfg.Model,
 		Root:         root,
 		BashTimeout:  5 * time.Minute,
 		// A readonly session must not gain write access by delegating;
-		// ask-mode sessions gate at the run_step approval instead (steps
-		// run autonomously once approved). Mode is fixed at session start.
+		// ask-mode sessions gate at the agent-tool approval instead. Subagents
+		// run autonomously once approved. Mode is fixed at session start.
 		Mode: permission.Mode(cfg.Permissions.Mode),
 	}
-	sup := factory.NewSupervisor(runner, factory.DefaultBudget(), resolver)
+	sup := factory.NewSupervisor(runner, factory.DefaultBudget(), factory.Resolver{})
 	runner.Sup = sup
 	ui := make(chan factory.Event, 256)
 	go teeEvents(sup.Events, filepath.Join(root, ".neo", "events.jsonl"), ui)
-	return factory.RunStepTool{Sup: sup, CallerNode: 0, Dir: cwd}, ui
-}
-
-// stepsSection builds the system prompt block that advertises available
-// steps, so plain language like "run the validate step" reliably maps to
-// run_step calls.
-func stepsSection(r factory.Resolver) string {
-	cat := r.Catalog()
-	if len(cat) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("\n\n# Workflow steps\n\n")
-	b.WriteString("Named steps are runnable with the run_step tool. When the user asks to run ")
-	b.WriteString("a step (\"run the validate step\") or a sequence (\"run these steps: branch, ")
-	b.WriteString("verify, validate\"), call run_step once per step, in order, passing a ")
-	b.WriteString("self-contained input each time — steps have no memory of this conversation. ")
-	b.WriteString("If a step fails or its output reveals a problem, stop the sequence and report. ")
-	b.WriteString("ok=true only means the step completed; judge an agent step's output by its content.\n\nAvailable steps:\n")
-	for _, st := range cat {
-		b.WriteString("\n- `")
-		b.WriteString(st.Name)
-		b.WriteString("`")
-		if st.Description != "" {
-			b.WriteString(" — ")
-			b.WriteString(st.Description)
-		}
-		if st.Kind == "script" {
-			b.WriteString(" (script)")
-		}
-	}
-	return b.String()
+	return factory.AgentTool{Sup: sup, CallerNode: 0, Dir: cwd}, ui
 }
 
 // teeEvents drains an event stream to a jsonl file and, when forward is
@@ -149,36 +60,4 @@ func teeEvents(events <-chan factory.Event, path string, forward chan<- factory.
 	if forward != nil {
 		close(forward)
 	}
-}
-
-func runSupervised(ctx context.Context, budget factory.Budget, rootStep, input string) (string, error) {
-	cfg := mustConfig()
-	prov := mustProvider(cfg)
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("getwd: %w", err)
-	}
-	root := workspace.Root(cwd)
-
-	runner := &factory.AgentRunner{
-		Provider:     prov,
-		DefaultModel: cfg.Model,
-		Root:         root,
-		BashTimeout:  5 * time.Minute,
-	}
-	sup := factory.NewSupervisor(runner, budget, factory.Resolver{Paths: factory.DefaultStepPaths(root)})
-	runner.Sup = sup
-
-	console := factory.NewConsole(sup, os.Stdout)
-	watcherDone := make(chan struct{})
-	go func() {
-		defer close(watcherDone)
-		console.Watch(filepath.Join(root, ".neo", "events.jsonl"), 500*time.Millisecond)
-	}()
-
-	out, err := sup.Run(ctx, cwd, rootStep, input)
-	close(sup.Events)
-	<-watcherDone
-	fmt.Println()
-	return out, err
 }

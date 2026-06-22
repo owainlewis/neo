@@ -1,7 +1,6 @@
 package factory
 
 import (
-	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,9 +9,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
-
-//go:embed defaults/*.md
-var defaultSteps embed.FS
 
 // Step is a resolved step definition. Agent steps carry a prompt (markdown
 // body) plus frontmatter restrictions; script steps carry the executable path.
@@ -58,9 +54,6 @@ func (r Resolver) Resolve(name string) (Step, error) {
 		if st, ok := findInDir(base, name); ok {
 			return st, nil
 		}
-	}
-	if b, err := defaultSteps.ReadFile("defaults/" + name + ".md"); err == nil {
-		return parseAgentStep(name, "", b)
 	}
 	return Step{}, fmt.Errorf("no step named %q (available: %s)", name, strings.Join(r.List(), ", "))
 }
@@ -134,17 +127,6 @@ func (r Resolver) Catalog() []Step {
 			}
 			if info, err := e.Info(); err == nil && info.Mode()&0o111 != 0 {
 				add(Step{Name: fname, Kind: "script", Path: filepath.Join(base, fname)})
-			}
-		}
-	}
-	if entries, err := defaultSteps.ReadDir("defaults"); err == nil {
-		for _, e := range entries {
-			b, err := defaultSteps.ReadFile("defaults/" + e.Name())
-			if err != nil {
-				continue
-			}
-			if st, err := parseAgentStep(strings.TrimSuffix(e.Name(), ".md"), "", b); err == nil {
-				add(st)
 			}
 		}
 	}

@@ -46,8 +46,8 @@ func TestApprovalBlockRenderTruncatesLongPreview(t *testing.T) {
 
 	out := plain(approvalBlock{req: testApproval("write_file", strings.Join(lines, "\n"))}.render(80, nil))
 
-	if !strings.HasPrefix(strings.TrimLeft(out, " "), "approve write_file?  y / n") {
-		t.Fatalf("approval prompt should stay first, got:\n%s", out)
+	if !strings.Contains(firstLine(out), "approve write") {
+		t.Fatalf("approval prompt should stay on the first line, got:\n%s", out)
 	}
 	if strings.Contains(out, "+line 79") {
 		t.Fatalf("approval preview was not truncated:\n%s", out)
@@ -59,7 +59,7 @@ func TestApprovalBlockRenderTruncatesLongPreview(t *testing.T) {
 
 func TestApprovalBlockRenderKeepsShortPreview(t *testing.T) {
 	out := plain(approvalBlock{req: testApproval("edit_file", "-old\n+new")}.render(80, nil))
-	for _, want := range []string{"approve edit_file?  y / n", "-old", "+new"} {
+	for _, want := range []string{"approve edit", "-old", "+new"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("approval block missing %q:\n%s", want, out)
 		}

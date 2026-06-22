@@ -24,6 +24,13 @@ func newTestAgent(t *testing.T, prov llm.Provider, ts ...tools.Tool) *Agent {
 	})
 }
 
+func TestAgent_DefaultMaxTurnsIs100(t *testing.T) {
+	ag := New(Config{Provider: &llmtest.FakeProvider{}})
+	if ag.cfg.MaxTurns != 100 {
+		t.Fatalf("default MaxTurns = %d, want 100", ag.cfg.MaxTurns)
+	}
+}
+
 func TestAgent_TextOnlyTurnReturnsText(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("hello world")}}
 	ag := newTestAgent(t, prov)

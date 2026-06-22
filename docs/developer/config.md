@@ -15,10 +15,12 @@ First hit wins. Config files are not merged.
 ```yaml
 # neo default configuration.
 # Override by creating ./neo.yaml in a project, or ~/.neo/config.yaml globally.
+# The first file found wins — config files are NOT merged.
 
-# LLM backend: "anthropic" (default) or "openai".
-# anthropic → requires ANTHROPIC_API_KEY
-# openai    → uses the Responses API; auth via openai_auth (below)
+# LLM backend: "anthropic" (default), "openai", or "openrouter".
+# anthropic  → requires ANTHROPIC_API_KEY
+# openai     → uses the Responses API; auth via openai_auth (below)
+# openrouter → uses Chat Completions via OPENROUTER_API_KEY
 provider: anthropic
 
 # How the "openai" provider authenticates (ignored for other providers):
@@ -29,11 +31,11 @@ provider: anthropic
 model: claude-opus-4-8
 
 # Tool permission mode:
-#   ask      → allow read/search, ask before bash and file mutations (default)
-#   trusted  → allow built-in tools, while still denying file paths outside repo
+#   trusted  → allow built-in tools, ask before high-risk bash commands (default)
+#   ask      → allow read/search, ask before bash and file mutations
 #   readonly → allow read/search only
 permissions:
-  mode: ask
+  mode: trusted
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.
@@ -42,6 +44,51 @@ features:
   memory: true      # load and update project-root memory.md
   skills: true      # discover .neo/skills, advertise them, expand $name references
   prompt_caching: true # cache_control the static system prompt prefix to cut input cost
+
+# ----------------------------------------------------------------------------
+# Example provider configurations
+# ----------------------------------------------------------------------------
+# Copy ONE of the blocks below over the `provider`/`model` lines above to switch
+# backends. Remember: the first config file found wins, so edit the file neo is
+# actually loading (./neo.yaml in a project, or ~/.neo/config.yaml globally).
+#
+# Leave `model` unset to use the provider's built-in default. Model names move
+# fast — check each provider's current model list rather than copying an id from
+# here verbatim.
+#
+# --- Anthropic (API key) -----------------------------------------------------
+# Requires: export ANTHROPIC_API_KEY=sk-ant-...
+# Models: https://docs.anthropic.com/en/docs/about-claude/models
+#
+# provider: anthropic
+# model: <claude-model-id>
+#
+# --- OpenAI (API key) --------------------------------------------------------
+# Requires: export OPENAI_API_KEY=sk-...
+# Models: https://platform.openai.com/docs/models
+#
+# provider: openai
+# openai_auth: api_key
+# model: <openai-model-id>
+#
+# --- OpenAI (ChatGPT / Codex subscription) -----------------------------------
+# Uses your ChatGPT/Codex plan instead of an API key.
+# Run `neo login` once to authorize (device-code flow); credentials are stored
+# in ~/.neo/auth.json. Remove them later with `neo logout`.
+# Leave `model` unset to use the subscription's supported default.
+#
+# provider: openai
+# openai_auth: subscription
+#
+# --- OpenRouter --------------------------------------------------------------
+# Requires: export OPENROUTER_API_KEY=sk-or-...
+# Models are a live list (provider/model form). Query the current catalogue:
+#   curl https://openrouter.ai/api/v1/models | jq '.data[].id'
+# or browse https://openrouter.ai/models
+#
+# provider: openrouter
+# model: <provider/model-id>
+# ----------------------------------------------------------------------------
 ```
 
 ## Provider Selection
@@ -51,6 +98,7 @@ features:
 | `provider: anthropic` | `ANTHROPIC_API_KEY` | `internal/llm/anthropic` |
 | `provider: openai` with `openai_auth: api_key` | `OPENAI_API_KEY` | `internal/llm/openai.Client` |
 | `provider: openai` with `openai_auth: subscription` | ChatGPT/Codex device-code credentials from `~/.neo/auth.json` | `internal/llm/openai.CodexClient` |
+| `provider: openrouter` | `OPENROUTER_API_KEY` | `internal/llm/openrouter` |
 
 Subscription credentials are created with `neo login` and removed with `neo logout`. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 
@@ -67,10 +115,10 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 
 ## Permissions
 
-`permissions.mode` defaults to `ask`.
+`permissions.mode` defaults to `trusted`.
 
 | Mode | Effect |
 | --- | --- |
+| `trusted` | Allow built-in tools; ask before high-risk bash commands; deny path-shaped file tools outside the repo root. |
 | `ask` | Allow read/search tools inside the repo root; ask before bash and file mutations. |
-| `trusted` | Allow built-in tools, while still denying path-shaped file tools outside the repo root. |
 | `readonly` | Allow read/search tools only; deny bash and file mutations. |

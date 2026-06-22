@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -22,6 +23,14 @@ var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // plain strips ANSI escape codes so tests can assert on rendered text content.
 func plain(s string) string { return ansiRe.ReplaceAllString(s, "") }
+
+// firstLine returns the first line of s, for asserting on header ordering.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
 
 // makeTestModel builds a minimal model for slash-command and state-transition
 // tests without going through newModel (which probes the terminal). Only the
