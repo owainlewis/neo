@@ -15,6 +15,7 @@ First hit wins. Config files are not merged.
 ```yaml
 # neo default configuration.
 # Override by creating ./neo.yaml in a project, or ~/.neo/config.yaml globally.
+# The first file found wins — config files are NOT merged.
 
 # LLM backend: "anthropic" (default), "openai", or "openrouter".
 # anthropic  → requires ANTHROPIC_API_KEY
@@ -43,6 +44,51 @@ features:
   memory: true      # load and update project-root memory.md
   skills: true      # discover .neo/skills, advertise them, expand $name references
   prompt_caching: true # cache_control the static system prompt prefix to cut input cost
+
+# ----------------------------------------------------------------------------
+# Example provider configurations
+# ----------------------------------------------------------------------------
+# Copy ONE of the blocks below over the `provider`/`model` lines above to switch
+# backends. Remember: the first config file found wins, so edit the file neo is
+# actually loading (./neo.yaml in a project, or ~/.neo/config.yaml globally).
+#
+# Leave `model` unset to use the provider's built-in default. Model names move
+# fast — check each provider's current model list rather than copying an id from
+# here verbatim.
+#
+# --- Anthropic (API key) -----------------------------------------------------
+# Requires: export ANTHROPIC_API_KEY=sk-ant-...
+# Models: https://docs.anthropic.com/en/docs/about-claude/models
+#
+# provider: anthropic
+# model: <claude-model-id>
+#
+# --- OpenAI (API key) --------------------------------------------------------
+# Requires: export OPENAI_API_KEY=sk-...
+# Models: https://platform.openai.com/docs/models
+#
+# provider: openai
+# openai_auth: api_key
+# model: <openai-model-id>
+#
+# --- OpenAI (ChatGPT / Codex subscription) -----------------------------------
+# Uses your ChatGPT/Codex plan instead of an API key.
+# Run `neo login` once to authorize (device-code flow); credentials are stored
+# in ~/.neo/auth.json. Remove them later with `neo logout`.
+# Leave `model` unset to use the subscription's supported default.
+#
+# provider: openai
+# openai_auth: subscription
+#
+# --- OpenRouter --------------------------------------------------------------
+# Requires: export OPENROUTER_API_KEY=sk-or-...
+# Models are a live list (provider/model form). Query the current catalogue:
+#   curl https://openrouter.ai/api/v1/models | jq '.data[].id'
+# or browse https://openrouter.ai/models
+#
+# provider: openrouter
+# model: <provider/model-id>
+# ----------------------------------------------------------------------------
 ```
 
 ## Provider Selection

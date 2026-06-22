@@ -375,7 +375,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		tui.WithSessions(store, sess, func(resumed *session.Session) {
 			sess = resumed
 		}),
-		tui.WithModelChoices(modelChoices(cfg)),
+		tui.WithModelChoices(modelChoices(ctx, cfg)),
 		tui.WithStepEvents(stepEvents),
 		tui.WithWorkflowEvents(workflowEvents),
 	); err != nil {
@@ -399,7 +399,7 @@ func sessionModel(cfg *config.Config, meta session.Metadata) string {
 	return cfg.Model
 }
 
-func modelChoices(cfg *config.Config) []tui.ModelChoice {
+func modelChoices(ctx context.Context, cfg *config.Config) []tui.ModelChoice {
 	switch cfg.Provider {
 	case "openai":
 		if cfg.SubscriptionAuth() {
@@ -418,17 +418,42 @@ func modelChoices(cfg *config.Config) []tui.ModelChoice {
 			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},
 		}
 	case "openrouter":
-		return []tui.ModelChoice{
-			{ID: "anthropic/claude-sonnet-4.5", Name: "Claude Sonnet 4.5 (OpenRouter)", Description: "Default OpenRouter model"},
-			{ID: "openai/gpt-4o", Name: "GPT-4o (OpenRouter)", Description: "OpenAI GPT-4o via OpenRouter"},
-			{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro (OpenRouter)", Description: "Google Gemini Pro via OpenRouter"},
-			{ID: "deepseek/deepseek-chat-v3.1", Name: "DeepSeek Chat v3.1 (OpenRouter)", Description: "Lower-cost coding-capable model via OpenRouter"},
-		}
+		return openRouterModelChoices(ctx)
 	default:
 		return []tui.ModelChoice{
 			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Description: "Default Anthropic model"},
 		}
 	}
+}
+
+// openRouterModelChoices fetches the live OpenRouter model catalogue. Model ids
+// move fast, so the picker is populated from OpenRouter's /models endpoint rather
+// than a hardcoded list. On failure (offline, timeout, API change) it falls back
+// to the provider default so the picker still works. The fetch is time-boxed so
+// startup never hangs on a slow network.
+func openRouterModelChoices(ctx context.Context) []tui.ModelChoice {
+	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	models, err := openrouter.Models(fetchCtx, nil)
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not fetch OpenRouter models (%v); using default\n", err)
+		}
+		return []tui.ModelChoice{
+			{ID: openrouter.DefaultModel, Name: openrouter.DefaultModel, Description: "Default OpenRouter model"},
+		}
+	}
+
+	choices := make([]tui.ModelChoice, 0, len(models))
+	for _, m := range models {
+		name := m.Name
+		if name == "" {
+			name = m.ID
+		}
+		choices = append(choices, tui.ModelChoice{ID: m.ID, Name: name, Description: m.Description})
+	}
+	return choices
 }
 
 func listSessions(ctx context.Context) {
