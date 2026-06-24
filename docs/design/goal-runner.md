@@ -2,13 +2,21 @@
 
 Status: Draft.
 
-This spec is for `/goal`, not `/loop`.
+This spec describes how Neo should implement `/goal`.
 
-A goal keeps the current session working until a condition is met, blocked, paused, cleared, or budget-limited.
+`/goal` gives Neo a standing objective that survives across turns in the current session.
 
-A loop runs a prompt on a schedule.
+Neo starts with the goal as the first normal user turn.
 
-Those are different product features and should stay separate in Neo.
+After each turn, Neo checks whether the goal is still active.
+
+If it is active and Neo is idle, Neo adds a continuation prompt and keeps working.
+
+The run stops when the goal is complete, blocked, paused, cleared, or the attempt budget is reached.
+
+Use `/goal` when the agent would otherwise need multiple "keep going" prompts.
+
+Scheduled automation is a separate feature and should be designed separately.
 
 ## 1. Source Review
 
