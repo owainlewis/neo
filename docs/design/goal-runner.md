@@ -12,17 +12,22 @@ Those are different product features and should stay separate in Neo.
 
 ## 1. Source Review
 
-This design is based on the current implementations in Hermes and Codex.
+This design is based on the current implementations and docs in Hermes, Claude Code, and Codex.
 
 Sources reviewed:
 
-- Hermes `/goal` implementation: https://github.com/nousresearch/hermes-agent/blob/f477f89/hermes_cli/goals.py
-- Hermes CLI continuation hook: https://github.com/nousresearch/hermes-agent/blob/f477f89/cli.py
+- Hermes `/goal` implementation: https://github.com/nousresearch/hermes-agent/blob/9259d1e5dacbaae8f6692d9e910c190e64f234a9/hermes_cli/goals.py
+- Hermes CLI continuation hook: https://github.com/nousresearch/hermes-agent/blob/9259d1e5dacbaae8f6692d9e910c190e64f234a9/cli.py
 - Hermes user docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/goals
-- Codex goal extension: https://github.com/openai/codex/tree/f959e7f/codex-rs/ext/goal
-- Codex goal runtime: https://github.com/openai/codex/blob/f959e7f/codex-rs/ext/goal/src/runtime.rs
-- Codex goal tools: https://github.com/openai/codex/blob/f959e7f/codex-rs/ext/goal/src/tool.rs
-- Codex goal steering prompt: https://github.com/openai/codex/blob/f959e7f/codex-rs/ext/goal/templates/goals/continuation.md
+- Hermes cron docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/cron
+- Claude Code `/goal` docs: https://code.claude.com/docs/en/goal
+- Claude Code scheduled tasks docs: https://code.claude.com/docs/en/scheduled-tasks
+- Codex goal extension: https://github.com/openai/codex/tree/390b73133b0707ce877ec924b0011c06b776b9e8/codex-rs/ext/goal
+- Codex goal runtime: https://github.com/openai/codex/blob/390b73133b0707ce877ec924b0011c06b776b9e8/codex-rs/ext/goal/src/runtime.rs
+- Codex goal tools: https://github.com/openai/codex/blob/390b73133b0707ce877ec924b0011c06b776b9e8/codex-rs/ext/goal/src/tool.rs
+- Codex goal tool specs: https://github.com/openai/codex/blob/390b73133b0707ce877ec924b0011c06b776b9e8/codex-rs/ext/goal/src/spec.rs
+- Codex goal steering prompt: https://github.com/openai/codex/blob/390b73133b0707ce877ec924b0011c06b776b9e8/codex-rs/ext/goal/templates/goals/continuation.md
+- Codex user docs: https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex
 
 Hermes implements goals as a session-scoped `GoalManager`.
 
@@ -38,6 +43,25 @@ The useful Hermes lessons are:
 - Weak judge models need a parse-failure backstop.
 - Wait barriers matter for long-running processes.
 
+Claude Code implements `/goal` as a session-scoped prompt-based Stop hook.
+
+After each turn, a small fast model evaluates the condition against the conversation.
+
+The evaluator does not run tools or inspect files independently.
+
+It can only judge what the main agent has surfaced in the transcript.
+
+Claude allows one active goal per session, restores active goals on resume, and clears the active goal when `/clear` starts a new conversation.
+
+The useful Claude lessons are:
+
+- One goal per session is an understandable product rule.
+- The goal text can be both the first prompt and the completion condition.
+- A separate evaluator can catch some premature "done" claims.
+- The evaluator model is only as good as the evidence in the conversation.
+- `/goal` and scheduled work are separate products.
+- `/clear` should clear the active goal so the session does not keep working from missing context.
+
 Codex implements goals as a first-class thread extension.
 
 It persists thread goal state, exposes goal tools to the model, injects goal steering when the thread is idle, tracks token and wall-clock budget, emits goal update events, and lets the model mark the goal complete or blocked through `update_goal`.
@@ -52,6 +76,110 @@ The useful Codex lessons are:
 - The continuation prompt must tell the agent not to shrink the objective.
 - Goal objective text is user-provided data, not higher-priority instruction.
 
+### Three approaches
+
+Hermes and Claude use an evaluator-driven loop.
+
+The main agent works.
+
+A separate evaluator decides whether the goal is done.
+
+If the evaluator says no, the product starts another turn.
+
+```mermaid
+flowchart TD
+    A["User sets /goal"] --> B["Session goal state"]
+    B --> C["Main agent turn"]
+    C --> D["Separate evaluator model"]
+    D -->|done| E["Clear or mark goal achieved"]
+    D -->|continue| F["Enqueue continuation prompt"]
+    F --> C
+    D -->|wait or blocked| G["Pause, wait, or stop"]
+```
+
+Codex uses a state-and-tool-driven loop.
+
+The main agent works and is given goal tools.
+
+The product owns the state machine.
+
+The model may only make narrow lifecycle claims through tools.
+
+If the goal is still active and the thread is idle, the runtime injects continuation context.
+
+```mermaid
+flowchart TD
+    A["User sets /goal"] --> B["Thread goal state"]
+    B --> C["Agent turn with goal tools"]
+    C --> D["Agent works from current evidence"]
+    D --> E["Agent audits completion"]
+    E -->|not done| F["Runtime waits for idle"]
+    F --> G["Inject continuation context"]
+    G --> C
+    E -->|done or blocked| H["Agent calls update_goal"]
+    H --> B
+    B -->|terminal status| I["Stop automatic continuation"]
+```
+
+Neo Phase 1 should copy the Codex control-plane idea, but not all of Codex's machinery.
+
+Neo should store explicit goal state, expose a narrow goal tool, and continue only from a simple idle scheduler.
+
+Neo should skip token accounting, hidden internal context, dynamic tool visibility, and a separate evaluator model in Phase 1.
+
+```mermaid
+flowchart TD
+    A["/goal objective"] --> B["internal/goal.Manager creates session goal"]
+    B --> C["Save session JSON"]
+    C --> D["Send first normal user turn"]
+    D --> E{"Goal still active?"}
+    E -->|no| F["Stop"]
+    E -->|yes| G{"TUI idle and input empty?"}
+    G -->|no| H["Wait for next scheduler check"]
+    G -->|yes| I["Append visible continuation prompt"]
+    I --> D
+```
+
+### Why Codex is the better base for Neo
+
+Codex is not better because it has more features.
+
+It is better for Neo because its core abstraction is product state, not a hidden evaluator decision.
+
+That matters for a local TUI because state transitions need to survive resume, interrupts, `/clear`, budget limits, and user commands.
+
+With an evaluator-driven design, "done" lives in a second model call.
+
+The product then needs a judge provider path, JSON parsing rules, failure handling, a prompt contract, and rules for what happens when the judge cannot see enough evidence.
+
+With a Codex-style design, "done" is a typed transition.
+
+The product can say:
+
+- The current session has one goal.
+- The goal has one status.
+- The user and system own pause, resume, clear, and budgets.
+- The model can only request `complete` or `blocked`.
+- Completion and blocked claims are visible in the transcript and persisted state.
+- The scheduler only continues when the TUI is idle.
+
+That is easier to explain and easier to test.
+
+The tradeoff is that the model is partly grading its own work.
+
+Neo should offset that with a strong continuation prompt, concrete evidence requirements, a blocked threshold, and normal user review.
+
+It should not add a second evaluator until there is evidence that self-reported completion is too weak.
+
+### Comparison table
+
+| System | Who decides done? | How does the next turn start? | Where is state stored? | Main strength | Main risk |
+|--------|-------------------|-------------------------------|------------------------|---------------|-----------|
+| Hermes | Separate judge model after each turn. | Normal continuation prompt is queued. | Session metadata keyed by session ID. | Easy to graft onto an existing chat loop. | Judge parse failures and weak transcript evidence become product behavior. |
+| Claude Code | Small fast evaluator model through a session-scoped Stop hook. | Stop hook starts another turn when the evaluator says not done. | Current session. | Very simple user model and independent evaluation. | Requires hook/evaluator machinery and only judges surfaced evidence. |
+| Codex | Agent calls goal tools to mark complete or blocked. | Runtime injects goal context when the thread is idle. | Thread goal state. | Explicit inspectable state and serialized product transitions. | The working model can mark its own goal complete. |
+| Neo Phase 1 | Agent calls one narrow goal tool, with manager-enforced transitions. | TUI appends a visible continuation prompt only when idle and input is empty. | Optional `goal` field in session JSON. | Simple, reliable, easy to explain, close to current Neo architecture. | Completion quality depends on prompt discipline and evidence checks. |
+
 ## 2. Decision
 
 Build `/goal` first.
@@ -60,6 +188,8 @@ Do not build `/loop` in this feature.
 
 Do not build reusable goal files in this feature.
 
+Do not build a chat message queue in this feature.
+
 Do not expose YAML, TOML, or another goal definition format.
 
 Use plain English as the user surface and typed Go state as the internal representation.
@@ -67,6 +197,8 @@ Use plain English as the user surface and typed Go state as the internal represe
 Phase 1 should use a Codex-style goal tool for explicit completion and blocked transitions.
 
 Phase 1 should use a Hermes-style TUI scheduler to enqueue continuation turns when idle.
+
+Favor simple, visible, reliable behavior over a more autonomous system that is harder to reason about.
 
 Do not add a separate judge model in Phase 1.
 
@@ -102,7 +234,7 @@ The first useful version is:
 /goal clear
 ```
 
-`/goal <objective>` sets or replaces the active goal and starts the first turn immediately.
+`/goal <objective>` sets or replaces the current session's single goal and starts the first turn immediately.
 
 `/goal status` shows the active goal, state, attempts used, budget, and last reason.
 
@@ -135,6 +267,29 @@ The user writes plain English.
 
 Neo stores a typed goal object.
 
+Phase 1 has a simple invariant: one session can have at most one goal.
+
+The goal belongs to the session, not to the whole Neo app.
+
+Starting a new session starts with no goal.
+
+Resuming a session restores its goal if it has one.
+
+Switching sessions switches the goal context because the goal is part of that session's saved state.
+
+`internal/goal.Manager` owns the current state.
+
+The TUI, goal tool, scheduler, and session layer should ask the manager to make transitions instead of mutating state directly.
+
+The manager is deliberately boring:
+
+- It serializes state changes with a mutex.
+- It enforces valid status transitions.
+- It counts attempts.
+- It enforces the blocked threshold.
+- It rejects stale tool updates for an old goal ID.
+- It returns snapshots for rendering, persistence, and tool output.
+
 The minimum shape is:
 
 ```go
@@ -144,6 +299,7 @@ type State struct {
     Contract    Contract
     Status      Status
     Attempts    Attempts
+    Blocked     BlockedAudit
     LastReason  string
     CreatedAt   time.Time
     UpdatedAt   time.Time
@@ -162,6 +318,12 @@ type Attempts struct {
     Max  int
 }
 
+type BlockedAudit struct {
+    Signature string
+    Count     int
+    LastReason string
+}
+
 type Status string
 
 const (
@@ -175,7 +337,21 @@ const (
 )
 ```
 
-Persist the state inside the session JSON.
+Persist the state inside the session JSON as an optional top-level `goal` field.
+
+The shape should be:
+
+```go
+type Session struct {
+    Metadata Metadata      `json:"metadata"`
+    Messages []llm.Message `json:"messages"`
+    Goal     *goal.State   `json:"goal,omitempty"`
+}
+```
+
+Save the session immediately after creating a goal, before sending the first turn.
+
+Then save again after each turn and after each user-visible goal transition.
 
 Do not put the full goal in the session index unless the UI later needs it for listing.
 
@@ -183,22 +359,27 @@ Backward compatibility should be simple: old sessions have no `goal` field.
 
 ## 6. Goal Tool
 
-Add a model-visible `goal` tool when a goal is active.
+Register one model-visible `goal` tool in Phase 1.
 
-It should support two read/write operations:
+Do not mutate the tool registry when goals start or stop.
 
-```text
-get_goal
-update_goal
-```
+If no goal is active, the tool should return a clear "no active goal" result.
 
-If Neo prefers one tool, use an `action` field:
+This is simpler than adding dynamic tool visibility to the current registry.
+
+Use one tool with an `action` field:
 
 ```json
 { "action": "get" }
-{ "action": "complete", "reason": "go test ./... passed" }
-{ "action": "blocked", "reason": "needs API credentials" }
+{ "action": "complete", "goal_id": "goal_123", "reason": "go test ./... passed" }
+{ "action": "blocked", "goal_id": "goal_123", "reason": "needs API credentials" }
 ```
+
+`get` returns the current goal ID, objective, status, attempt budget, and stopping rules.
+
+`complete` and `blocked` must include the goal ID returned by `get`.
+
+The manager rejects stale goal IDs.
 
 The model may only mark a goal `complete` or `blocked`.
 
@@ -227,14 +408,19 @@ Control flow:
 ```text
 /goal objective
 create session goal with status active
+save session immediately
 send objective as the first normal user turn
-after send completes, save session
+after send completes, save session again
 if goal status is complete, blocked, paused, cleared, budget-limited, or usage-limited: stop
-if a real user message is queued: let it run first
 if attempts are exhausted: mark budget_limited and stop
-if TUI is idle: enqueue a continuation turn
+if TUI is idle and the input buffer is empty: enqueue a continuation turn
+otherwise do nothing until the next scheduler check
 repeat
 ```
+
+Phase 1 should not implement a real chat message queue.
+
+User input wins by preventing automatic continuation, not by being queued behind a running turn.
 
 Continuation turns are normal user-role messages in Phase 1.
 
@@ -283,9 +469,20 @@ Codex shows that token accounting is valuable, but it is too much for Phase 1.
 
 User input always wins.
 
-If the user sends a message while a goal is active, Neo should process the user message before any queued continuation.
+In Phase 1, that means automatic continuation only starts when Neo is idle and the user is not actively interacting with the input.
 
-After that user turn finishes, the goal scheduler runs again.
+Neo may enqueue a continuation only if:
+
+- the goal is still active
+- no agent turn is running
+- the input buffer is empty
+- no picker or modal is active
+- no pause, clear, interrupt, or cancellation is pending
+- the attempt budget has not been exhausted
+
+If the user starts typing before the continuation begins, Neo should not enqueue the continuation.
+
+After the user's next turn finishes, the goal scheduler checks again.
 
 Slash commands that inspect or mutate goal control state should be allowed while a turn is active if they are safe.
 
@@ -294,6 +491,10 @@ Slash commands that start new work should require idle.
 Esc or Ctrl-C during an active turn should pause the goal after cancellation.
 
 It should not immediately enqueue another continuation.
+
+The existing `/clear` command should also clear the active goal and cancel any pending continuation.
+
+If the user wants to preserve the goal without continuing, they should use `/goal pause`.
 
 ## 10. Workflow Relationship
 
@@ -337,7 +538,7 @@ Likely package boundaries:
 
 | Area | Responsibility |
 |------|----------------|
-| `internal/goal` | Goal state, status transitions, blocked threshold, continuation prompt, tool implementation. |
+| `internal/goal` | Goal manager, state snapshots, status transitions, blocked threshold, continuation prompt, tool implementation. |
 | `internal/session` | Persist and restore optional goal state. |
 | `internal/tui` | Slash commands, status rendering, idle continuation scheduling, interrupt handling. |
 | `internal/config` | `goals.max_attempts`. |
@@ -348,6 +549,8 @@ Do not implement this by teaching `internal/agent` about `/goal`.
 Do not implement this by making a workflow checklist durable.
 
 Do not implement this by adding YAML files.
+
+Do not implement this by adding a general-purpose chat queue.
 
 ## 13. Alternatives Considered
 
@@ -375,20 +578,30 @@ Reusable goal files:
 - Downside: introduces trust, path scope, executable verifier, and file format decisions.
 - Downside: confuses goals with scheduled loops and workflows.
 
+Real chat queue:
+
+- Upside: the user could submit normal messages while a goal turn is running.
+- Downside: it creates ordering, cancellation, editing, transcript, and slash-command priority questions.
+- Downside: Neo already has a simpler model where normal chat waits until the current turn finishes.
+- Downside: goals only need to avoid interrupting the user, not build a second input system.
+
 The Phase 1 recommendation is Codex-style goal tool plus Hermes-style TUI scheduling.
 
 ## 14. Build Order
 
-1. Add `internal/goal` state, status transitions, and tests.
+1. Add `internal/goal` state, manager transitions, blocked audit, and tests.
 2. Add optional goal state to `session.Session` and session save/load tests.
-3. Add the `goal` tool with `get`, `complete`, and `blocked` actions.
-4. Add `/goal`, `/goal status`, `/goal pause`, `/goal resume`, and `/goal clear`.
-5. Add continuation prompt generation and TUI idle scheduling.
-6. Add attempt budget handling and `budget_limited`.
-7. Add interrupt behavior so cancellation pauses the goal.
-8. Add config docs through `go run ./cmd/neo-docs`.
-9. Add optional `/goal draft` contract generation later.
-10. Add optional wait barriers later.
+3. Save new goal state before the first send and after each transition.
+4. Add the always-registered `goal` tool with `get`, `complete`, and `blocked` actions.
+5. Add `/goal`, `/goal status`, `/goal pause`, `/goal resume`, and `/goal clear`.
+6. Make existing `/clear` clear the active goal and cancel pending continuation.
+7. Add continuation prompt generation and TUI idle scheduling.
+8. Add the simple scheduler rule: continue only when idle, input is empty, and no modal is active.
+9. Add attempt budget handling and `budget_limited`.
+10. Add interrupt behavior so cancellation pauses the goal.
+11. Add config docs through `go run ./cmd/neo-docs`.
+12. Add optional `/goal draft` contract generation later.
+13. Add optional wait barriers later.
 
 Stop before scheduled loops.
 
