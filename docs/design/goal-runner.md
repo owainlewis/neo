@@ -10,11 +10,15 @@ Neo starts with the goal as the first normal user turn.
 
 After each turn, Neo checks whether the goal is still active.
 
-If it is active and Neo is idle, Neo adds a continuation prompt and keeps working.
+If it is active, Neo immediately starts the next continuation turn.
+
+`/goal` is foreground execution, not background work.
 
 The run stops when the goal is complete, blocked, paused, cleared, or the attempt budget is reached.
 
 Use `/goal` when the agent would otherwise need multiple "keep going" prompts.
+
+Do not let a normal side conversation interleave halfway through a running goal.
 
 Scheduled automation is a separate feature and should be designed separately.
 
@@ -45,7 +49,7 @@ The useful Hermes lessons are:
 
 - Goal state belongs to the session, so resume restores the goal.
 - The continuation is a normal turn, not a system prompt mutation.
-- User input preempts automatic continuation.
+- User interruption pauses the goal instead of letting continuation immediately requeue.
 - Ctrl-C pauses the goal instead of immediately re-queueing work.
 - Judge failures fail open, with budget as the backstop.
 - Weak judge models need a parse-failure backstop.
@@ -79,7 +83,7 @@ The useful Codex lessons are:
 - Goal state should be explicit product state, not inferred from chat text.
 - Completion and blocked status should be explicit state transitions.
 - Only the user or system should control pause, resume, budget-limited, usage-limited, and clear.
-- Continuation should only start when the thread is idle.
+- Codex uses idle as a concurrency guard, not as a promise that unrelated chat can interleave.
 - Budget accounting and goal status changes need serialization so external mutations cannot race idle continuation.
 - The continuation prompt must tell the agent not to shrink the objective.
 - Goal objective text is user-provided data, not higher-priority instruction.
@@ -113,7 +117,7 @@ The product owns the state machine.
 
 The model may only make narrow lifecycle claims through tools.
 
-If the goal is still active and the thread is idle, the runtime injects continuation context.
+If the goal is still active after a turn ends, the runtime injects continuation context as soon as the thread is safe to run again.
 
 ```mermaid
 flowchart TD
@@ -121,8 +125,8 @@ flowchart TD
     B --> C["Agent turn with goal tools"]
     C --> D["Agent works from current evidence"]
     D --> E["Agent audits completion"]
-    E -->|not done| F["Runtime waits for idle"]
-    F --> G["Inject continuation context"]
+    E -->|not done| F["Turn ends"]
+    F --> G["Runtime injects continuation context"]
     G --> C
     E -->|done or blocked| H["Agent calls update_goal"]
     H --> B
@@ -131,7 +135,7 @@ flowchart TD
 
 Neo Phase 1 should copy the Codex control-plane idea, but not all of Codex's machinery.
 
-Neo should store explicit goal state, expose a narrow goal tool, and continue only from a simple idle scheduler.
+Neo should store explicit goal state, expose a narrow goal tool, and run continuation as foreground control flow.
 
 Neo should skip token accounting, hidden internal context, dynamic tool visibility, and a separate evaluator model in Phase 1.
 
@@ -142,9 +146,9 @@ flowchart TD
     C --> D["Send first normal user turn"]
     D --> E{"Goal still active?"}
     E -->|no| F["Stop"]
-    E -->|yes| G{"TUI idle and input empty?"}
-    G -->|no| H["Wait for next scheduler check"]
-    G -->|yes| I["Append visible continuation prompt"]
+    E -->|yes| G{"Interrupt requested?"}
+    G -->|yes| H["Pause goal"]
+    G -->|no| I["Append visible continuation prompt"]
     I --> D
 ```
 
@@ -169,7 +173,7 @@ The product can say:
 - The user and system own pause, resume, clear, and budgets.
 - The model can only request `complete` or `blocked`.
 - Completion and blocked claims are visible in the transcript and persisted state.
-- The scheduler only continues when the TUI is idle.
+- Continuation is foreground and only waits for the previous turn to finish.
 
 That is easier to explain and easier to test.
 
@@ -185,8 +189,8 @@ It should not add a second evaluator until there is evidence that self-reported 
 |--------|-------------------|-------------------------------|------------------------|---------------|-----------|
 | Hermes | Separate judge model after each turn. | Normal continuation prompt is queued. | Session metadata keyed by session ID. | Easy to graft onto an existing chat loop. | Judge parse failures and weak transcript evidence become product behavior. |
 | Claude Code | Small fast evaluator model through a session-scoped Stop hook. | Stop hook starts another turn when the evaluator says not done. | Current session. | Very simple user model and independent evaluation. | Requires hook/evaluator machinery and only judges surfaced evidence. |
-| Codex | Agent calls goal tools to mark complete or blocked. | Runtime injects goal context when the thread is idle. | Thread goal state. | Explicit inspectable state and serialized product transitions. | The working model can mark its own goal complete. |
-| Neo Phase 1 | Agent calls one narrow goal tool, with manager-enforced transitions. | TUI appends a visible continuation prompt only when idle and input is empty. | Optional `goal` field in session JSON. | Simple, reliable, easy to explain, close to current Neo architecture. | Completion quality depends on prompt discipline and evidence checks. |
+| Codex | Agent calls goal tools to mark complete or blocked. | Runtime injects goal context when the previous turn is done and the thread can accept work. | Thread goal state. | Explicit inspectable state and serialized product transitions. | The working model can mark its own goal complete. |
+| Neo Phase 1 | Agent calls one narrow goal tool, with manager-enforced transitions. | TUI appends the next visible continuation prompt immediately after each non-terminal goal turn. | Optional `goal` field in session JSON. | Simple, reliable, easy to explain, close to current Neo architecture. | Completion quality depends on prompt discipline and interrupt handling. |
 
 ## 2. Decision
 
@@ -204,7 +208,7 @@ Use plain English as the user surface and typed Go state as the internal represe
 
 Phase 1 should use a Codex-style goal tool for explicit completion and blocked transitions.
 
-Phase 1 should use a Hermes-style TUI scheduler to enqueue continuation turns when idle.
+Phase 1 should use foreground TUI orchestration to chain continuation turns until the goal stops.
 
 Favor simple, visible, reliable behavior over a more autonomous system that is harder to reason about.
 
@@ -246,9 +250,9 @@ The first useful version is:
 
 `/goal status` shows the active goal, state, attempts used, budget, and last reason.
 
-`/goal pause` stops automatic continuation but keeps the goal.
+`/goal pause` stops the foreground goal runner but keeps the goal.
 
-`/goal resume` resumes automatic continuation with a fresh attempt budget.
+`/goal resume` restarts the foreground goal runner from the saved goal state.
 
 `/goal clear` removes the goal.
 
@@ -287,7 +291,7 @@ Switching sessions switches the goal context because the goal is part of that se
 
 `internal/goal.Manager` owns the current state.
 
-The TUI, goal tool, scheduler, and session layer should ask the manager to make transitions instead of mutating state directly.
+The TUI, goal tool, runner, and session layer should ask the manager to make transitions instead of mutating state directly.
 
 The manager is deliberately boring:
 
@@ -297,6 +301,29 @@ The manager is deliberately boring:
 - It enforces the blocked threshold.
 - It rejects stale tool updates for an old goal ID.
 - It returns snapshots for rendering, persistence, and tool output.
+
+The manager should expose explicit transition methods rather than generic setters:
+
+```go
+Start(objective string, contract Contract) Snapshot
+Pause(reason string) Snapshot
+Resume(reason string) (Snapshot, ResumePlan)
+Clear(reason string) Snapshot
+MarkComplete(goalID, reason string) (Snapshot, error)
+MarkBlocked(goalID, reason string) (Snapshot, error)
+MarkBudgetLimited(reason string) Snapshot
+```
+
+Valid resume transitions are:
+
+```text
+paused        -> active, preserve Attempts.Used
+blocked       -> active, preserve Attempts.Used, reset BlockedAudit
+budget_limited -> active, reset Attempts.Used
+usage_limited -> active, preserve Attempts.Used
+```
+
+Every other resume attempt returns a user-visible error and does not mutate state.
 
 The minimum shape is:
 
@@ -411,6 +438,14 @@ The goal runner sits above the existing agent loop.
 
 It should not make `internal/agent` understand goals.
 
+Once a goal starts, Neo enters foreground goal mode.
+
+Foreground goal mode owns the session until the goal reaches a terminal state or the user interrupts it.
+
+Normal chat input should not be accepted as a side conversation during foreground goal mode.
+
+If the user wants to talk about something else, they should interrupt or pause the goal first.
+
 Control flow:
 
 ```text
@@ -420,15 +455,19 @@ save session immediately
 send objective as the first normal user turn
 after send completes, save session again
 if goal status is complete, blocked, paused, cleared, budget-limited, or usage-limited: stop
+if interrupt was requested during the turn: pause goal and stop
 if attempts are exhausted: mark budget_limited and stop
-if TUI is idle and the input buffer is empty: enqueue a continuation turn
-otherwise do nothing until the next scheduler check
+enqueue the next continuation turn immediately
 repeat
 ```
 
-Phase 1 should not implement a real chat message queue.
+The word "idle" should only appear in implementation notes.
 
-User input wins by preventing automatic continuation, not by being queued behind a running turn.
+It means "the previous agent turn has ended and it is safe to start the next one."
+
+It must not mean "the user can sneak unrelated chat between goal turns."
+
+Phase 1 should not implement a real chat message queue.
 
 Continuation turns are normal user-role messages in Phase 1.
 
@@ -444,7 +483,170 @@ It must tell the agent not to redefine success around a smaller task.
 
 It must tell the agent to call `goal blocked` only after the blocked threshold is satisfied.
 
-## 8. Budget
+## 8. Interruption
+
+Interruption is a first-class part of the `/goal` design.
+
+A foreground goal needs a reliable way to stop mid-flow.
+
+Hermes treats interruption as a goal pause signal.
+
+When a turn is interrupted, Hermes sets a per-turn interrupted flag, skips judge-and-requeue, and pauses the goal so the user can resume or clear it.
+
+Codex has turn abort lifecycle hooks and accounts goal progress on abort.
+
+Codex also uses idle continuation only after the active turn is over.
+
+Neo already has a partial cancellation path.
+
+Esc calls the current `sendCancel`.
+
+The TUI passes a cancellable context into `Agent.SendWith`.
+
+The agent passes that context into provider calls and tool calls.
+
+The bash tool uses `exec.CommandContext`, so cancellation reaches the shell process.
+
+There is also a unit test proving a provider can return `context.Canceled`.
+
+That is not enough to declare interruption solved.
+
+`interrupt_requested` is runner-local state, not a persisted goal status.
+
+Persist only the resulting user-visible state: `paused` or `cleared`.
+
+Phase 1 has one pause interrupt gesture and one quit gesture.
+
+Esc pauses the goal.
+
+Ctrl+C and Ctrl+D quit Neo.
+
+If Ctrl+C or Ctrl+D happens while a goal is running, Neo must mark the goal `paused`, save the session, request cancellation, and then quit.
+
+That prevents session resume from accidentally continuing work the user tried to stop.
+
+The design needs tests for these cases:
+
+- Esc during a provider call returns promptly and does not append a continuation.
+- Esc during bash cancels the command and does not leave orphaned child processes.
+- Esc during file/search tools exits promptly.
+- Esc during permission approval denies the request and pauses the goal.
+- Ctrl+C during a goal saves `paused` before quitting.
+- A second Esc while cancellation is pending is a no-op except for status rendering.
+- Session state is saved after the goal pauses.
+
+Recommended Phase 1 behavior:
+
+```text
+Esc during a goal turn:
+  request cancellation
+  mark goal interrupt_requested
+  wait for the active turn to return
+  mark goal paused with reason "interrupted"
+  save session
+  do not enqueue continuation
+
+/goal pause during a goal turn:
+  same as Esc, but reason is "user-paused"
+
+/goal clear during a goal turn:
+  request cancellation
+  mark goal cleared
+  save session
+  do not enqueue continuation
+
+Ctrl+C or Ctrl+D during a goal turn:
+  mark goal paused with reason "quit-interrupted"
+  save session synchronously
+  request cancellation
+  quit Neo
+```
+
+While cancellation is pending, the UI should show:
+
+```text
+Interrupting goal...
+Waiting for the active model or tool call to stop.
+```
+
+There is no timeout-based forced kill in Phase 1.
+
+The operation remains in `interrupting` UI state until the active send returns.
+
+If the user wants out while cancellation is still pending, Ctrl+C saves the goal as paused and quits.
+
+## 9. Pause And Resume
+
+Pause and resume are user-owned control transitions.
+
+The model cannot pause or resume a goal through the goal tool.
+
+Pause means "stop running this goal after the current cancellation or turn boundary, but keep the saved objective and progress."
+
+Resume means "start the foreground goal runner again from the saved goal state."
+
+### How to pause a goal
+
+Pausing when no goal turn is active is immediate.
+
+Neo marks the goal `paused`, records `LastReason`, saves the session, and does not enqueue a continuation turn.
+
+Pausing a running goal is an interrupt.
+
+Neo requests cancellation of the active turn, marks the goal `interrupt_requested` internally, waits for the active send to return, then marks the goal `paused`.
+
+The transcript should show that the goal was paused by the user.
+
+The next continuation must not be started after a pause.
+
+The attempt count is preserved.
+
+If the paused turn had already started as a continuation attempt, that attempt remains counted.
+
+Cancellation does not rewind work that already began.
+
+### How to resume a goal
+
+`/goal resume` is valid when the saved goal is `paused`, `blocked`, `budget_limited`, or `usage_limited`.
+
+It is not valid for `complete`, `cleared`, or missing goals.
+
+Resuming a paused goal preserves the attempt count and remaining budget.
+
+Resuming a blocked goal preserves the attempt count and starts a fresh blocked audit.
+
+Resuming a budget-limited goal starts a new attempt window by resetting `Attempts.Used` to `0`.
+
+Resuming a usage-limited goal preserves attempts and clears the usage-limited stop reason.
+
+Neo marks the goal `active`, records `LastReason`, saves the session, and immediately starts the next visible continuation turn.
+
+Resume does not replay the original objective as a brand-new first turn.
+
+Resume uses the normal continuation prompt with the saved objective, current transcript, attempt state, and stopping rules.
+
+Resume should be explicit.
+
+Neo should not automatically resume a paused goal just because the session is opened again.
+
+Status transition summary:
+
+```text
+active + Esc              -> paused after cancellation
+active + /goal pause      -> paused after cancellation
+paused + /goal resume     -> active, then immediate continuation
+blocked + /goal resume    -> active with fresh blocked audit, then immediate continuation
+budget_limited + resume   -> active with Attempts.Used reset to 0, then immediate continuation
+usage_limited + resume    -> active, then immediate continuation
+complete + resume         -> reject; start a new /goal instead
+cleared + resume          -> reject; there is no saved goal to resume
+```
+
+This follows Codex's rule that a resumed blocked goal starts a fresh blocked audit.
+
+The model must prove the blocker again across the normal blocked threshold before it can mark the goal blocked again.
+
+## 10. Budget
 
 Phase 1 should use attempts, not token budget.
 
@@ -461,6 +663,10 @@ An attempt is one automatic continuation turn.
 
 The initial `/goal <objective>` turn does not count as an automatic continuation attempt.
 
+Neo should increment `Attempts.Used` immediately before starting each continuation turn.
+
+A cancelled continuation still counts because the work began.
+
 When attempts are exhausted, mark the goal `budget_limited` and show a handoff:
 
 ```text
@@ -473,44 +679,44 @@ Later, add token and wall-clock accounting.
 
 Codex shows that token accounting is valuable, but it is too much for Phase 1.
 
-## 9. User Input And Interrupts
+## 11. User Input During A Goal
 
-User input always wins.
+Normal user input does not interleave with a foreground goal.
 
-In Phase 1, that means automatic continuation only starts when Neo is idle and the user is not actively interacting with the input.
+The goal owns the session until it stops.
 
-Neo may enqueue a continuation only if:
+If the user types while a goal is running, Neo should treat that as intent to interrupt, not as a side prompt.
 
-- the goal is still active
-- no agent turn is running
-- the input buffer is empty
-- no picker or modal is active
-- no pause, clear, interrupt, or cancellation is pending
-- the attempt budget has not been exhausted
+Phase 1 should keep the input behavior simple:
 
-If the user starts typing before the continuation begins, Neo should not enqueue the continuation.
+- Enter is disabled for normal chat while a goal turn is running.
+- Esc interrupts and pauses the goal.
+- `/goal pause` interrupts and pauses the goal.
+- `/goal clear` interrupts and clears the goal.
+- `/goal status` is allowed because it only reads state.
 
-After the user's next turn finishes, the goal scheduler checks again.
+After the goal is paused, the user can send normal chat again.
 
-Slash commands that inspect or mutate goal control state should be allowed while a turn is active if they are safe.
+If we later want "message interrupts and then runs after the pause," copy Hermes's interrupt queue deliberately.
 
-Slash commands that start new work should require idle.
+Do not accidentally build that queue as part of Phase 1.
 
-Esc or Ctrl-C during an active turn should pause the goal after cancellation.
-
-It should not immediately enqueue another continuation.
-
-The existing `/clear` command should also clear the active goal and cancel any pending continuation.
+The existing `/clear` command should clear the active goal and cancel any pending continuation.
 
 If the user wants to preserve the goal without continuing, they should use `/goal pause`.
 
-## 10. Workflow Relationship
+## 12. Workflow Relationship
 
 Do not merge goals and workflows.
 
 The `workflow` tool is for step visibility.
 
 The `goal` tool is for lifecycle control.
+
+The UI should make both visible because they answer different questions:
+
+- Goal: why Neo is still running, what the durable objective is, and when automatic continuation stops.
+- Workflow: what steps the agent is taking inside the current turn or goal.
 
 A good goal turn may use the workflow tool to show its current plan.
 
@@ -520,7 +726,48 @@ Only `goal complete` or a user command should complete the goal.
 
 This keeps "how I am doing it" separate from "whether the durable objective is done."
 
-## 11. Safety
+Reuse the existing workflow panel's visual language for goal progress.
+
+Do not store the goal itself as a workflow item.
+
+The goal panel should be driven by `internal/goal.Manager` snapshots, not by model-authored workflow events.
+
+The workflow panel can still appear during a goal run when the agent creates one.
+
+In that case, show goal status and workflow steps together as one progress area rather than two competing status surfaces.
+
+Example active goal panel:
+
+```text
+Goal active - 3/20 attempts
+[running] Objective: Fix every failing test in internal/session and verify go test ./...
+[running] Current turn: running tests after session persistence changes
+[pending] Completion: waiting for concrete evidence before goal complete
+```
+
+Example goal with workflow steps:
+
+```text
+Goal active - 3/20 attempts
+[running] Objective: Fix every failing test in internal/session and verify go test ./...
+
+Workflow
+[done] Inspect session save/load behavior
+[running] Patch goal persistence edge cases - go test ./internal/session
+[pending] Run full relevant test suite
+[pending] Update docs if behavior changed
+```
+
+Implementation guidance:
+
+- Reuse `workflowBlock` styling: title, glyphs, concise detail text, and the same bottom-panel placement.
+- Prefer extracting a small shared progress renderer over duplicating formatting logic.
+- Keep `Tab` as the toggle for this progress area when either a goal or workflow exists.
+- Do not require every goal to create a workflow checklist.
+- Encourage the agent to use `workflow` only when the next work is meaningfully multi-step.
+- Keep terminal goal states visible until `/goal clear` or `/clear`, so the user can see why automatic continuation stopped.
+
+## 13. Safety
 
 Goals do not grant new permissions.
 
@@ -538,7 +785,7 @@ Path boundaries can be advisory in Phase 1.
 
 Enforced path boundaries can come later through the permission layer.
 
-## 12. Implementation Boundaries
+## 14. Implementation Boundaries
 
 Keep the core agent loop policy-free.
 
@@ -548,7 +795,7 @@ Likely package boundaries:
 |------|----------------|
 | `internal/goal` | Goal manager, state snapshots, status transitions, blocked threshold, continuation prompt, tool implementation. |
 | `internal/session` | Persist and restore optional goal state. |
-| `internal/tui` | Slash commands, status rendering, idle continuation scheduling, interrupt handling. |
+| `internal/tui` | Slash commands, status rendering, foreground continuation orchestration, interrupt handling. |
 | `internal/config` | `goals.max_attempts`. |
 | `cmd/neo-docs` | Generated docs for config and commands. |
 
@@ -560,7 +807,7 @@ Do not implement this by adding YAML files.
 
 Do not implement this by adding a general-purpose chat queue.
 
-## 13. Alternatives Considered
+## 15. Alternatives Considered
 
 Hermes-style external judge:
 
@@ -591,25 +838,33 @@ Real chat queue:
 - Upside: the user could submit normal messages while a goal turn is running.
 - Downside: it creates ordering, cancellation, editing, transcript, and slash-command priority questions.
 - Downside: Neo already has a simpler model where normal chat waits until the current turn finishes.
-- Downside: goals only need to avoid interrupting the user, not build a second input system.
+- Downside: goals should be foreground work, so a side queue is the wrong product shape.
 
-The Phase 1 recommendation is Codex-style goal tool plus Hermes-style TUI scheduling.
+Idle continuation:
 
-## 14. Build Order
+- Upside: it matches Codex's runtime language and avoids overlapping turns.
+- Downside: phrased as product behavior, it makes goals sound like background work.
+- Decision: keep the safety guard, but describe the product as foreground continuation.
+
+The Phase 1 recommendation is Codex-style goal tool plus foreground TUI orchestration.
+
+## 16. Build Order
 
 1. Add `internal/goal` state, manager transitions, blocked audit, and tests.
 2. Add optional goal state to `session.Session` and session save/load tests.
 3. Save new goal state before the first send and after each transition.
 4. Add the always-registered `goal` tool with `get`, `complete`, and `blocked` actions.
 5. Add `/goal`, `/goal status`, `/goal pause`, `/goal resume`, and `/goal clear`.
-6. Make existing `/clear` clear the active goal and cancel pending continuation.
-7. Add continuation prompt generation and TUI idle scheduling.
-8. Add the simple scheduler rule: continue only when idle, input is empty, and no modal is active.
-9. Add attempt budget handling and `budget_limited`.
-10. Add interrupt behavior so cancellation pauses the goal.
-11. Add config docs through `go run ./cmd/neo-docs`.
-12. Add optional `/goal draft` contract generation later.
-13. Add optional wait barriers later.
+6. Add manager tests for pause, resume, blocked resume, usage-limited resume, invalid resume, and budget-limited resume.
+7. Make existing `/clear` clear the active goal and cancel pending continuation.
+8. Add continuation prompt generation and foreground TUI orchestration.
+9. Add the simple runner rule: continue immediately after each non-terminal goal turn.
+10. Add attempt budget handling and `budget_limited`.
+11. Add interrupt behavior so Esc or `/goal pause` cancels the active turn and pauses the goal.
+12. Add tests proving provider, bash, file, and search cancellation stop goal continuation.
+13. Add config docs through `go run ./cmd/neo-docs`.
+14. Add optional `/goal draft` contract generation later.
+15. Add optional wait barriers later.
 
 Stop before scheduled loops.
 

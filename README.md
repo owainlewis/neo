@@ -17,8 +17,8 @@ layered on as independent modules.
 
 - **Interactive chat.** `neo` opens a Bubble Tea terminal UI. Type a task and
   watch the agent work.
-- **Small tool surface.** Read, search, shell, and edit tools are inspectable
-  and permissioned.
+- **Small tool surface.** Read, search, shell, edit, workflow, and subagent
+  tools are inspectable and permissioned.
 - **Permission modes.** Choose `ask`, `trusted`, or `readonly` depending on how
   much approval you want before Neo runs tools.
 - **Visible workflows.** Ask Neo to run a workflow or provide numbered steps and
@@ -99,13 +99,15 @@ README alone.
 
 ### 1. Choose a backend
 
-Neo defaults to Anthropic. Use OpenAI only when you set `provider: openai`.
+Neo defaults to Anthropic.
+Use OpenAI when you set `provider: openai`, or OpenRouter when you set `provider: openrouter`.
 
 | Backend | What you need | Config | Extra step |
 |------|------|------|------|
 | Anthropic | `ANTHROPIC_API_KEY` | No config required | None |
 | OpenAI API key | `OPENAI_API_KEY` | `provider: openai` | None |
 | OpenAI subscription | ChatGPT/Codex subscription | `provider: openai` and `openai_auth: subscription` | Run `neo login` once |
+| OpenRouter | `OPENROUTER_API_KEY` | `provider: openrouter` | None |
 
 If you are using OpenAI with an API key, you do not need `neo login`.
 `neo login` is only for the device-code subscription flow.
@@ -130,10 +132,16 @@ OpenAI subscription:
 neo login
 ```
 
+OpenRouter:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-..."
+```
+
 `neo login` prints a device-code URL and one-time code, then stores the
 subscription credentials in `~/.neo/auth.json`.
 
-### 3. Create `neo.yaml` only if you need OpenAI
+### 3. Create `neo.yaml` only if you need OpenAI or OpenRouter
 
 Anthropic users can skip this step because `provider: anthropic` is the default.
 
@@ -149,6 +157,12 @@ OpenAI subscription:
 ```yaml
 provider: openai
 openai_auth: subscription
+```
+
+OpenRouter:
+
+```yaml
+provider: openrouter
 ```
 
 Neo reads the first config file it finds in this order:
@@ -189,10 +203,11 @@ Summarize this repository and suggest a good first change.
 
 | Key | Default | Meaning |
 |------|------|------|
-| `provider` | `anthropic` | Select `anthropic` or `openai` |
+| `provider` | `anthropic` | Select `anthropic`, `openai`, or `openrouter` |
 | `openai_auth` | `api_key` when using OpenAI | Choose `api_key` or `subscription` |
-| `permissions.mode` | `ask` | Prompt before bash and file mutations |
+| `permissions.mode` | `trusted` | Run built-in tools automatically, asking before high-risk bash |
 | `features.agents_file` | `true` | Load `AGENTS.md` instructions |
+| `features.memory` | `true` | Load and update project-root `memory.md` |
 | `features.skills` | `true` | Enable `.neo/skills` discovery and `$name` expansion |
 | `features.prompt_caching` | `true` | Cache the stable system prompt prefix when supported |
 
@@ -321,7 +336,8 @@ Constraints:
 
 ## Configuration
 
-Neo defaults to Anthropic. Set `provider: openai` if you want OpenAI instead.
+Neo defaults to Anthropic.
+Set `provider: openai` for OpenAI, or `provider: openrouter` for OpenRouter.
 Config files are not merged; the first file found wins.
 
 OpenAI API key:
@@ -338,12 +354,19 @@ provider: openai
 openai_auth: subscription
 ```
 
+OpenRouter:
+
+```yaml
+provider: openrouter
+```
+
 **`neo.yaml` reference:**
 
 ```yaml
-# LLM backend: "anthropic" (default) or "openai".
-# anthropic -> requires ANTHROPIC_API_KEY
-# openai    -> uses the Responses API; auth via openai_auth.
+# LLM backend: "anthropic" (default), "openai", or "openrouter".
+# anthropic  -> requires ANTHROPIC_API_KEY
+# openai     -> uses the Responses API; auth via openai_auth.
+# openrouter -> uses Chat Completions via OPENROUTER_API_KEY.
 provider: anthropic
 
 # How the "openai" provider authenticates:
@@ -355,6 +378,7 @@ openai_auth: api_key
 #   anthropic                -> claude-opus-4-8
 #   openai + api_key         -> gpt-4o
 #   openai + subscription    -> gpt-5-codex
+#   openrouter               -> anthropic/claude-sonnet-4.5
 model: claude-opus-4-8
 
 # Tool permission mode:
@@ -396,7 +420,7 @@ ownership/permission changes, `git clean -fd`, and `git reset --hard`.
 
 ## Tools
 
-The agent has these built-in tools:
+The chat agent has these tools:
 
 | Tool | Description |
 |------|-------------|
@@ -406,6 +430,8 @@ The agent has these built-in tools:
 | `bash` | Run a shell command through `/bin/bash -c` with a 2-minute timeout |
 | `write_file` | Create or overwrite a file |
 | `edit_file` | Replace one exact string match in a file |
+| `workflow` | Create or update the visible workflow checklist |
+| `agent` | Spawn a fresh subagent with a self-contained prompt |
 
 ## Project Layout
 
@@ -415,12 +441,14 @@ internal/agent/         Core agent loop and event model
 internal/auth/          OpenAI subscription device-code auth and credential storage
 internal/config/        Config loading and feature flags
 internal/config/defaults/   Embedded neo.yaml
-internal/llm/           Provider interface + Anthropic and OpenAI adapters
-internal/projectctx/    AGENTS.md discovery and system-prompt injection
+internal/factory/       Subagent runtime for the chat agent tool
+internal/llm/           Provider interface + Anthropic, OpenAI, and OpenRouter adapters
+internal/projectctx/    AGENTS.md, memory.md, and git-context prompt injection
 internal/session/       Saved session metadata and transcripts
 internal/skills/        skill discovery, catalog, and $name expansion
 internal/tools/         bash, read_file, write_file, edit_file, grep, glob
 internal/tui/           Bubble Tea terminal UI
+internal/workflow/      Visible workflow checklist tool
 ```
 
 ## Developer Docs
