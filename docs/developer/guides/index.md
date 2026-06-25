@@ -17,6 +17,14 @@ These guides explain Neo's core features in plain language. The reference docs s
 | [Compaction](compaction.md) | Why long chats need context management and what Neo has today. |
 | [Memory](memory.md) | What memory means for a coding agent and what should stay out of scope. |
 
+## PR Readiness Loops
+
+Use a normal prompt for one bounded change.
+
+Use a persistent PR-readiness goal when external state can change after the first pass, such as CI, generated-doc checks, or automated review comments.
+
+That loop should re-read live PR state, fix only actionable failures, push updates, then re-check until the PR is ready or a real blocker repeats.
+
 ## How To Read These
 
 Each guide uses the same shape:
