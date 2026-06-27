@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/owainlewis/neo/internal/atomicfile"
 )
 
 // Store persists subscription credentials to a JSON file (default ~/.neo/auth.json),
@@ -86,29 +88,9 @@ func (s *Store) load() (map[string]Credentials, error) {
 }
 
 func (s *Store) save(all map[string]Credentials) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(s.path), err)
-	}
 	b, err := json.MarshalIndent(all, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".auth-*.json")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, s.path)
+	return atomicfile.Write(s.path, b, 0o600, 0o700)
 }

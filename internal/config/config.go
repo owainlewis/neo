@@ -100,9 +100,8 @@ func featureEnabled(flag *bool, def bool) bool {
 // First hit wins — no merging.
 func Load() (*Config, error) {
 	home, _ := os.UserHomeDir()
-	userCfg := filepath.Join(home, userConfigDir, userConfigName)
 
-	for _, path := range []string{projectConfigName, userCfg} {
+	for _, path := range configPaths(home) {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -124,6 +123,14 @@ func Load() (*Config, error) {
 	}
 	cfg.source = "embedded"
 	return cfg, nil
+}
+
+func configPaths(home string) []string {
+	paths := []string{projectConfigName}
+	if home != "" {
+		paths = append(paths, filepath.Join(home, userConfigDir, userConfigName))
+	}
+	return paths
 }
 
 func parseConfig(b []byte, source string) (*Config, error) {
