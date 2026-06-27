@@ -30,6 +30,13 @@ func writeFile(t *testing.T, path, body string) {
 	}
 }
 
+func TestConfigPathsSkipUserConfigWhenHomeIsEmpty(t *testing.T) {
+	got := configPaths("")
+	if len(got) != 1 || got[0] != projectConfigName {
+		t.Fatalf("config paths = %#v, want only %q", got, projectConfigName)
+	}
+}
+
 func TestLoad_FallsBackToEmbeddedWhenNoLocalConfig(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		// Force the HOME lookup to a place with no config.
