@@ -35,6 +35,7 @@ var keyBindings = []struct {
 	{"⌥↩", "newline"},
 	{"!cmd", "run shell command"},
 	{"tab", "toggle workflow panel (accepts picker selection first)"},
+	{"ctrl+o", "expand/collapse latest truncated tool output"},
 	{"esc", "cancel the current turn"},
 	{"ctrl+l", "clear the screen"},
 	{"ctrl+c", "quit"},
