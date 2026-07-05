@@ -208,10 +208,14 @@ func TestSlashCommand_ToolsPermissionsTokensModelAndClear(t *testing.T) {
 	}
 
 	m := makeTestModel()
+	m.ag.SetUsage(llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4})
 	m.blocks = append(m.blocks, noticeBlock{text: "x"})
 	m.handleSlashCommand("/clear")
 	if len(m.blocks) != 0 {
 		t.Fatalf("/clear left %d blocks", len(m.blocks))
+	}
+	if got := m.ag.Usage(); got != (llm.Usage{}) {
+		t.Fatalf("/clear left usage = %+v", got)
 	}
 }
 

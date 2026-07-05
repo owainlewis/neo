@@ -63,6 +63,7 @@ type Config struct {
 	MaxTurns     int
 	OnEvent      func(Event)
 	Messages     []llm.Message
+	Usage        llm.Usage
 }
 
 type Agent struct {
@@ -81,7 +82,7 @@ func New(cfg Config) *Agent {
 	if cfg.Compactor == nil {
 		cfg.Compactor = compact.NoCompaction{}
 	}
-	return &Agent{cfg: cfg, messages: cloneMessages(cfg.Messages)}
+	return &Agent{cfg: cfg, messages: cloneMessages(cfg.Messages), usage: cfg.Usage}
 }
 
 func (a *Agent) emit(e Event) {
@@ -134,8 +135,13 @@ func (a *Agent) ReplaceTranscript(messages []llm.Message) {
 	a.usage = llm.Usage{}
 }
 
+func (a *Agent) SetUsage(usage llm.Usage) {
+	a.usage = usage
+}
+
 func (a *Agent) Clear() {
 	a.messages = nil
+	a.usage = llm.Usage{}
 }
 
 func (a *Agent) ToolSpecs() []llm.ToolSpec {

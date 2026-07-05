@@ -566,6 +566,43 @@ func TestAgent_AccumulatesUsage(t *testing.T) {
 	}
 }
 
+func TestAgent_RestoresAndContinuesUsage(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{Content: []llm.ContentBlock{{Type: "text", Text: "next"}}, StopReason: "end_turn", Usage: llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}},
+	}}
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(),
+		Usage:    llm.Usage{InputTokens: 10, OutputTokens: 20, CacheCreationTokens: 30, CacheReadTokens: 40},
+	})
+	if got, want := ag.Usage(), (llm.Usage{InputTokens: 10, OutputTokens: 20, CacheCreationTokens: 30, CacheReadTokens: 40}); got != want {
+		t.Fatalf("restored usage = %+v, want %+v", got, want)
+	}
+	if _, err := ag.Send(context.Background(), "hi"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	want := llm.Usage{InputTokens: 11, OutputTokens: 22, CacheCreationTokens: 33, CacheReadTokens: 44}
+	if got := ag.Usage(); got != want {
+		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+}
+
+func TestAgent_ClearResetsUsage(t *testing.T) {
+	ag := New(Config{
+		Provider: &llmtest.FakeProvider{},
+		Usage:    llm.Usage{InputTokens: 10, OutputTokens: 20, CacheCreationTokens: 30, CacheReadTokens: 40},
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "old"}}}},
+	})
+	ag.Clear()
+	if len(ag.Transcript()) != 0 {
+		t.Fatalf("clear left transcript: %#v", ag.Transcript())
+	}
+	if got := ag.Usage(); got != (llm.Usage{}) {
+		t.Fatalf("clear left usage = %+v", got)
+	}
+}
+
 func TestAgent_CancelledProviderReturnsContextCanceled(t *testing.T) {
 	ag := newTestAgent(t, cancelProvider{})
 	ctx, cancel := context.WithCancel(context.Background())

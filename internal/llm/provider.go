@@ -74,10 +74,10 @@ type Request struct {
 // Usage reports token accounting for a single completion. Cache fields are
 // zero for providers that don't support prompt caching.
 type Usage struct {
-	InputTokens         int
-	OutputTokens        int
-	CacheCreationTokens int // tokens written to the cache on this request
-	CacheReadTokens     int // tokens served from the cache on this request
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	CacheCreationTokens int `json:"cache_creation_tokens"` // tokens written to the cache on this request
+	CacheReadTokens     int `json:"cache_read_tokens"`     // tokens served from the cache on this request
 }
 
 type Response struct {
