@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
@@ -43,25 +44,50 @@ func (b Bash) Run(ctx context.Context, input map[string]any) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	c := exec.CommandContext(ctx, "/bin/bash", "-c", cmd)
+	c := exec.Command("/bin/bash", "-c", cmd)
 	if b.CWD != "" {
 		c.Dir = b.CWD
 	}
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var buf bytes.Buffer
 	c.Stdout = &buf
 	c.Stderr = &buf
-	runErr := c.Run()
+	if err := c.Start(); err != nil {
+		return buf.String(), err
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Wait()
+	}()
+
+	var runErr error
+	var ctxErr error
+	select {
+	case runErr = <-done:
+	case <-ctx.Done():
+		ctxErr = ctx.Err()
+		killProcessGroup(c)
+		runErr = <-done
+	}
+
 	out := buf.String()
+	if ctxErr != nil {
+		return out, fmt.Errorf("bash cancelled: %w", ctxErr)
+	}
 	if runErr != nil {
 		// Surface as an error so the agent marks the tool_result with is_error=true.
 		// Keep the captured output in the message so the model can see what happened.
-		if ctx.Err() != nil {
-			return out, fmt.Errorf("bash cancelled: %w", ctx.Err())
-		}
 		if ee, ok := runErr.(*exec.ExitError); ok {
 			return out, fmt.Errorf("exit %d", ee.ExitCode())
 		}
 		return out, runErr
 	}
 	return out, nil
+}
+
+func killProcessGroup(c *exec.Cmd) {
+	if c.Process == nil {
+		return
+	}
+	_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
 }
