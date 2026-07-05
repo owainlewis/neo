@@ -79,6 +79,8 @@ func main() {
 		runSessions(ctx, os.Args[2:])
 	case "doctor":
 		os.Exit(runDoctor(ctx))
+	case "update":
+		runUpdate(ctx, os.Args[2:])
 	case "resume":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: neo resume <session-id>")
@@ -109,6 +111,7 @@ USAGE:
   neo sessions search <query>
                      Search saved session transcripts
   neo doctor         Check local config and environment
+  neo update --check Check for a stable release without installing
   neo resume <id>    Resume a saved chat session
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials

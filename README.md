@@ -182,6 +182,7 @@ Summarize this repository and suggest a good first change.
 | `neo sessions` | List saved chats |
 | `neo doctor` | Check local config, credentials, sessions, git, and workspace |
 | `neo sessions search <query>` | Search saved chat transcripts |
+| `neo update --check` | Check for a stable release without installing |
 | `neo resume <id>` | Resume a saved chat |
 | `neo login` | Set up OpenAI subscription auth |
 | `neo logout` | Remove stored OpenAI subscription credentials |
@@ -208,6 +209,7 @@ neo chat
 neo sessions
 neo doctor
 neo sessions search "old task"
+neo update --check
 neo resume <session-id>
 
 neo login
