@@ -573,7 +573,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendCancel()
 			m.sendCancel = nil
 		}
-		if msg.err != nil && !errors.Is(msg.err, context.Canceled) && !errors.Is(msg.err, agent.ErrMaxTurns) {
+		if errors.Is(msg.err, context.Canceled) {
+			m.appendBlock(noticeBlock{text: "turn canceled"})
+		} else if msg.err != nil && !errors.Is(msg.err, agent.ErrMaxTurns) {
 			m.appendBlock(errorBlock{err: msg.err})
 		}
 		cmds = append(cmds, refreshBranch())

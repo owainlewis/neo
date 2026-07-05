@@ -271,6 +271,11 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 		a.messages = append(a.messages, assistantMsg)
 		if len(toolResults) > 0 {
 			a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: toolResults})
+			if err := ctx.Err(); err != nil {
+				logx.Debug("agent turn canceled after tool results", "turn", turn+1, "error", err.Error())
+				a.emit(Event{Kind: EventError, Err: err})
+				return strings.TrimSpace(finalText.String()), err
+			}
 			continue
 		}
 

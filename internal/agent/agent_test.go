@@ -613,6 +613,37 @@ func TestAgent_CancelledProviderReturnsContextCanceled(t *testing.T) {
 	}
 }
 
+func TestAgent_CancelledToolCommitsRecoverableToolResult(t *testing.T) {
+	started := make(chan struct{})
+	prov := &cancelAfterToolProvider{}
+	ag := newTestAgent(t, prov, blockingTool{started: started})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(ctx, "run tool")
+		errc <- err
+	}()
+	<-started
+	cancel()
+	err := <-errc
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	transcript := ag.Transcript()
+	assertToolUseResultsPaired(t, transcript)
+	if len(transcript) != 3 {
+		t.Fatalf("transcript length = %d, want 3: %#v", len(transcript), transcript)
+	}
+	result := transcript[2].Content[0]
+	if result.Type != "tool_result" || !result.IsError || !strings.Contains(result.Content, "context canceled") {
+		t.Fatalf("tool result = %+v, want cancellation error", result)
+	}
+	if prov.calls != 1 {
+		t.Fatalf("provider calls = %d, want no follow-up provider call after canceled tool result", prov.calls)
+	}
+}
+
 func TestAgent_CompactorRunsBeforeProvider(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("ok")}}
 	comp := &countingCompactor{}
@@ -708,6 +739,39 @@ type cancelProvider struct{}
 
 func (cancelProvider) Name() string { return "cancel" }
 func (cancelProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	return nil, ctx.Err()
+}
+
+type blockingTool struct {
+	started chan struct{}
+}
+
+func (blockingTool) Name() string { return "block" }
+
+func (blockingTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: "block", Description: "block", InputSchema: map[string]any{"type": "object"}}
+}
+
+func (t blockingTool) Run(ctx context.Context, _ map[string]any) (string, error) {
+	close(t.started)
+	<-ctx.Done()
+	return "partial output", ctx.Err()
+}
+
+type cancelAfterToolProvider struct {
+	calls int
+}
+
+func (p *cancelAfterToolProvider) Name() string { return "cancel-after-tool" }
+
+func (p *cancelAfterToolProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	p.calls++
+	if p.calls == 1 {
+		return &llm.Response{
+			Content:    []llm.ContentBlock{{Type: "tool_use", ID: "call_1", Name: "block"}},
+			StopReason: "tool_use",
+		}, nil
+	}
 	return nil, ctx.Err()
 }
 
