@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"charm.land/glamour/v2"
+
+	"github.com/owainlewis/neo/internal/promptcmd"
 )
 
 // helpBlock renders the available slash commands and key bindings.
@@ -63,5 +65,40 @@ func (m *model) slashCommands() []slashCommand {
 	if m.memoryEnabled {
 		commands = append(commands, memorySlashCommand)
 	}
+	used := map[string]bool{}
+	for _, c := range commands {
+		used[c.cmd] = true
+	}
+	for _, c := range m.promptCommands {
+		cmd := "/" + c.Name
+		if used[cmd] {
+			continue
+		}
+		used[cmd] = true
+		commands = append(commands, slashCommand{cmd: cmd, desc: c.Description})
+	}
 	return commands
+}
+
+func (m *model) promptCommand(cmd string) (promptcmd.Command, bool) {
+	if builtinSlashCommand(cmd) {
+		return promptcmd.Command{}, false
+	}
+	name := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(cmd)), "/")
+	for _, c := range m.promptCommands {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return promptcmd.Command{}, false
+}
+
+func builtinSlashCommand(cmd string) bool {
+	cmd = strings.ToLower(strings.TrimSpace(cmd))
+	for _, c := range baseSlashCommands {
+		if c.cmd == cmd {
+			return true
+		}
+	}
+	return memorySlashCommand.cmd == cmd
 }

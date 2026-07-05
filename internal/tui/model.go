@@ -25,6 +25,7 @@ import (
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
+	"github.com/owainlewis/neo/internal/promptcmd"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workflow"
@@ -40,6 +41,7 @@ type Options struct {
 	ModelChoices    []ModelChoice
 	ProjectRoot     string
 	MemoryEnabled   bool
+	PromptCommands  []promptcmd.Command
 	StepEvents      <-chan factory.Event
 	WorkflowEvents  <-chan workflow.Event
 }
@@ -71,6 +73,10 @@ func WithProjectMemory(root string, enabled bool) Option {
 		opts.ProjectRoot = root
 		opts.MemoryEnabled = enabled
 	}
+}
+
+func WithPromptCommands(commands []promptcmd.Command) Option {
+	return func(opts *Options) { opts.PromptCommands = commands }
 }
 
 // WithStepEvents subscribes the TUI to the factory supervisor's event
@@ -215,6 +221,7 @@ type model struct {
 	modelChoices      []ModelChoice
 	projectRoot       string
 	memoryEnabled     bool
+	promptCommands    []promptcmd.Command
 }
 
 func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
@@ -319,6 +326,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		modelChoices:      normalizeModelChoices(modelTag, opts.ModelChoices),
 		projectRoot:       opts.ProjectRoot,
 		memoryEnabled:     opts.MemoryEnabled,
+		promptCommands:    opts.PromptCommands,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -431,7 +439,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.hideFilePicker()
 				m.layout()
 				m.syncInputHeight()
-				m.handleSlashCommand(text)
+				cmds = append(cmds, m.handleSlashCommand(text))
 				break
 			}
 			// A leading ! is a direct shell command alias. It runs through the
@@ -457,22 +465,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Pull any dragged/pasted image paths out of the input; they become
 			// attachments on the message, the rest stays as text.
 			text, images := extractImagePaths(text)
-			m.appendBlock(userBlock{text: rawInput})
-			m.maybeStartWorkflowFromUserText(text)
-			if len(images) > 0 {
-				m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
-			}
-			// Expand any $name skill references: the user sees what they typed,
-			// the agent receives the expanded message.
-			sent, used := skills.Expand(text, m.skills)
-			if len(used) > 0 {
-				m.appendBlock(noticeBlock{text: "applied skill: " + strings.Join(used, ", ")})
-			}
-			m.busy = true
-			m.busySince = time.Now()
-			m.caption = randomCaption()
-			m.setDotColor(colDotThinking)
-			cmds = append(cmds, m.startSend(sent, images))
+			cmds = append(cmds, m.submitUserTurn(rawInput, text, images))
 		case "shift+enter", "alt+enter", "ctrl+j":
 			// Insert a newline. Most terminals don't distinguish shift+enter
 			// from enter without enhanced-key reporting; alt+enter and
@@ -688,14 +681,31 @@ const elapsedThreshold = 3 * time.Second
 
 const defaultPlaceholder = "Ask neo anything…   ↩ send"
 
+func (m *model) submitUserTurn(displayText, agentText string, images []string) tea.Cmd {
+	m.appendBlock(userBlock{text: displayText})
+	m.maybeStartWorkflowFromUserText(agentText)
+	if len(images) > 0 {
+		m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
+	}
+	sent, used := skills.Expand(agentText, m.skills)
+	if len(used) > 0 {
+		m.appendBlock(noticeBlock{text: "applied skill: " + strings.Join(used, ", ")})
+	}
+	m.busy = true
+	m.busySince = time.Now()
+	m.caption = randomCaption()
+	m.setDotColor(colDotThinking)
+	return m.startSend(sent, images)
+}
+
 // handleSlashCommand parses slash commands. Called only when input begins
 // with '/'.
-func (m *model) handleSlashCommand(line string) {
+func (m *model) handleSlashCommand(line string) tea.Cmd {
 	parts := strings.Fields(line)
 	cmd := parts[0]
 	if m.busy && slashCommandRequiresIdle(cmd) {
 		m.appendBlock(errorBlock{err: fmt.Errorf("%s is unavailable while a turn is running", cmd)})
-		return
+		return nil
 	}
 	switch cmd {
 	case "/help":
@@ -722,8 +732,20 @@ func (m *model) handleSlashCommand(line string) {
 			}
 		}
 	default:
+		if pc, ok := m.promptCommand(cmd); ok {
+			if m.busy {
+				m.appendBlock(errorBlock{err: fmt.Errorf("%s is unavailable while a turn is running", cmd)})
+				return nil
+			}
+			args := strings.TrimSpace(strings.TrimPrefix(line, cmd))
+			expanded := promptcmd.Expand(pc, args)
+			send := m.submitUserTurn(line, expanded, nil)
+			m.appendBlock(noticeBlock{text: "expanded command: " + cmd})
+			return send
+		}
 		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: %s — try /help", cmd)})
 	}
+	return nil
 }
 
 func slashCommandRequiresIdle(cmd string) bool {
