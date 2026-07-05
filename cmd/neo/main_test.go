@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
+	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/session"
 )
@@ -226,6 +228,19 @@ func TestSessionModel_FallsBackForLegacySessionsWithoutProvider(t *testing.T) {
 	meta := session.Metadata{Model: "gpt-4o"}
 	if got := sessionModel(cfg, meta); got != "claude-opus-4-8" {
 		t.Fatalf("sessionModel = %q, want config model for legacy session", got)
+	}
+}
+
+func TestChatCompactorUsesContextWindowOverride(t *testing.T) {
+	got := chatCompactor(&llmtest.FakeProvider{}, "m", &config.Config{
+		Compaction: config.Compaction{ContextWindowTokens: 1_000_000},
+	})
+	s, ok := got.(compact.Summarizer)
+	if !ok {
+		t.Fatalf("compactor = %T, want compact.Summarizer", got)
+	}
+	if s.TriggerTokens != 700_000 {
+		t.Fatalf("trigger tokens = %d, want 700000", s.TriggerTokens)
 	}
 }
 

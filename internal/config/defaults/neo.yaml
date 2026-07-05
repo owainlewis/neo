@@ -22,6 +22,11 @@ model: claude-opus-4-8
 permissions:
   mode: trusted
 
+# Long transcripts compact at 70% of this context window estimate. Keep this
+# conservative by default; raise it for larger-context models.
+compaction:
+  context_window_tokens: 200000
+
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.
 features:

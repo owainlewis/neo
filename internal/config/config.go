@@ -45,6 +45,7 @@ type Config struct {
 	OpenAIAuth  string      `yaml:"openai_auth"`
 	Model       string      `yaml:"model"`
 	Features    Features    `yaml:"features"`
+	Compaction  Compaction  `yaml:"compaction"`
 	Permissions Permissions `yaml:"permissions"`
 
 	// source records where this config was loaded from (a file path or
@@ -55,6 +56,14 @@ type Config struct {
 // Permissions configures how Neo gates tool calls before they run.
 type Permissions struct {
 	Mode string `yaml:"mode"`
+}
+
+// Compaction configures when long transcripts are summarized.
+type Compaction struct {
+	// ContextWindowTokens is an optional manual override for the active model's
+	// context window. When omitted, chat startup uses the compact package's
+	// conservative default.
+	ContextWindowTokens int `yaml:"context_window_tokens"`
 }
 
 // Features toggles optional, layered capabilities. The core agent loop is never

@@ -386,7 +386,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		Provider:     prov,
 		Tools:        reg,
 		Policy:       permission.New(cfg.Permissions.Mode, root),
-		Compactor:    compact.NewSummarizer(prov, model),
+		Compactor:    chatCompactor(prov, model, cfg),
 		Messages:     sess.Messages,
 		Usage:        sess.Usage,
 	})
@@ -415,6 +415,14 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func chatCompactor(prov llm.Provider, model string, cfg *config.Config) compact.Compactor {
+	s := compact.NewSummarizer(prov, model)
+	if cfg != nil && cfg.Compaction.ContextWindowTokens > 0 {
+		s.TriggerTokens = compact.TriggerTokensForContextWindow(cfg.Compaction.ContextWindowTokens)
+	}
+	return s
 }
 
 // sessionModel picks the model for a (possibly resumed) session: the session's
