@@ -370,10 +370,12 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		Policy:       permission.New(cfg.Permissions.Mode, root),
 		Compactor:    compact.NewSummarizer(prov, model),
 		Messages:     sess.Messages,
+		Usage:        sess.Usage,
 	})
 
 	saveSession := func() error {
 		sess.Messages = ag.Transcript()
+		sess.Usage = ag.Usage()
 		sess.Metadata.CWD = cwd
 		sess.Metadata.Model = ag.Model()
 		sess.Metadata.Provider = cfg.Provider

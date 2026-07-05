@@ -120,6 +120,7 @@ func (m *model) resumeSelectedSession() {
 		return
 	}
 	m.ag.ReplaceTranscript(sess.Messages)
+	m.ag.SetUsage(sess.Usage)
 	m.currentSessionID = sess.Metadata.ID
 	if sess.Metadata.CWD != "" {
 		m.currentSessionCWD = sess.Metadata.CWD

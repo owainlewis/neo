@@ -43,6 +43,10 @@ func TestSessionBrowser_EnterResumesSelectedSession(t *testing.T) {
 	cwd := t.TempDir()
 	store := session.NewStore(t.TempDir())
 	sess := saveTestSession(t, store, session.Metadata{ID: "sess_old", CWD: cwd, Source: "tui", Model: "test", Title: "Old task"}, "continue this")
+	sess.Usage = llm.Usage{InputTokens: 7, OutputTokens: 8, CacheCreationTokens: 9, CacheReadTokens: 10}
+	if err := store.Save(context.Background(), sess); err != nil {
+		t.Fatalf("save usage: %v", err)
+	}
 
 	m := makeTestModel()
 	m.sessionStore = store
@@ -65,6 +69,9 @@ func TestSessionBrowser_EnterResumesSelectedSession(t *testing.T) {
 	got := m.ag.Transcript()
 	if len(got) != 1 || got[0].Content[0].Text != "continue this" {
 		t.Fatalf("agent transcript not replaced: %#v", got)
+	}
+	if got := m.ag.Usage(); got != sess.Usage {
+		t.Fatalf("agent usage = %+v, want %+v", got, sess.Usage)
 	}
 	out := plain(renderBlocks(m.blocks))
 	if !strings.Contains(out, "resumed session: Old task") || !strings.Contains(out, "continue this") {

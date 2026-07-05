@@ -43,6 +43,7 @@ type Metadata struct {
 type Session struct {
 	Metadata Metadata      `json:"metadata"`
 	Messages []llm.Message `json:"messages"`
+	Usage    llm.Usage     `json:"usage"`
 }
 
 // Store persists sessions as one JSON file each plus an index.json summary.

@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -43,6 +45,34 @@ func TestStoreCreateSaveLoadList(t *testing.T) {
 	if got := loaded.Messages[0].Content[0].Text; got != "  summarize this repository\nplease  " {
 		t.Fatalf("message text changed: %q", got)
 	}
+	sess.Usage = llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}
+	if err := store.Save(context.Background(), sess); err != nil {
+		t.Fatalf("Save with usage: %v", err)
+	}
+	loaded, err = store.Load(context.Background(), sess.Metadata.ID)
+	if err != nil {
+		t.Fatalf("Load with usage: %v", err)
+	}
+	if loaded.Usage != sess.Usage {
+		t.Fatalf("usage = %+v, want %+v", loaded.Usage, sess.Usage)
+	}
+	b, err := os.ReadFile(store.sessionPath(sess.Metadata.ID))
+	if err != nil {
+		t.Fatalf("read session json: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("parse session json: %v", err)
+	}
+	usage, ok := raw["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("session json missing usage object: %s", b)
+	}
+	for _, key := range []string{"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens"} {
+		if _, ok := usage[key]; !ok {
+			t.Fatalf("usage json missing %q: %v", key, usage)
+		}
+	}
 
 	items, err := store.List(context.Background())
 	if err != nil {
@@ -50,6 +80,39 @@ func TestStoreCreateSaveLoadList(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].ID != sess.Metadata.ID {
 		t.Fatalf("unexpected list: %#v", items)
+	}
+}
+
+func TestStoreLoadOlderSessionWithoutUsage(t *testing.T) {
+	store := NewStore(t.TempDir())
+	if err := os.MkdirAll(store.Dir(), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const body = `{
+  "metadata": {
+    "id": "sess_old",
+    "source": "tui",
+    "cwd": "/repo",
+    "model": "test",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z"
+  },
+  "messages": [
+    {"role": "user", "content": [{"type": "text", "text": "hello"}]}
+  ]
+}`
+	if err := os.WriteFile(store.sessionPath("sess_old"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write old session: %v", err)
+	}
+	loaded, err := store.Load(context.Background(), "sess_old")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Usage != (llm.Usage{}) {
+		t.Fatalf("usage = %+v, want zero", loaded.Usage)
+	}
+	if got := loaded.Messages[0].Content[0].Text; got != "hello" {
+		t.Fatalf("message text = %q", got)
 	}
 }
 
