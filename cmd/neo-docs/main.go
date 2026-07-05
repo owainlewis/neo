@@ -208,6 +208,7 @@ func cliPage() string {
 | ` + "`neo chat`" + ` | Open interactive chat mode explicitly. |
 | ` + "`neo sessions`" + ` | List saved chat sessions. |
 | ` + "`neo doctor`" + ` | Check local config, credentials, sessions, git, and workspace readiness. |
+| ` + "`neo sessions search <query>`" + ` | Search saved session transcripts locally. |
 | ` + "`neo resume <id>`" + ` | Resume a saved chat session. |
 | ` + "`neo login`" + ` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
 | ` + "`neo logout`" + ` | Remove stored OpenAI subscription credentials. |
@@ -299,6 +300,7 @@ Session files are written atomically with a sibling temp file and rename.
 ## Resume Surfaces
 
 - ` + "`neo sessions`" + ` lists saved sessions from the shell.
+- ` + "`neo sessions search <query>`" + ` searches saved transcript text locally and prints matching session metadata plus a short excerpt.
 - ` + "`neo resume <id>`" + ` resumes a session from the shell and restores its saved cwd before tools are created.
 - ` + "`/sessions`" + ` opens an in-TUI session browser with search and cwd/all filtering. The in-TUI browser only resumes sessions from the current cwd, because tools and permissions are already bound to that workspace.
 

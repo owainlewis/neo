@@ -10,6 +10,7 @@
 | `neo chat` | Open interactive chat mode explicitly. |
 | `neo sessions` | List saved chat sessions. |
 | `neo doctor` | Check local config, credentials, sessions, git, and workspace readiness. |
+| `neo sessions search <query>` | Search saved session transcripts locally. |
 | `neo resume <id>` | Resume a saved chat session. |
 | `neo login` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
 | `neo logout` | Remove stored OpenAI subscription credentials. |

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,6 +117,58 @@ func TestStoreLoadOlderSessionWithoutUsage(t *testing.T) {
 	}
 }
 
+func TestStoreSearchFindsTranscriptText(t *testing.T) {
+	store := NewStore(t.TempDir())
+	saveSearchSession(t, store, "sess_a", "Auth work", "fixed login token refresh")
+	saveSearchSession(t, store, "sess_b", "Docs work", "updated readme")
+
+	results, warnings, err := store.Search(context.Background(), "token")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %#v", results)
+	}
+	if results[0].Metadata.ID != "sess_a" || !strings.Contains(results[0].Excerpt, "token") {
+		t.Fatalf("unexpected result: %#v", results[0])
+	}
+}
+
+func TestStoreSearchNoMatchSucceeds(t *testing.T) {
+	store := NewStore(t.TempDir())
+	saveSearchSession(t, store, "sess_a", "Auth work", "fixed login token refresh")
+	results, warnings, err := store.Search(context.Background(), "missing")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 0 || len(warnings) != 0 {
+		t.Fatalf("results=%#v warnings=%#v", results, warnings)
+	}
+}
+
+func TestStoreSearchSkipsMalformedSession(t *testing.T) {
+	store := NewStore(t.TempDir())
+	saveSearchSession(t, store, "sess_good", "Good", "needle appears here")
+	saveSearchSession(t, store, "sess_bad", "Bad", "needle appears here too")
+	if err := os.WriteFile(store.sessionPath("sess_bad"), []byte(`{bad json`), 0o600); err != nil {
+		t.Fatalf("overwrite bad session: %v", err)
+	}
+
+	results, warnings, err := store.Search(context.Background(), "needle")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Metadata.ID != "sess_good" {
+		t.Fatalf("results = %#v", results)
+	}
+	if len(warnings) != 1 || warnings[0].ID != "sess_bad" {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+}
+
 func TestStoreListNewestFirst(t *testing.T) {
 	store := NewStore(t.TempDir())
 	older := &Session{Metadata: Metadata{ID: "older", Source: "tui", CreatedAt: time.Now().Add(-time.Hour)}}
@@ -133,6 +186,23 @@ func TestStoreListNewestFirst(t *testing.T) {
 	}
 	if len(items) != 2 || items[0].ID != "newer" || items[1].ID != "older" {
 		t.Fatalf("expected newest first, got %#v", items)
+	}
+}
+
+func saveSearchSession(t *testing.T, store *Store, id, title, text string) {
+	t.Helper()
+	sess := &Session{
+		Metadata: Metadata{ID: id, Source: "tui", CWD: "/repo", Model: "test", Title: title},
+		Messages: []llm.Message{{
+			Role: llm.RoleUser,
+			Content: []llm.ContentBlock{{
+				Type: "text",
+				Text: text,
+			}},
+		}},
+	}
+	if err := store.Save(context.Background(), sess); err != nil {
+		t.Fatalf("save search session: %v", err)
 	}
 }
 

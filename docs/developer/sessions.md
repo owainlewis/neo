@@ -16,6 +16,7 @@ Session files are written atomically with a sibling temp file and rename.
 ## Resume Surfaces
 
 - `neo sessions` lists saved sessions from the shell.
+- `neo sessions search <query>` searches saved transcript text locally and prints matching session metadata plus a short excerpt.
 - `neo resume <id>` resumes a session from the shell and restores its saved cwd before tools are created.
 - `/sessions` opens an in-TUI session browser with search and cwd/all filtering. The in-TUI browser only resumes sessions from the current cwd, because tools and permissions are already bound to that workspace.
 

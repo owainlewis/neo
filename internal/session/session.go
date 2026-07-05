@@ -46,6 +46,16 @@ type Session struct {
 	Usage    llm.Usage     `json:"usage"`
 }
 
+type SearchResult struct {
+	Metadata Metadata
+	Excerpt  string
+}
+
+type SearchWarning struct {
+	ID  string
+	Err error
+}
+
 // Store persists sessions as one JSON file each plus an index.json summary.
 // Index mutations are read-modify-write with an atomic rename and no
 // cross-process lock — like the auth store, this assumes a single interactive
@@ -199,6 +209,38 @@ func (s *Store) FindByExternal(ctx context.Context, source, external string) (*S
 	return nil, ErrNotFound
 }
 
+func (s *Store) Search(ctx context.Context, query string) ([]SearchResult, []SearchWarning, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil, fmt.Errorf("search query is empty")
+	}
+	items, err := s.List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	needle := strings.ToLower(query)
+	var results []SearchResult
+	var warnings []SearchWarning
+	for _, meta := range items {
+		if err := ctx.Err(); err != nil {
+			return results, warnings, err
+		}
+		sess, err := s.Load(ctx, meta.ID)
+		if err != nil {
+			warnings = append(warnings, SearchWarning{ID: meta.ID, Err: err})
+			continue
+		}
+		text := transcriptText(sess.Messages)
+		if idx := strings.Index(strings.ToLower(text), needle); idx >= 0 {
+			results = append(results, SearchResult{
+				Metadata: sess.Metadata,
+				Excerpt:  matchingExcerpt(text, idx, len(query)),
+			})
+		}
+	}
+	return results, warnings, nil
+}
+
 func (s *Store) Delete(ctx context.Context, id string) error {
 	id, err := cleanID(id)
 	if err != nil {
@@ -233,6 +275,44 @@ func TitleFromMessages(messages []llm.Message) string {
 		}
 	}
 	return ""
+}
+
+func transcriptText(messages []llm.Message) string {
+	var parts []string
+	for _, msg := range messages {
+		for _, block := range msg.Content {
+			switch block.Type {
+			case "text":
+				parts = append(parts, block.Text)
+			case "tool_result":
+				parts = append(parts, block.Content)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func matchingExcerpt(text string, idx, queryLen int) string {
+	const contextRunes = 48
+	runes := []rune(text)
+	byteToRune := 0
+	for i := range text {
+		if i >= idx {
+			break
+		}
+		byteToRune++
+	}
+	queryRunes := len([]rune(text[idx:min(len(text), idx+queryLen)]))
+	start := max(0, byteToRune-contextRunes)
+	end := min(len(runes), byteToRune+queryRunes+contextRunes)
+	excerpt := strings.Join(strings.Fields(string(runes[start:end])), " ")
+	if start > 0 {
+		excerpt = "..." + excerpt
+	}
+	if end < len(runes) {
+		excerpt += "..."
+	}
+	return excerpt
 }
 
 func TitleFromText(text string) string {

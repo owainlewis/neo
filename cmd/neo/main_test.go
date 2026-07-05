@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
@@ -224,6 +226,26 @@ func TestSessionModel_FallsBackForLegacySessionsWithoutProvider(t *testing.T) {
 	meta := session.Metadata{Model: "gpt-4o"}
 	if got := sessionModel(cfg, meta); got != "claude-opus-4-8" {
 		t.Fatalf("sessionModel = %q, want config model for legacy session", got)
+	}
+}
+
+func TestPrintSessionSearchResultsIncludesMetadataAndExcerpt(t *testing.T) {
+	var out bytes.Buffer
+	printSessionSearchResults(&out, []session.SearchResult{{
+		Metadata: session.Metadata{
+			ID:        "sess_1",
+			UpdatedAt: time.Date(2026, 7, 5, 12, 0, 0, 0, time.Local),
+			Model:     "test-model",
+			CWD:       "/repo",
+			Title:     "Bug fix",
+		},
+		Excerpt: "fixed the token bug",
+	}})
+	text := out.String()
+	for _, want := range []string{"ID", "UPDATED", "MODEL", "CWD", "TITLE", "MATCH", "sess_1", "test-model", "/repo", "Bug fix", "fixed the token bug"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("search output missing %q:\n%s", want, text)
+		}
 	}
 }
 

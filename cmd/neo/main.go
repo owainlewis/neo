@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -75,7 +76,7 @@ func main() {
 	case "chat":
 		runChat(ctx)
 	case "sessions":
-		listSessions(ctx)
+		runSessions(ctx, os.Args[2:])
 	case "doctor":
 		os.Exit(runDoctor(ctx))
 	case "resume":
@@ -105,6 +106,8 @@ USAGE:
   neo                Interactive chat mode (default)
   neo chat           Interactive chat mode (explicit)
   neo sessions       List saved chat sessions
+  neo sessions search <query>
+                     Search saved session transcripts
   neo doctor         Check local config and environment
   neo resume <id>    Resume a saved chat session
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
@@ -475,6 +478,24 @@ func openRouterModelChoices(ctx context.Context) []tui.ModelChoice {
 	return choices
 }
 
+func runSessions(ctx context.Context, args []string) {
+	if len(args) == 0 {
+		listSessions(ctx)
+		return
+	}
+	if args[0] == "search" {
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: neo sessions search <query>")
+			os.Exit(2)
+		}
+		searchSessions(ctx, strings.Join(args[1:], " "))
+		return
+	}
+	fmt.Fprintf(os.Stderr, "unknown sessions command: %s\n", args[0])
+	fmt.Fprintln(os.Stderr, "usage: neo sessions [search <query>]")
+	os.Exit(2)
+}
+
 func listSessions(ctx context.Context) {
 	store := mustSessionStore()
 	items, err := store.List(ctx)
@@ -499,6 +520,44 @@ func listSessions(ctx context.Context) {
 			meta.Model,
 			shortPath(meta.CWD),
 			title,
+		)
+	}
+	_ = w.Flush()
+}
+
+func searchSessions(ctx context.Context, query string) {
+	store := mustSessionStore()
+	results, warnings, err := store.Search(ctx, query)
+	for _, warning := range warnings {
+		fmt.Fprintf(os.Stderr, "warning: skipped session %s: %v\n", warning.ID, warning.Err)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "search sessions: %v\n", err)
+		os.Exit(1)
+	}
+	if len(results) == 0 {
+		fmt.Println("no matching sessions")
+		return
+	}
+	printSessionSearchResults(os.Stdout, results)
+}
+
+func printSessionSearchResults(out io.Writer, results []session.SearchResult) {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tUPDATED\tMODEL\tCWD\tTITLE\tMATCH")
+	for _, result := range results {
+		meta := result.Metadata
+		title := meta.Title
+		if title == "" {
+			title = "(untitled)"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			meta.ID,
+			meta.UpdatedAt.Local().Format("2006-01-02 15:04"),
+			meta.Model,
+			shortPath(meta.CWD),
+			title,
+			result.Excerpt,
 		)
 	}
 	_ = w.Flush()
