@@ -63,6 +63,39 @@ func TestModelChoices_OpenRouterFallsBackWhenCatalogueUnavailable(t *testing.T) 
 	}
 }
 
+func TestDoctorCredentialCheckFailsWhenEnvCredentialMissing(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	got := doctorCredentialCheck(&config.Config{Provider: "anthropic"})
+	if got.Status != doctorFail {
+		t.Fatalf("status = %s, want fail", got.Status)
+	}
+	if !strings.Contains(got.Detail, "ANTHROPIC_API_KEY") {
+		t.Fatalf("detail should name missing env var, got %q", got.Detail)
+	}
+}
+
+func TestDoctorCredentialCheckDoesNotPrintSecretValue(t *testing.T) {
+	const secret = "sk-test-secret"
+	t.Setenv("OPENAI_API_KEY", secret)
+	got := doctorCredentialCheck(&config.Config{Provider: "openai", OpenAIAuth: config.OpenAIAuthAPIKey})
+	if got.Status != doctorPass {
+		t.Fatalf("status = %s, want pass (%s)", got.Status, got.Detail)
+	}
+	if strings.Contains(got.Detail, secret) {
+		t.Fatalf("doctor detail exposed secret: %q", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "OPENAI_API_KEY") {
+		t.Fatalf("detail should name credential source, got %q", got.Detail)
+	}
+}
+
+func TestDoctorProviderCheckRejectsUnknownProvider(t *testing.T) {
+	got := doctorProviderCheck(&config.Config{Provider: "wat"})
+	if got.Status != doctorFail {
+		t.Fatalf("status = %s, want fail", got.Status)
+	}
+}
+
 func TestChatSystem_IncludesProjectMemoryAsDistinctDynamicBlock(t *testing.T) {
 	root := t.TempDir()
 	cwd := filepath.Join(root, "pkg")

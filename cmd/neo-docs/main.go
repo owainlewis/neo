@@ -207,6 +207,7 @@ func cliPage() string {
 | ` + "`neo`" + ` | Open interactive chat mode. |
 | ` + "`neo chat`" + ` | Open interactive chat mode explicitly. |
 | ` + "`neo sessions`" + ` | List saved chat sessions. |
+| ` + "`neo doctor`" + ` | Check local config, credentials, sessions, git, and workspace readiness. |
 | ` + "`neo resume <id>`" + ` | Resume a saved chat session. |
 | ` + "`neo login`" + ` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
 | ` + "`neo logout`" + ` | Remove stored OpenAI subscription credentials. |
@@ -222,6 +223,7 @@ func cliPage() string {
 ## Runtime Notes
 
 - ` + "`neo`" + ` with no subcommand defaults to chat.
+- ` + "`neo doctor`" + ` is local-first: it checks config, required credential presence, session store access, git availability, and whether the current directory is a git workspace without calling providers or printing secrets.
 - ` + "`neo login`" + ` prints the OpenAI Codex device-code URL and one-time code, then stores refreshable subscription credentials in ` + "`~/.neo/auth.json`" + ` with file permissions intended to protect secrets.
 - ` + "`neo logout`" + ` deletes the stored OpenAI subscription credential entry.
 - Resuming a session attempts to change into the saved session cwd. If unavailable, Neo warns and stays in the current directory.
