@@ -529,6 +529,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+l":
 			m.blocks = nil
 			m.refreshViewport()
+		case "ctrl+o":
+			m.toggleLatestToolResultExpansion()
 		default:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
@@ -902,6 +904,20 @@ func (m *model) layout() {
 func (m *model) appendBlock(b block) {
 	m.blocks = append(m.blocks, b)
 	m.refreshViewport()
+}
+
+func (m *model) toggleLatestToolResultExpansion() bool {
+	for i := len(m.blocks) - 1; i >= 0; i-- {
+		b, ok := m.blocks[i].(toolResultBlock)
+		if !ok || !b.isTruncated() {
+			continue
+		}
+		b.expanded = !b.expanded
+		m.blocks[i] = b
+		m.refreshViewport()
+		return true
+	}
+	return false
 }
 
 func (m *model) workflowPanelView() string {

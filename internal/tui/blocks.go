@@ -101,20 +101,22 @@ func (b toolCallBlock) render(width int, _ *glamour.TermRenderer) string {
 }
 
 type toolResultBlock struct {
-	name    string
-	text    string
-	isError bool
-	elapsed time.Duration
+	name     string
+	text     string
+	isError  bool
+	elapsed  time.Duration
+	expanded bool
 }
+
+const toolResultMaxLines = 12
 
 func (b toolResultBlock) render(width int, _ *glamour.TermRenderer) string {
 	body := strings.TrimRight(b.text, "\n")
-	const maxLines = 12
 	lines := strings.Split(body, "\n")
 	hidden := 0
-	if len(lines) > maxLines {
-		hidden = len(lines) - maxLines
-		lines = lines[:maxLines]
+	if len(lines) > toolResultMaxLines && !b.expanded {
+		hidden = len(lines) - toolResultMaxLines
+		lines = lines[:toolResultMaxLines]
 		body = strings.Join(lines, "\n")
 	}
 	if strings.TrimSpace(body) == "" {
@@ -122,7 +124,9 @@ func (b toolResultBlock) render(width int, _ *glamour.TermRenderer) string {
 	}
 	footerParts := []string{}
 	if hidden > 0 {
-		footerParts = append(footerParts, fmt.Sprintf("+%d lines", hidden))
+		footerParts = append(footerParts, fmt.Sprintf("+%d lines", hidden), "ctrl+o to expand")
+	} else if b.expanded && b.isTruncated() {
+		footerParts = append(footerParts, "expanded", "ctrl+o to collapse")
 	}
 	if b.elapsed > 0 {
 		footerParts = append(footerParts, fmtElapsed(b.elapsed))
@@ -136,6 +140,11 @@ func (b toolResultBlock) render(width int, _ *glamour.TermRenderer) string {
 		style = styCardErr
 	}
 	return style.Width(width - 2).Render(body + footer)
+}
+
+func (b toolResultBlock) isTruncated() bool {
+	body := strings.TrimRight(b.text, "\n")
+	return len(strings.Split(body, "\n")) > toolResultMaxLines
 }
 
 // treeNode is one step execution in a treeBlock: a node of the supervisor's
