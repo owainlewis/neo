@@ -180,6 +180,7 @@ Summarize this repository and suggest a good first change.
 | `neo` | Open interactive chat mode |
 | `neo chat` | Open interactive chat mode explicitly |
 | `neo sessions` | List saved chats |
+| `neo doctor` | Check local config, credentials, sessions, git, and workspace |
 | `neo resume <id>` | Resume a saved chat |
 | `neo login` | Set up OpenAI subscription auth |
 | `neo logout` | Remove stored OpenAI subscription credentials |
@@ -204,6 +205,7 @@ neo
 neo chat
 
 neo sessions
+neo doctor
 neo resume <session-id>
 
 neo login
