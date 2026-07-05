@@ -41,6 +41,15 @@ func TestSummarizer_BelowTriggerIsNoOp(t *testing.T) {
 	}
 }
 
+func TestTriggerTokensForContextWindow(t *testing.T) {
+	if got := TriggerTokensForContextWindow(200_000); got != 140_000 {
+		t.Fatalf("trigger = %d, want 140000", got)
+	}
+	if got := TriggerTokensForContextWindow(0); got != 140_000 {
+		t.Fatalf("default trigger = %d, want 140000", got)
+	}
+}
+
 func TestSummarizer_CompactsOldTurnsIntoSummary(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("the summary")}}
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1, KeepRecent: 4}

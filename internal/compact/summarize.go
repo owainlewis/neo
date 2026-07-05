@@ -10,12 +10,14 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 )
 
-// Compaction defaults. The trigger is an estimate (~4 chars per token), kept
-// well under the smallest context window neo targets so compaction runs before
-// the provider starts rejecting requests.
+// Compaction defaults. The context window default is intentionally conservative
+// for modern coding models; users on larger-context models can override it in
+// config without requiring a model catalog.
 const (
-	DefaultTriggerTokens = 100_000
-	DefaultKeepRecent    = 20
+	DefaultContextWindowTokens = 200_000
+	DefaultKeepRecent          = 20
+
+	triggerRatio = 0.70
 )
 
 const summarySystem = `You summarize coding agent transcripts. Produce a compact summary that preserves:
@@ -39,7 +41,7 @@ type Summarizer struct {
 	Provider llm.Provider
 	Model    string
 	// TriggerTokens is the estimated transcript size at which compaction runs
-	// (default DefaultTriggerTokens).
+	// (default TriggerTokensForContextWindow(DefaultContextWindowTokens)).
 	TriggerTokens int
 	// KeepRecent is the number of trailing messages preserved verbatim
 	// (default DefaultKeepRecent).
@@ -51,10 +53,19 @@ func NewSummarizer(p llm.Provider, model string) Summarizer {
 	return Summarizer{Provider: p, Model: model}
 }
 
+// TriggerTokensForContextWindow returns the estimated transcript size at which
+// compaction should run for a model context window.
+func TriggerTokensForContextWindow(contextWindowTokens int) int {
+	if contextWindowTokens <= 0 {
+		contextWindowTokens = DefaultContextWindowTokens
+	}
+	return int(float64(contextWindowTokens) * triggerRatio)
+}
+
 func (s Summarizer) Compact(ctx context.Context, messages []llm.Message) ([]llm.Message, error) {
 	trigger := s.TriggerTokens
 	if trigger <= 0 {
-		trigger = DefaultTriggerTokens
+		trigger = TriggerTokensForContextWindow(DefaultContextWindowTokens)
 	}
 	keep := s.KeepRecent
 	if keep <= 0 {

@@ -231,6 +231,20 @@ func TestLoad_ExplicitModelOverridesProviderDefault(t *testing.T) {
 	})
 }
 
+func TestLoad_CompactionContextWindowOverride(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\ncompaction:\n  context_window_tokens: 1000000\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Compaction.ContextWindowTokens != 1_000_000 {
+			t.Fatalf("context_window_tokens = %d, want 1000000", cfg.Compaction.ContextWindowTokens)
+		}
+	})
+}
+
 func TestFeatures_AgentsFileDefaultsOnWhenAbsent(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)

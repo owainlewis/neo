@@ -200,6 +200,7 @@ Summarize this repository and suggest a good first change.
 | `provider` | `anthropic` | Select `anthropic` or `openai` |
 | `openai_auth` | `api_key` when using OpenAI | Choose `api_key` or `subscription` |
 | `permissions.mode` | `ask` | Prompt before bash and file mutations |
+| `compaction.context_window_tokens` | `200000` | Compact at 70% of this context window estimate |
 | `features.agents_file` | `true` | Load `AGENTS.md` instructions |
 | `features.skills` | `true` | Enable `.neo/skills` discovery and `$name` expansion |
 | `features.prompt_commands` | `true` | Enable `.neo/commands` slash prompt templates |
@@ -415,6 +416,11 @@ model: claude-opus-4-8
 #   readonly -> allow read/search only
 permissions:
   mode: trusted
+
+# Long transcripts compact at 70% of this context window estimate.
+# Raise this for larger-context models.
+compaction:
+  context_window_tokens: 200000
 
 # Optional, layered capabilities. Each defaults to on when omitted; set a flag
 # to false to disable it. The core agent loop is never affected by these.

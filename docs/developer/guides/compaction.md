@@ -19,11 +19,22 @@ If the transcript gets too large, the next provider call may fail or become wast
 Neo summarizes old turns once the transcript gets large:
 
 - `compact.Compactor` is the interface; the agent calls it before every provider call.
-- `compact.Summarizer` is wired in by the chat command. When the estimated transcript size passes a trigger (~100k tokens), it asks the provider to summarize the oldest turns and replaces them with a single user message carrying the summary. The most recent messages are kept verbatim.
+- `compact.Summarizer` is wired in by the chat command. When the estimated transcript size passes 70% of the configured context window, it asks the provider to summarize the oldest turns and replaces them with a single user message carrying the summary. The most recent messages are kept verbatim.
 - `NoCompaction` is the fallback when no compactor is configured.
 - `SafeSplitPoint` picks the cut so strategies avoid invalid transcript splits.
 
 The important safety rule is: never keep a `tool_result` without its matching `tool_use`.
+
+## Context Window Setting
+
+Neo uses a conservative default context window of 200k tokens and compacts at 70% of that estimate. Users on larger-context models can raise it in `neo.yaml`:
+
+```yaml
+compaction:
+  context_window_tokens: 1000000
+```
+
+Neo does not maintain a model catalog for compaction. Unknown or custom models use the same conservative default unless the user sets an override.
 
 ## Strategy Options
 
@@ -32,7 +43,7 @@ The important safety rule is: never keep a `tool_result` without its matching `t
 | No compaction | Keep the transcript as-is. | Fallback when unconfigured. |
 | Summarize old turns | Replace older conversation with a summary. | Current default (`Summarizer`). |
 | Sliding window | Keep only the most recent safe chunk. | Future. |
-| Token-budget compaction | Compact only when near a model's context limit. | Future, needs model catalog. |
+| Manual context-window override | Compact at 70% of `compaction.context_window_tokens`. | Current default path. |
 
 ## What Good Compaction Preserves
 
