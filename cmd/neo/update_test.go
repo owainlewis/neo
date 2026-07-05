@@ -1,9 +1,17 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -102,4 +110,142 @@ func TestCheckStableUpdateUsesInjectedServer(t *testing.T) {
 	if got.Installed != "v1.2.2" || got.Latest != "v1.2.3" || !got.Available {
 		t.Fatalf("result = %+v", got)
 	}
+}
+
+func TestInstallStableUpdateReplacesBinaryAfterChecksumVerification(t *testing.T) {
+	const asset = "neo_darwin_amd64.tar.gz"
+	archive := testTarGz(t, "neo", []byte("new binary\n"))
+	checksum := testChecksumLine(asset, archive)
+	srv := testUpdateServer(t, asset, archive, checksum)
+	target := filepath.Join(t.TempDir(), "neo")
+	if err := os.WriteFile(target, []byte("old binary\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := installStableUpdate(context.Background(), srv.Client(), srv.URL+"/releases", srv.URL+"/download", "v1.2.2", target, "darwin", "amd64")
+	if err != nil {
+		t.Fatalf("installStableUpdate: %v", err)
+	}
+	if got.Installed != "v1.2.2" || got.Latest != "v1.2.3" || got.AlreadyCurrent {
+		t.Fatalf("result = %+v", got)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "new binary\n" {
+		t.Fatalf("binary = %q, want new binary", string(body))
+	}
+}
+
+func TestInstallStableUpdateDoesNotMutateWhenCurrent(t *testing.T) {
+	downloads := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/releases":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"tag_name":"v1.2.3","prerelease":false}]`))
+		default:
+			downloads++
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	target := filepath.Join(t.TempDir(), "neo")
+	if err := os.WriteFile(target, []byte("old binary\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := installStableUpdate(context.Background(), srv.Client(), srv.URL+"/releases", srv.URL+"/download", "v1.2.3", target, "darwin", "amd64")
+	if err != nil {
+		t.Fatalf("installStableUpdate: %v", err)
+	}
+	if !got.AlreadyCurrent {
+		t.Fatalf("AlreadyCurrent = false, want true")
+	}
+	if downloads != 0 {
+		t.Fatalf("download calls = %d, want 0", downloads)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "old binary\n" {
+		t.Fatalf("binary = %q, want old binary", string(body))
+	}
+}
+
+func TestInstallStableUpdateRejectsUnsupportedPlatform(t *testing.T) {
+	if _, err := releaseAssetName("windows", "amd64"); err == nil || !strings.Contains(err.Error(), "unsupported platform") {
+		t.Fatalf("releaseAssetName error = %v, want unsupported platform", err)
+	}
+	if _, err := releaseAssetName("darwin", "386"); err == nil || !strings.Contains(err.Error(), "unsupported platform") {
+		t.Fatalf("releaseAssetName error = %v, want unsupported platform", err)
+	}
+}
+
+func TestInstallStableUpdateChecksumMismatchLeavesOldBinary(t *testing.T) {
+	const asset = "neo_darwin_amd64.tar.gz"
+	archive := testTarGz(t, "neo", []byte("new binary\n"))
+	srv := testUpdateServer(t, asset, archive, "0000  "+asset+"\n")
+	target := filepath.Join(t.TempDir(), "neo")
+	if err := os.WriteFile(target, []byte("old binary\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := installStableUpdate(context.Background(), srv.Client(), srv.URL+"/releases", srv.URL+"/download", "v1.2.2", target, "darwin", "amd64")
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("installStableUpdate error = %v, want checksum mismatch", err)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "old binary\n" {
+		t.Fatalf("binary = %q, want old binary", string(body))
+	}
+}
+
+func testUpdateServer(t *testing.T, asset string, archive []byte, checksums string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/releases":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"tag_name":"v1.2.3","prerelease":false}]`))
+		case "/download/v1.2.3/" + asset:
+			_, _ = w.Write(archive)
+		case "/download/v1.2.3/checksums.txt":
+			_, _ = w.Write([]byte(checksums))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func testTarGz(t *testing.T, name string, body []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func testChecksumLine(asset string, body []byte) string {
+	sum := sha256.Sum256(body)
+	return fmt.Sprintf("%x  %s\n", sum, asset)
 }

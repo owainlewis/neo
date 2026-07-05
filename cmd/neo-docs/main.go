@@ -209,6 +209,7 @@ func cliPage() string {
 | ` + "`neo sessions`" + ` | List saved chat sessions. |
 | ` + "`neo doctor`" + ` | Check local config, credentials, sessions, git, and workspace readiness. |
 | ` + "`neo sessions search <query>`" + ` | Search saved session transcripts locally. |
+| ` + "`neo update`" + ` | Install the latest stable release. |
 | ` + "`neo update --check`" + ` | Check for a newer stable release without installing. |
 | ` + "`neo resume <id>`" + ` | Resume a saved chat session. |
 | ` + "`neo login`" + ` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
@@ -226,6 +227,7 @@ func cliPage() string {
 
 - ` + "`neo`" + ` with no subcommand defaults to chat.
 - ` + "`neo doctor`" + ` is local-first: it checks config, required credential presence, session store access, git availability, and whether the current directory is a git workspace without calling providers or printing secrets.
+- ` + "`neo update`" + ` installs the latest stable ` + "`v*`" + ` release for supported Linux and macOS architectures after verifying the release checksum.
 - ` + "`neo update --check`" + ` reads GitHub release metadata for stable ` + "`v*`" + ` releases and reports whether a newer version is available. It does not download or replace binaries.
 - ` + "`neo login`" + ` prints the OpenAI Codex device-code URL and one-time code, then stores refreshable subscription credentials in ` + "`~/.neo/auth.json`" + ` with file permissions intended to protect secrets.
 - ` + "`neo logout`" + ` deletes the stored OpenAI subscription credential entry.
