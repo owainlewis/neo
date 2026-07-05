@@ -23,6 +23,8 @@ Neo builds the prompt in ordered blocks:
 3. Dynamic project memory from `memory.md` when enabled.
 4. Dynamic git context captured at session start.
 
+Prompt command bodies are separate from this prompt. Neo shows prompt command names and descriptions in the TUI, then expands the selected body into the user turn only when a command is invoked.
+
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use `llm.SystemBlock` values instead.
 
 ## What Goes Where
@@ -31,6 +33,7 @@ The flattened prompt is still available for providers that only accept a string.
 | --- | --- |
 | Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. |
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked. |
+| Prompt commands | Slash-triggered prompt templates. Names and descriptions appear in TUI help, while full bodies expand only when invoked. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
 | `memory.md` | Durable project facts or preferences the user saved for future sessions. |
 | Git context | Branch, working tree status, and recent commits captured when the session starts in a repo. |
@@ -47,6 +50,8 @@ Run go test ./... after Go changes.
 
 Use skills for reusable workflows that should only apply when requested, such as review or commit behavior.
 
+Use prompt commands for daily shortcuts you want to run as `/name args` without adding template bodies to the base prompt.
+
 Change the base prompt only when the default personality or operating rules of Neo itself should change.
 
 ## What To Be Careful About
@@ -57,5 +62,6 @@ Always-loaded prompt text costs tokens every turn. Keep stable instructions shor
 
 - `cmd/neo/main.go`: chat startup and prompt assembly.
 - `internal/projectctx`: AGENTS.md, memory.md, and git-context discovery and rendering.
+- `internal/promptcmd`: prompt command discovery and expansion.
 - `internal/skills`: skill catalog and expansion.
 - `internal/llm/provider.go`: `SystemBlock`.

@@ -175,6 +175,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`internal/llm/openrouter/`" + ` | OpenRouter provider setup and defaults. |
 | ` + "`internal/permission/`" + ` | Tool-call permission policy and workspace path boundary checks. |
 | ` + "`internal/projectctx/`" + ` | AGENTS.md, memory.md, and git-context discovery plus prompt augmentation. |
+| ` + "`internal/promptcmd/`" + ` | Prompt-file slash command discovery and expansion. |
 | ` + "`internal/session/`" + ` | File-backed session metadata and transcripts. |
 | ` + "`internal/skills/`" + ` | Skill discovery, catalog rendering, and $name expansion. |
 | ` + "`internal/tools/`" + ` | Built-in tools exposed to the model. |
@@ -186,7 +187,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 1. ` + "`cmd/neo`" + ` loads config.
 2. ` + "`mustProvider`" + ` selects Anthropic, OpenAI, or OpenRouter. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
 3. The CLI creates or loads a session from ` + "`internal/session`" + `.
-4. Skills, AGENTS.md, project memory, and lightweight git context are discovered when enabled.
+4. Skills, prompt commands, AGENTS.md, project memory, and lightweight git context are discovered when enabled.
 5. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
 6. ` + "`agent.New`" + ` receives provider, tools, permission policy, system prompt, and optional restored messages.
 7. ` + "`tui.Run`" + ` owns user interaction and saves the transcript after each send.
@@ -276,6 +277,7 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | ` + "`agents_file`" + ` | ` + "`true`" + ` | Load AGENTS.md into the chat system prompt. |
 | ` + "`memory`" + ` | ` + "`true`" + ` | Load and update project-root ` + "`memory.md`" + `. |
 | ` + "`skills`" + ` | ` + "`true`" + ` | Discover skills and expand $name references. |
+| ` + "`prompt_commands`" + ` | ` + "`true`" + ` | Discover ` + "`.neo/commands`" + ` slash prompt templates. |
 | ` + "`prompt_caching`" + ` | ` + "`true`" + ` | Mark the stable system prompt prefix as cacheable when the provider supports it. |
 
 ## Permissions
@@ -511,6 +513,8 @@ Neo builds the prompt in ordered blocks:
 3. Dynamic project memory from ` + "`memory.md`" + ` when enabled.
 4. Dynamic git context captured at session start.
 
+Prompt command bodies are separate from this prompt. Neo shows prompt command names and descriptions in the TUI, then expands the selected body into the user turn only when a command is invoked.
+
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use ` + "`llm.SystemBlock`" + ` values instead.
 
 ## What Goes Where
@@ -519,6 +523,7 @@ The flattened prompt is still available for providers that only accept a string.
 | --- | --- |
 | Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. |
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked. |
+| Prompt commands | Slash-triggered prompt templates. Names and descriptions appear in TUI help, while full bodies expand only when invoked. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
 | ` + "`memory.md`" + ` | Durable project facts or preferences the user saved for future sessions. |
 | Git context | Branch, working tree status, and recent commits captured when the session starts in a repo. |
@@ -535,6 +540,8 @@ Run go test ./... after Go changes.
 
 Use skills for reusable workflows that should only apply when requested, such as review or commit behavior.
 
+Use prompt commands for daily shortcuts you want to run as ` + "`/name args`" + ` without adding template bodies to the base prompt.
+
 Change the base prompt only when the default personality or operating rules of Neo itself should change.
 
 ## What To Be Careful About
@@ -545,6 +552,7 @@ Always-loaded prompt text costs tokens every turn. Keep stable instructions shor
 
 - ` + "`cmd/neo/main.go`" + `: chat startup and prompt assembly.
 - ` + "`internal/projectctx`" + `: AGENTS.md, memory.md, and git-context discovery and rendering.
+- ` + "`internal/promptcmd`" + `: prompt command discovery and expansion.
 - ` + "`internal/skills`" + `: skill catalog and expansion.
 - ` + "`internal/llm/provider.go`" + `: ` + "`SystemBlock`" + `.
 `

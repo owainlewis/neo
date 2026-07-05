@@ -15,6 +15,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/permission"
+	"github.com/owainlewis/neo/internal/promptcmd"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -173,6 +174,80 @@ func TestSlashCommand_MemoryDisabledBehavesAsUnknown(t *testing.T) {
 	}
 	if !strings.Contains(eb.err.Error(), "unknown command: /memory") {
 		t.Fatalf("unexpected error: %v", eb.err)
+	}
+}
+
+func TestPromptCommandsAppearInHelpAndPicker(t *testing.T) {
+	m := makeTestModel()
+	m.promptCommands = []promptcmd.Command{{Name: "review", Description: "review a diff", Body: "Review this."}}
+
+	help := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
+	if !strings.Contains(help, "/review") || !strings.Contains(help, "review a diff") {
+		t.Fatalf("help missing prompt command: %s", help)
+	}
+
+	m.input.SetValue("/r")
+	m.updateSlashPicker()
+	if len(m.picker.matches) != 1 || m.picker.matches[0].cmd != "/review" {
+		t.Fatalf("expected /review picker match, got %+v", m.picker.matches)
+	}
+}
+
+func TestPromptCommandInvocationExpandsBodyWithArguments(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
+	m := makeTestModel()
+	m.ag = agent.New(agent.Config{Model: "test", Provider: prov, Policy: permission.New("trusted", ".")})
+	m.promptCommands = []promptcmd.Command{{Name: "review", Description: "review a diff", Body: "Review $ARGUMENTS carefully."}}
+
+	cmd := m.handleSlashCommand("/review internal/tui")
+	if cmd == nil {
+		t.Fatal("expected prompt command to start a send")
+	}
+	m.Update(cmd())
+
+	if len(prov.Calls) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(prov.Calls))
+	}
+	got := prov.Calls[0].Messages[len(prov.Calls[0].Messages)-1].Content[0].Text
+	if got != "Review internal/tui carefully." {
+		t.Fatalf("sent prompt = %q", got)
+	}
+	if len(m.blocks) < 2 {
+		t.Fatalf("expected visible command and notice blocks, got %d", len(m.blocks))
+	}
+	if _, ok := m.blocks[0].(userBlock); !ok {
+		t.Fatalf("first block = %T, want userBlock", m.blocks[0])
+	}
+	foundNotice := false
+	for _, b := range m.blocks {
+		if nb, ok := b.(noticeBlock); ok && strings.Contains(nb.text, "expanded command: /review") {
+			foundNotice = true
+		}
+	}
+	if !foundNotice {
+		t.Fatalf("missing expansion notice: %+v", m.blocks)
+	}
+}
+
+func TestPromptCommandCannotOverrideBuiltInCommand(t *testing.T) {
+	m := makeTestModel()
+	m.promptCommands = []promptcmd.Command{{Name: "help", Description: "custom help", Body: "not help"}}
+
+	m.handleSlashCommand("/help")
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("expected one help block, got %d", len(m.blocks))
+	}
+	if _, ok := m.blocks[0].(helpBlock); !ok {
+		t.Fatalf("expected built-in help block, got %T", m.blocks[0])
+	}
+	if _, ok := m.promptCommand("/Help"); ok {
+		t.Fatal("custom command should not override built-in names with different casing")
+	}
+	for _, c := range m.slashCommands() {
+		if c.cmd == "/help" && c.desc == "custom help" {
+			t.Fatal("custom command should not override built-in /help")
+		}
 	}
 }
 
