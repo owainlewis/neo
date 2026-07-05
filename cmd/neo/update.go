@@ -24,22 +24,31 @@ const githubReleaseDownloadBaseURL = "https://github.com/owainlewis/neo/releases
 var stableVersionRE = regexp.MustCompile(`^v([0-9]+)\.([0-9]+)\.([0-9]+)$`)
 
 type githubRelease struct {
-	TagName    string `json:"tag_name"`
-	Draft      bool   `json:"draft"`
-	Prerelease bool   `json:"prerelease"`
+	TagName         string `json:"tag_name"`
+	TargetCommitish string `json:"target_commitish"`
+	CreatedAt       string `json:"created_at"`
+	Draft           bool   `json:"draft"`
+	Prerelease      bool   `json:"prerelease"`
 }
 
 type updateCheckResult struct {
 	Installed string
 	Latest    string
+	Commit    string
 	Available bool
 }
 
 type updateInstallResult struct {
 	Installed      string
 	Latest         string
+	Commit         string
 	Target         string
 	AlreadyCurrent bool
+}
+
+type updateOptions struct {
+	Check   bool
+	Nightly bool
 }
 
 type versionParts struct {
@@ -51,22 +60,45 @@ type versionParts struct {
 }
 
 func runUpdate(ctx context.Context, args []string) {
+	opts, err := parseUpdateOptions(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "usage: neo update [--check] [--nightly]")
+		os.Exit(2)
+		return
+	}
+	if opts.Nightly {
+		runNightlyUpdate(ctx, opts)
+		return
+	}
+	runStableUpdate(ctx, opts)
+}
+
+func parseUpdateOptions(args []string) (updateOptions, error) {
+	var opts updateOptions
+	for _, arg := range args {
+		switch arg {
+		case "--check":
+			opts.Check = true
+		case "--nightly":
+			opts.Nightly = true
+		default:
+			return updateOptions{}, fmt.Errorf("unknown update flag %q", arg)
+		}
+	}
+	return opts, nil
+}
+
+func runStableUpdate(ctx context.Context, opts updateOptions) {
 	switch {
-	case len(args) == 1 && args[0] == "--check":
+	case opts.Check:
 		result, err := checkStableUpdate(ctx, http.DefaultClient, githubReleasesURL, Version)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "update: %v\n", err)
 			os.Exit(1)
 			return
 		}
-		fmt.Printf("installed: %s\n", result.Installed)
-		fmt.Printf("latest stable: %s\n", result.Latest)
-		if result.Available {
-			fmt.Println("update available: yes")
-		} else {
-			fmt.Println("update available: no")
-		}
-	case len(args) == 0:
+		printUpdateCheck("latest stable", result)
+	default:
 		target, err := currentExecutablePath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "update: %v\n", err)
@@ -79,18 +111,61 @@ func runUpdate(ctx context.Context, args []string) {
 			os.Exit(1)
 			return
 		}
-		fmt.Printf("installed: %s\n", result.Installed)
-		fmt.Printf("latest stable: %s\n", result.Latest)
-		if result.AlreadyCurrent {
-			fmt.Println("already current")
+		printUpdateInstall("latest stable", result)
+	}
+}
+
+func runNightlyUpdate(ctx context.Context, opts updateOptions) {
+	switch {
+	case opts.Check:
+		result, err := checkNightlyUpdate(ctx, http.DefaultClient, githubReleasesURL, Version)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "update: %v\n", err)
+			os.Exit(1)
 			return
 		}
-		fmt.Printf("updated: %s\n", result.Target)
+		printUpdateCheck("latest nightly", result)
 	default:
-		fmt.Fprintln(os.Stderr, "usage: neo update [--check]")
-		os.Exit(2)
+		target, err := currentExecutablePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "update: %v\n", err)
+			os.Exit(1)
+			return
+		}
+		result, err := installNightlyUpdate(ctx, http.DefaultClient, githubReleasesURL, githubReleaseDownloadBaseURL, Version, target, runtime.GOOS, runtime.GOARCH)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "update: %v\n", err)
+			os.Exit(1)
+			return
+		}
+		printUpdateInstall("latest nightly", result)
+	}
+}
+
+func printUpdateCheck(latestLabel string, result updateCheckResult) {
+	fmt.Printf("installed: %s\n", result.Installed)
+	fmt.Printf("%s: %s\n", latestLabel, result.Latest)
+	if result.Commit != "" {
+		fmt.Printf("commit: %s\n", result.Commit)
+	}
+	if result.Available {
+		fmt.Println("update available: yes")
+	} else {
+		fmt.Println("update available: no")
+	}
+}
+
+func printUpdateInstall(latestLabel string, result updateInstallResult) {
+	fmt.Printf("installed: %s\n", result.Installed)
+	fmt.Printf("%s: %s\n", latestLabel, result.Latest)
+	if result.Commit != "" {
+		fmt.Printf("commit: %s\n", result.Commit)
+	}
+	if result.AlreadyCurrent {
+		fmt.Println("already current")
 		return
 	}
+	fmt.Printf("updated: %s\n", result.Target)
 }
 
 func checkStableUpdate(ctx context.Context, httpc *http.Client, endpoint, installed string) (updateCheckResult, error) {
@@ -103,6 +178,19 @@ func checkStableUpdate(ctx context.Context, httpc *http.Client, endpoint, instal
 		return updateCheckResult{}, err
 	}
 	return updateCheckResult{Installed: installed, Latest: latest, Available: available}, nil
+}
+
+func checkNightlyUpdate(ctx context.Context, httpc *http.Client, endpoint, installed string) (updateCheckResult, error) {
+	latest, err := latestNightlyRelease(ctx, httpc, endpoint)
+	if err != nil {
+		return updateCheckResult{}, err
+	}
+	return updateCheckResult{
+		Installed: installed,
+		Latest:    latest.TagName,
+		Commit:    latest.TargetCommitish,
+		Available: nightlyUpdateAvailable(installed, latest.TagName),
+	}, nil
 }
 
 func installStableUpdate(ctx context.Context, httpc *http.Client, releaseEndpoint, downloadBase, installed, targetPath, goos, goarch string) (updateInstallResult, error) {
@@ -123,48 +211,36 @@ func installStableUpdate(ctx context.Context, httpc *http.Client, releaseEndpoin
 	if err != nil {
 		return updateInstallResult{}, err
 	}
-	archive, err := downloadReleaseAsset(ctx, httpc, downloadBase, latest, asset)
+	if err := installReleaseAsset(ctx, httpc, downloadBase, latest, asset, targetPath); err != nil {
+		return updateInstallResult{}, err
+	}
+	return result, nil
+}
+
+func installNightlyUpdate(ctx context.Context, httpc *http.Client, releaseEndpoint, downloadBase, installed, targetPath, goos, goarch string) (updateInstallResult, error) {
+	latest, err := latestNightlyRelease(ctx, httpc, releaseEndpoint)
 	if err != nil {
 		return updateInstallResult{}, err
 	}
-	checksums, err := downloadReleaseAsset(ctx, httpc, downloadBase, latest, "checksums.txt")
+	result := updateInstallResult{Installed: installed, Latest: latest.TagName, Commit: latest.TargetCommitish, Target: targetPath}
+	if !nightlyUpdateAvailable(installed, latest.TagName) {
+		result.AlreadyCurrent = true
+		return result, nil
+	}
+	asset, err := nightlyReleaseAssetName(goos, goarch, latest.TagName)
 	if err != nil {
 		return updateInstallResult{}, err
 	}
-	if err := verifyAssetChecksum(asset, archive, checksums); err != nil {
-		return updateInstallResult{}, err
-	}
-	binary, err := extractBinaryFromTarGz(archive, "neo")
-	if err != nil {
-		return updateInstallResult{}, err
-	}
-	if err := replaceExecutable(targetPath, binary); err != nil {
+	if err := installReleaseAsset(ctx, httpc, downloadBase, latest.TagName, asset, targetPath); err != nil {
 		return updateInstallResult{}, err
 	}
 	return result, nil
 }
 
 func latestStableRelease(ctx context.Context, httpc *http.Client, endpoint string) (string, error) {
-	if httpc == nil {
-		httpc = http.DefaultClient
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	releases, err := fetchReleases(ctx, httpc, endpoint)
 	if err != nil {
 		return "", err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "neo-update-check")
-	resp, err := httpc.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetch releases: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("fetch releases: GitHub returned %s", resp.Status)
-	}
-	var releases []githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-		return "", fmt.Errorf("parse releases: %w", err)
 	}
 	var latest string
 	for _, rel := range releases {
@@ -179,6 +255,51 @@ func latestStableRelease(ctx context.Context, httpc *http.Client, endpoint strin
 		return "", fmt.Errorf("no stable v* releases found")
 	}
 	return latest, nil
+}
+
+func latestNightlyRelease(ctx context.Context, httpc *http.Client, endpoint string) (githubRelease, error) {
+	releases, err := fetchReleases(ctx, httpc, endpoint)
+	if err != nil {
+		return githubRelease{}, err
+	}
+	var latest githubRelease
+	for _, rel := range releases {
+		if rel.Draft || !rel.Prerelease || !strings.HasPrefix(rel.TagName, "nightly-") {
+			continue
+		}
+		if latest.TagName == "" || rel.CreatedAt > latest.CreatedAt || (rel.CreatedAt == latest.CreatedAt && rel.TagName > latest.TagName) {
+			latest = rel
+		}
+	}
+	if latest.TagName == "" {
+		return githubRelease{}, fmt.Errorf("no nightly releases found")
+	}
+	return latest, nil
+}
+
+func fetchReleases(ctx context.Context, httpc *http.Client, endpoint string) ([]githubRelease, error) {
+	if httpc == nil {
+		httpc = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "neo-update-check")
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch releases: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("fetch releases: GitHub returned %s", resp.Status)
+	}
+	var releases []githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("parse releases: %w", err)
+	}
+	return releases, nil
 }
 
 func currentExecutablePath() (string, error) {
@@ -204,6 +325,32 @@ func releaseAssetName(goos, goarch string) (string, error) {
 		return "", fmt.Errorf("unsupported platform %s/%s", goos, goarch)
 	}
 	return fmt.Sprintf("neo_%s_%s.tar.gz", goos, goarch), nil
+}
+
+func nightlyReleaseAssetName(goos, goarch, version string) (string, error) {
+	if _, err := releaseAssetName(goos, goarch); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("neo_%s_%s_%s.tar.gz", goos, goarch, version), nil
+}
+
+func installReleaseAsset(ctx context.Context, httpc *http.Client, downloadBase, tag, asset, targetPath string) error {
+	archive, err := downloadReleaseAsset(ctx, httpc, downloadBase, tag, asset)
+	if err != nil {
+		return err
+	}
+	checksums, err := downloadReleaseAsset(ctx, httpc, downloadBase, tag, "checksums.txt")
+	if err != nil {
+		return err
+	}
+	if err := verifyAssetChecksum(asset, archive, checksums); err != nil {
+		return err
+	}
+	binary, err := extractBinaryFromTarGz(archive, "neo")
+	if err != nil {
+		return err
+	}
+	return replaceExecutable(targetPath, binary)
 }
 
 func downloadReleaseAsset(ctx context.Context, httpc *http.Client, baseURL, tag, asset string) ([]byte, error) {
@@ -342,6 +489,15 @@ func updateAvailable(installed, latest string) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+func nightlyUpdateAvailable(installed, latest string) bool {
+	installed = strings.TrimSpace(installed)
+	if installed == "" || installed == "dev" {
+		return true
+	}
+	installed = strings.TrimSuffix(installed, "-dirty")
+	return installed != latest
 }
 
 func parseInstalledVersion(version string) (versionParts, error) {

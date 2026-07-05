@@ -50,6 +50,44 @@ func TestLatestStableReleaseErrorsWhenMetadataMissing(t *testing.T) {
 	}
 }
 
+func TestLatestNightlyReleaseSelectsNewestNightlyPrerelease(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"tag_name":"v9.0.0","prerelease":false,"created_at":"2026-07-05T00:00:00Z"},
+			{"tag_name":"beta-20260705","prerelease":true,"created_at":"2026-07-05T01:00:00Z"},
+			{"tag_name":"nightly-20260704-aaaaaaa","target_commitish":"aaaaaaa","prerelease":true,"created_at":"2026-07-04T01:00:00Z"},
+			{"tag_name":"nightly-20260705-bbbbbbb","target_commitish":"bbbbbbb","prerelease":true,"created_at":"2026-07-05T01:00:00Z"},
+			{"tag_name":"nightly-20260706-ccccccc","target_commitish":"ccccccc","prerelease":true,"draft":true,"created_at":"2026-07-06T01:00:00Z"}
+		]`))
+	}))
+	defer srv.Close()
+
+	got, err := latestNightlyRelease(context.Background(), srv.Client(), srv.URL)
+	if err != nil {
+		t.Fatalf("latestNightlyRelease: %v", err)
+	}
+	if got.TagName != "nightly-20260705-bbbbbbb" || got.TargetCommitish != "bbbbbbb" {
+		t.Fatalf("nightly = %+v", got)
+	}
+}
+
+func TestCheckNightlyUpdateReportsCommit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"tag_name":"nightly-20260705-bbbbbbb","target_commitish":"bbbbbbb","prerelease":true,"created_at":"2026-07-05T01:00:00Z"}]`))
+	}))
+	defer srv.Close()
+
+	got, err := checkNightlyUpdate(context.Background(), srv.Client(), srv.URL, "v1.2.3")
+	if err != nil {
+		t.Fatalf("checkNightlyUpdate: %v", err)
+	}
+	if got.Latest != "nightly-20260705-bbbbbbb" || got.Commit != "bbbbbbb" || !got.Available {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
 func TestLatestStableReleaseReportsHTTPFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusBadGateway)
@@ -206,6 +244,91 @@ func TestInstallStableUpdateChecksumMismatchLeavesOldBinary(t *testing.T) {
 	}
 }
 
+func TestInstallStableUpdateIgnoresNightlyRelease(t *testing.T) {
+	const stableAsset = "neo_darwin_amd64.tar.gz"
+	archive := testTarGz(t, "neo", []byte("stable binary\n"))
+	checksum := testChecksumLine(stableAsset, archive)
+	downloaded := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/releases":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"tag_name":"nightly-20260705-bbbbbbb","prerelease":true,"created_at":"2026-07-05T01:00:00Z"},
+				{"tag_name":"v1.2.3","prerelease":false}
+			]`))
+		case "/download/v1.2.3/" + stableAsset:
+			downloaded = stableAsset
+			_, _ = w.Write(archive)
+		case "/download/v1.2.3/checksums.txt":
+			_, _ = w.Write([]byte(checksum))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	target := filepath.Join(t.TempDir(), "neo")
+	if err := os.WriteFile(target, []byte("old binary\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := installStableUpdate(context.Background(), srv.Client(), srv.URL+"/releases", srv.URL+"/download", "v1.2.2", target, "darwin", "amd64"); err != nil {
+		t.Fatalf("installStableUpdate: %v", err)
+	}
+	if downloaded != stableAsset {
+		t.Fatalf("downloaded asset = %q, want %q", downloaded, stableAsset)
+	}
+}
+
+func TestInstallNightlyUpdateUsesNightlyAsset(t *testing.T) {
+	const tag = "nightly-20260705-bbbbbbb"
+	const asset = "neo_darwin_amd64_" + tag + ".tar.gz"
+	archive := testTarGz(t, "neo", []byte("nightly binary\n"))
+	checksum := testChecksumLine(asset, archive)
+	srv := testNightlyUpdateServer(t, tag, asset, archive, checksum, true)
+	target := filepath.Join(t.TempDir(), "neo")
+	if err := os.WriteFile(target, []byte("old binary\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := installNightlyUpdate(context.Background(), srv.Client(), srv.URL+"/releases", srv.URL+"/download", "v1.2.3", target, "darwin", "amd64")
+	if err != nil {
+		t.Fatalf("installNightlyUpdate: %v", err)
+	}
+	if got.Latest != tag || got.Commit != "bbbbbbb" || got.AlreadyCurrent {
+		t.Fatalf("result = %+v", got)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "nightly binary\n" {
+		t.Fatalf("binary = %q, want nightly binary", string(body))
+	}
+}
+
+func TestInstallNightlyUpdateMissingArtifactLeavesOldBinary(t *testing.T) {
+	const tag = "nightly-20260705-bbbbbbb"
+	const asset = "neo_darwin_amd64_" + tag + ".tar.gz"
+	srv := testNightlyUpdateServer(t, tag, asset, nil, "", false)
+	target := filepath.Join(t.TempDir(), "neo")
+	if err := os.WriteFile(target, []byte("old binary\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := installNightlyUpdate(context.Background(), srv.Client(), srv.URL+"/releases", srv.URL+"/download", "v1.2.3", target, "darwin", "amd64")
+	if err == nil || !strings.Contains(err.Error(), "download "+asset) {
+		t.Fatalf("installNightlyUpdate error = %v, want missing artifact", err)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "old binary\n" {
+		t.Fatalf("binary = %q, want old binary", string(body))
+	}
+}
+
 func testUpdateServer(t *testing.T, asset string, archive []byte, checksums string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +339,29 @@ func testUpdateServer(t *testing.T, asset string, archive []byte, checksums stri
 		case "/download/v1.2.3/" + asset:
 			_, _ = w.Write(archive)
 		case "/download/v1.2.3/checksums.txt":
+			_, _ = w.Write([]byte(checksums))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func testNightlyUpdateServer(t *testing.T, tag, asset string, archive []byte, checksums string, includeAsset bool) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/releases":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"tag_name":"` + tag + `","target_commitish":"bbbbbbb","prerelease":true,"created_at":"2026-07-05T01:00:00Z"}]`))
+		case "/download/" + tag + "/" + asset:
+			if !includeAsset {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write(archive)
+		case "/download/" + tag + "/checksums.txt":
 			_, _ = w.Write([]byte(checksums))
 		default:
 			http.NotFound(w, r)
