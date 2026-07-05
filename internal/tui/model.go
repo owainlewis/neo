@@ -147,8 +147,9 @@ type approvalRequestMsg struct {
 }
 
 type approvalState struct {
-	req   agent.ApprovalRequest
-	reply chan bool
+	req      agent.ApprovalRequest
+	reply    chan bool
+	expanded bool
 }
 
 type model struct {
@@ -376,6 +377,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.allow.Add(rule)
 				m.finishApproval(true)
 				m.appendBlock(noticeBlock{text: "won't ask again for " + rule.Label() + " this session"})
+			case "ctrl+o":
+				m.toggleApprovalPreview()
 			case "n", "N", "esc":
 				m.finishApproval(false)
 			}
@@ -801,6 +804,24 @@ func (m *model) finishApproval(ok bool) {
 		m.appendBlock(noticeBlock{text: "denied " + m.approval.req.ToolName})
 	}
 	m.approval = nil
+}
+
+func (m *model) toggleApprovalPreview() bool {
+	if m.approval == nil || !approvalPreviewIsTruncated(m.approval.req.Preview) {
+		return false
+	}
+	m.approval.expanded = !m.approval.expanded
+	for i := len(m.blocks) - 1; i >= 0; i-- {
+		b, ok := m.blocks[i].(approvalBlock)
+		if !ok {
+			continue
+		}
+		b.expanded = m.approval.expanded
+		m.blocks[i] = b
+		m.refreshViewport()
+		return true
+	}
+	return false
 }
 
 // setDotColor swaps the spinner's foreground so the pulsing dot reflects

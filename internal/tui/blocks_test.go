@@ -44,24 +44,46 @@ func TestApprovalBlockRenderTruncatesLongPreview(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("+line %02d", i))
 	}
 
-	out := plain(approvalBlock{req: testApproval("write_file", strings.Join(lines, "\n"))}.render(80, nil))
+	out := plain(approvalBlock{req: agent.ApprovalRequest{
+		ToolName: "write_file",
+		Args:     map[string]any{"path": "notes.md", "content": "new\ncontent"},
+		Reason:   "file write requires approval",
+		Preview:  strings.Join(lines, "\n"),
+	}}.render(80, nil))
 
-	if !strings.Contains(firstLine(out), "approve write") {
+	if !strings.Contains(firstLine(out), "permission required") {
 		t.Fatalf("approval prompt should stay on the first line, got:\n%s", out)
 	}
 	if strings.Contains(out, "+line 79") {
 		t.Fatalf("approval preview was not truncated:\n%s", out)
 	}
-	if !strings.Contains(out, "more lines hidden") {
-		t.Fatalf("approval preview missing truncation note:\n%s", out)
+	for _, want := range []string{"write notes.md", "2 lines", "reason: file write requires approval", "keys: y approve", "ctrl+o to inspect"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("approval block missing %q:\n%s", want, out)
+		}
 	}
 }
 
 func TestApprovalBlockRenderKeepsShortPreview(t *testing.T) {
 	out := plain(approvalBlock{req: testApproval("edit_file", "-old\n+new")}.render(80, nil))
-	for _, want := range []string{"approve edit", "-old", "+new"} {
+	for _, want := range []string{"permission required", "edit", "keys: y approve", "-old", "+new"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("approval block missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestApprovalBlockRenderExpandedLongPreview(t *testing.T) {
+	var lines []string
+	for i := 0; i < 80; i++ {
+		lines = append(lines, fmt.Sprintf("+line %02d", i))
+	}
+
+	out := plain(approvalBlock{req: testApproval("edit_file", strings.Join(lines, "\n")), expanded: true}.render(80, nil))
+
+	for _, want := range []string{"+line 79", "full preview", "ctrl+o to collapse"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expanded approval block missing %q:\n%s", want, out)
 		}
 	}
 }

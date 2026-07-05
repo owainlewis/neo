@@ -301,24 +301,36 @@ func (b tokensBlock) render(width int, _ *glamour.TermRenderer) string {
 }
 
 type approvalBlock struct {
-	req agent.ApprovalRequest
+	req      agent.ApprovalRequest
+	expanded bool
 }
 
 func (b approvalBlock) render(width int, _ *glamour.TermRenderer) string {
-	head, _ := toolCardContent(b.req.ToolName, b.req.Args)
+	head, detail := toolCardContent(b.req.ToolName, b.req.Args)
 	var sb strings.Builder
-	sb.WriteString(styAccent.Render("approve "))
+	sb.WriteString(styAccent.Render("permission required"))
+	sb.WriteString("\n")
 	sb.WriteString(styTool.Render(head))
-	if b.req.Preview != "" {
+	if detail != "" {
 		sb.WriteString("\n")
-		sb.WriteString(styMuted.Render(trimApprovalPreview(b.req.Preview)))
+		sb.WriteString(styMuted.Render(detail))
+	}
+	if strings.TrimSpace(b.req.Reason) != "" {
+		sb.WriteString("\n")
+		sb.WriteString(styMuted.Render("reason: " + b.req.Reason))
+	}
+	sb.WriteString("\n")
+	sb.WriteString(styMuted.Render("keys: y approve · a always allow · n/esc deny · ctrl+o expand preview"))
+	if b.req.Preview != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(styMuted.Render(trimApprovalPreview(b.req.Preview, b.expanded)))
 	}
 	return accentCard(sb.String(), colApprove)
 }
 
 const approvalPreviewMaxLines = 18
 
-func trimApprovalPreview(preview string) string {
+func trimApprovalPreview(preview string, expanded bool) string {
 	preview = strings.TrimRight(preview, "\n")
 	if preview == "" {
 		return ""
@@ -327,10 +339,21 @@ func trimApprovalPreview(preview string) string {
 	if len(lines) <= approvalPreviewMaxLines {
 		return preview
 	}
+	if expanded {
+		return preview + "\n(full preview · ctrl+o to collapse)"
+	}
 	hidden := len(lines) - approvalPreviewMaxLines
 	kept := append([]string(nil), lines[:approvalPreviewMaxLines]...)
-	kept = append(kept, fmt.Sprintf("... %d more lines hidden. Approve to apply the full change.", hidden))
+	kept = append(kept, fmt.Sprintf("... %d more lines hidden. ctrl+o to inspect before deciding.", hidden))
 	return strings.Join(kept, "\n")
+}
+
+func approvalPreviewIsTruncated(preview string) bool {
+	preview = strings.TrimRight(preview, "\n")
+	if preview == "" {
+		return false
+	}
+	return len(strings.Split(preview, "\n")) > approvalPreviewMaxLines
 }
 
 // toolCardContent returns a header line and an optional body for the tool card.
