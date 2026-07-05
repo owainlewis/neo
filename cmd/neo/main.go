@@ -113,6 +113,10 @@ USAGE:
   neo doctor         Check local config and environment
   neo update         Install the latest stable release
   neo update --check Check for a stable release without installing
+  neo update --nightly
+                     Install the latest nightly release
+  neo update --nightly --check
+                     Check for a nightly release without installing
   neo resume <id>    Resume a saved chat session
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials
