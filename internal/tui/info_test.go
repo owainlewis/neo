@@ -322,21 +322,57 @@ func TestSlashCommand_StatefulCommandsRequireIdle(t *testing.T) {
 }
 
 func TestApprovalPromptRepliesFromKeypress(t *testing.T) {
+	tests := []struct {
+		name string
+		key  tea.KeyPressMsg
+		want bool
+	}{
+		{"approve", keyPress('y'), true},
+		{"deny n", keyPress('n'), false},
+		{"deny esc", keyPress(tea.KeyEsc), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := makeTestModel()
+			reply := make(chan bool, 1)
+			m.Update(approvalRequestMsg{
+				req:   agent.ApprovalRequest{ToolName: "bash", Preview: "preview"},
+				reply: reply,
+			})
+			if m.approval == nil {
+				t.Fatal("expected pending approval")
+			}
+			m.Update(tt.key)
+			if got := <-reply; got != tt.want {
+				t.Fatalf("reply = %v, want %v", got, tt.want)
+			}
+			if m.approval != nil {
+				t.Fatal("expected approval to clear")
+			}
+		})
+	}
+}
+
+func TestApprovalPreviewToggleUpdatesPendingCard(t *testing.T) {
 	m := makeTestModel()
 	reply := make(chan bool, 1)
 	m.Update(approvalRequestMsg{
-		req:   agent.ApprovalRequest{ToolName: "bash", Preview: "preview"},
+		req:   agent.ApprovalRequest{ToolName: "edit_file", Preview: numberedLines(25)},
 		reply: reply,
 	})
-	if m.approval == nil {
-		t.Fatal("expected pending approval")
+	if !m.toggleApprovalPreview() {
+		t.Fatal("expected approval preview to expand")
 	}
-	m.Update(keyPress('y'))
-	if got := <-reply; !got {
-		t.Fatal("expected approval reply true")
+	out := renderPlainBlocks(m)
+	if !strings.Contains(out, "line 24") {
+		t.Fatalf("expanded approval preview missing full content:\n%s", out)
 	}
-	if m.approval != nil {
-		t.Fatal("expected approval to clear")
+	if !m.toggleApprovalPreview() {
+		t.Fatal("expected approval preview to collapse")
+	}
+	out = renderPlainBlocks(m)
+	if strings.Contains(out, "line 24") {
+		t.Fatalf("collapsed approval preview should hide full content:\n%s", out)
 	}
 }
 
