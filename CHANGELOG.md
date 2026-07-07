@@ -2,6 +2,12 @@
 
 All notable changes to Neo will be documented in this file.
 
+## [v0.2.2] - 2026-07-07
+
+### Changed
+
+- Published a patch release to verify the configured Homebrew tap token updates `owainlewis/homebrew-tap` during release automation.
+
 ## [v0.2.1] - 2026-07-07
 
 ### Fixed
@@ -50,6 +56,7 @@ All notable changes to Neo will be documented in this file.
 
 - Initial public release.
 
+[v0.2.2]: https://github.com/owainlewis/neo/compare/v0.2.1...v0.2.2
 [v0.2.1]: https://github.com/owainlewis/neo/compare/v0.2.0...v0.2.1
 [v0.2.0]: https://github.com/owainlewis/neo/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/owainlewis/neo/releases/tag/v0.1.0
