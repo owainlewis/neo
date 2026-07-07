@@ -587,6 +587,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if summary, ok := m.resultSummary(msg.err, elapsed); ok {
 			m.appendBlock(summary)
 		}
+		m.hideTerminalWorkflow()
 		cmds = append(cmds, refreshBranch())
 
 	case spinner.TickMsg:
@@ -693,6 +694,7 @@ const elapsedThreshold = 3 * time.Second
 const defaultPlaceholder = "Ask neo anything…   ↩ send"
 
 func (m *model) submitUserTurn(displayText, agentText string, images []string) tea.Cmd {
+	m.clearTerminalWorkflow()
 	m.appendBlock(userBlock{text: displayText})
 	m.maybeStartWorkflowFromUserText(agentText)
 	if len(images) > 0 {
@@ -1015,6 +1017,39 @@ func (m *model) workflowPanelHeight() int {
 		return 0
 	}
 	return strings.Count(panel, "\n") + 2 // panel lines plus one-line margin before status
+}
+
+func (m *model) workflowTerminal() bool {
+	if m.workflow == nil || len(m.workflow.items) == 0 {
+		return false
+	}
+	for _, item := range m.workflow.items {
+		switch item.Status {
+		case workflow.Done, workflow.Failed, workflow.Skipped:
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (m *model) hideTerminalWorkflow() {
+	if !m.workflowTerminal() {
+		return
+	}
+	m.workflowVisible = false
+	m.layout()
+}
+
+func (m *model) clearTerminalWorkflow() {
+	if !m.workflowTerminal() {
+		return
+	}
+	m.workflow = nil
+	m.workflowVisible = false
+	m.autoWorkflowPending = false
+	m.layout()
 }
 
 func (m *model) refreshViewport() {
