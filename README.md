@@ -96,6 +96,7 @@ neo
 git clone https://github.com/owainlewis/neo.git
 cd neo
 just build                          # or: go build -o neo ./cmd/neo
+just install                        # install into a writable bin dir on PATH
 ```
 
 `just build` stamps the current git description into the binary as the version
@@ -529,7 +530,7 @@ also work as plain `go` commands.
 just build        # go build -o neo ./cmd/neo
 just test         # go test ./...
 just test-verbose # go test -v ./...
-just install      # go install ./cmd/neo
+just install      # install neo into a writable bin dir on PATH
 just fmt          # gofmt -w .
 just lint         # go vet ./... && golangci-lint run
 just clean        # remove the ./neo binary

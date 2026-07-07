@@ -25,9 +25,51 @@ test:
 test-verbose:
     go test -v ./...
 
-# Install neo onto $GOBIN (stamps Version)
+# Install neo into a runnable bin directory (stamps Version)
 install:
-    go install -ldflags "-X main.Version={{version}}" ./cmd/neo
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    on_path() {
+      case ":$PATH:" in
+        *":$1:"*) return 0 ;;
+        *) return 1 ;;
+      esac
+    }
+
+    can_use_dir() {
+      local dir="$1"
+      mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]
+    }
+
+    bin_dir="${GOBIN:-$(go env GOBIN)}"
+    if [ -z "$bin_dir" ]; then
+      for candidate in "$HOME/.local/bin" "$HOME/bin" "$(go env GOPATH)/bin" "/usr/local/bin"; do
+        if on_path "$candidate" && can_use_dir "$candidate"; then
+          bin_dir="$candidate"
+          break
+        fi
+      done
+    fi
+    if [ -z "$bin_dir" ]; then
+      for candidate in "$HOME/.local/bin" "$HOME/bin" "$(go env GOPATH)/bin" "/usr/local/bin"; do
+        if can_use_dir "$candidate"; then
+          bin_dir="$candidate"
+          break
+        fi
+      done
+    fi
+    if [ -z "$bin_dir" ]; then
+      echo "error: could not find a writable install directory" >&2
+      exit 1
+    fi
+
+    GOBIN="$bin_dir" go install -ldflags "-X main.Version={{version}}" ./cmd/neo
+    echo "installed neo to $bin_dir/neo"
+    if ! on_path "$bin_dir"; then
+      echo "warning: $bin_dir is not on your PATH" >&2
+      echo "add this to your shell rc: export PATH=\"$bin_dir:\$PATH\"" >&2
+    fi
 
 # Validate the install script with bash -n (syntax check)
 check-install-script:
