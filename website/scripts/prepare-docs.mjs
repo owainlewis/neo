@@ -14,6 +14,19 @@ const sourceDir = resolve(repoRoot, 'docs/developer');
 // step never clobbers the hand-written pages living beside it in docs/.
 const destDir = resolve(websiteDir, 'src/content/docs/docs/reference');
 
+// These pages are the landing pages for the "Internals" sidebar group —
+// implementation-level material for people extending or contributing to
+// Neo, not required reading to use it. The Go generator (cmd/neo-docs)
+// doesn't know about the website's sidebar grouping, so that framing is
+// added here at the website layer instead of in the generated source.
+const CONTRIBUTOR_NOTE_PATHS = new Set(['index.md', 'guides/index.md']);
+const CONTRIBUTOR_NOTE =
+  ':::note[For contributors]\n' +
+  "This section explains Neo's internals for people extending or contributing to it. " +
+  "If you just want to use Neo, you don't need any of this — see " +
+  '[Install](/docs/install/) and [Quick start](/docs/quick-start/) instead.\n' +
+  ':::\n\n';
+
 await rm(destDir, { recursive: true, force: true });
 await mkdir(destDir, { recursive: true });
 await copyDir(sourceDir, destDir);
@@ -42,6 +55,7 @@ function transform(raw, relPath) {
   const descMatch = withoutTitle.match(/^([^\n#].+)$/m);
   const description = (descMatch ? descMatch[1] : title).replace(/`/g, '').slice(0, 140);
   const rewritten = rewriteLinks(withoutTitle, relPath);
+  const note = CONTRIBUTOR_NOTE_PATHS.has(relPath) ? CONTRIBUTOR_NOTE : '';
   const frontmatter = [
     '---',
     `title: ${yamlString(title)}`,
@@ -50,7 +64,7 @@ function transform(raw, relPath) {
     '---',
     '',
   ].join('\n');
-  return frontmatter + rewritten;
+  return frontmatter + note + rewritten;
 }
 
 function rewriteLinks(content, relPath) {
