@@ -1,219 +1,130 @@
-# Release SOP for Neo
+# Neo Release SOP
 
-This document is an agent-friendly standard operating procedure for cutting a Neo
-stable release. Read it fully before acting. Follow the steps in order and stop
-on any ambiguity or failed verification.
+Use this guide when asked to cut a stable Neo release. It is written for an
+agent: focus on the desired outcome, verify each result, and ask before taking
+any destructive action.
 
-## Purpose
+## Goal
 
-Publish a new stable Neo release that is available from:
+Publish a new stable release that is available in all supported install paths:
 
-- GitHub Releases with checksums and Linux/macOS archives.
-- The one-line installer, which resolves the latest stable GitHub release.
-- Homebrew cask `owainlewis/tap/neo`, when the Homebrew tap token is configured.
+- GitHub Releases, with Linux/macOS archives and checksums.
+- The one-line installer, which installs the latest stable GitHub release.
+- Homebrew, via the `owainlewis/tap/neo` cask when the tap token is configured.
 
-## Release machinery
+## Important context
 
-- Stable releases are triggered by pushing a `v*` git tag.
-- Workflow: `.github/workflows/release.yml`.
-- Release builder/config: `.goreleaser.yaml`.
-- Changelog: `CHANGELOG.md`.
-- Installer: `install.sh`.
-- Homebrew tap: `owainlewis/homebrew-tap`, cask `Casks/neo.rb`.
-- Required Actions secret for Homebrew publishing:
-  `HOMEBREW_TAP_GITHUB_TOKEN` in repo `owainlewis/neo`.
+- Stable releases are created by pushing a `v*` tag.
+- The release workflow is `.github/workflows/release.yml`.
+- GoReleaser config is `.goreleaser.yaml`.
+- Release notes live in `CHANGELOG.md`.
+- Generated docs under `docs/developer/` must not be edited by hand.
+- The Homebrew tap update needs the `HOMEBREW_TAP_GITHUB_TOKEN` Actions secret.
+  If the secret is missing, the GitHub release can still succeed, but Homebrew
+  publishing will be skipped.
 
-GoReleaser publishes the GitHub release. It updates the Homebrew tap only when
-`HOMEBREW_TAP_GITHUB_TOKEN` is present; otherwise `.goreleaser.yaml` skips the
-Homebrew upload so the GitHub release can still complete.
+## Safety rules
 
-## Agent constraints
+- Preserve unrelated working-tree changes.
+- Stage and commit only release-related files.
+- Never print secret values.
+- Never move, delete, or recreate a pushed release tag unless the user explicitly
+  asks for that recovery path.
+- If anything is ambiguous, stop and ask.
 
-- Do not edit generated files under `docs/developer/` by hand.
-- Preserve unrelated working-tree changes. Stage only release-intended files.
-- Do not print secret values. It is OK to list secret names.
-- Do not delete or overwrite existing release tags unless explicitly instructed.
-- If a release workflow fails after creating a GitHub release, do not rerun the
-  same tag blindly. Diagnose first; prefer a patch tag if a new commit is needed.
+## Release checklist
 
-## Preflight
+### 1. Confirm the release base
 
-1. Read required repository guidance:
+Start from the intended release branch, normally the latest `main`. Check the
+current branch, local changes, recent commits, existing tags, and recent GitHub
+releases.
 
-   ```bash
-   sed -n '1,160p' docs/developer/index.md
-   ```
+If the repository is not on the expected release base, or unrelated changes are
+present, either move to a clean worktree or ask the user how to proceed.
 
-2. Inspect repository state:
+### 2. Check publishing prerequisites
 
-   ```bash
-   git status --short --branch
-   git log --oneline -5
-   git tag --list 'v*' --sort=-v:refname | head -10
-   gh release list --repo owainlewis/neo --limit 10
-   ```
+Confirm GitHub CLI access is available for this repository.
 
-3. Confirm you are working from the intended release base. Normally release from
-   the current `main`/`origin/main` tip. If the current branch is not `main`,
-   confirm whether the user expects this branch to be released.
+Check whether the `HOMEBREW_TAP_GITHUB_TOKEN` secret exists by name only. Do not
+show its value. If it is missing, tell the user that Homebrew publishing will be
+skipped unless they add the secret before release.
 
-4. Check whether the Homebrew secret exists, without printing its value:
+### 3. Choose the version
 
-   ```bash
-   gh secret list --repo owainlewis/neo | grep '^HOMEBREW_TAP_GITHUB_TOKEN\b' || true
-   ```
+Look at the latest stable `v*` tag and choose the next semantic version:
 
-   If missing, tell the user Homebrew publishing will be skipped. GitHub release
-   publishing can still proceed.
+- Patch for release-process fixes, documentation-only release corrections, or
+  small bug fixes.
+- Minor for user-visible features and normal batches of improvements.
+- Major only when explicitly requested.
 
-## Choose the next version
+If the version bump is not obvious, ask the user to choose.
 
-1. Find the latest stable semver tag:
+### 4. Update the changelog
 
-   ```bash
-   git tag --list 'v*' --sort=-v:refname | head -1
-   ```
+Create or update `CHANGELOG.md` with a new top entry for the chosen version and
+today's date.
 
-2. Choose the next version:
-   - Patch, e.g. `v0.2.2` -> `v0.2.3`, for release automation fixes, docs-only
-     release notes corrections, or small fixes.
-   - Minor, e.g. `v0.2.2` -> `v0.3.0`, for user-visible features since the last
-     stable release.
-   - Major only with explicit user instruction.
+Summarize what changed since the previous stable release. Prefer human-readable
+release notes over raw commit lists. Use short sections such as:
 
-3. If unsure, ask the user before editing or tagging.
+- Highlights
+- Added
+- Changed
+- Fixed
 
-## Update `CHANGELOG.md`
+Keep the changelog useful to users. Omit noisy merge commits and internal-only
+churn unless it affects release behavior.
 
-If `CHANGELOG.md` does not exist, create it. Add a new section at the top:
+Ensure release archives include the changelog. In `.goreleaser.yaml`, the
+archive file list should include `CHANGELOG.md` alongside `LICENSE` and
+`README.md`.
 
-```markdown
-## [vX.Y.Z] - YYYY-MM-DD
+### 5. Verify locally
+
+Run the normal release-relevant checks before tagging:
+
+- Go tests.
+- Generated developer docs check.
+- Installer shell syntax check.
+- GoReleaser config check, if GoReleaser is installed locally.
+
+If a check fails, fix it before continuing. If a local optional tool is missing,
+note that and rely on CI for that specific check.
+
+### 6. Commit release metadata
+
+Commit the changelog and any release config updates. Use a clear release-prep
+commit message, for example:
+
+```text
+chore(release): prepare vX.Y.Z
 ```
 
-Use concise categories where applicable:
+Before committing, review the staged diff and confirm it contains only the
+intended release files.
 
-- `### Highlights`
-- `### Added`
-- `### Changed`
-- `### Fixed`
+### 7. Tag and publish
 
-Generate candidate notes from commit subjects since the previous stable tag:
+Create an annotated `vX.Y.Z` tag on the release commit and push the commit and
+tag to the main repository.
 
-```bash
-git log <previous-tag>..HEAD --pretty=format:'%s' --reverse
-```
+The pushed tag should trigger the Release workflow automatically.
 
-Write human-readable notes. Do not dump raw merge commits. Include compare links
-at the bottom:
+### 8. Watch the release workflow
 
-```markdown
-[vX.Y.Z]: https://github.com/owainlewis/neo/compare/<previous-tag>...vX.Y.Z
-```
+Monitor the Release workflow until it succeeds or fails.
 
-Ensure `.goreleaser.yaml` includes `CHANGELOG.md` in archive files. It should
-contain:
+If it fails, inspect the failed logs and report the exact cause. If the failure
+happened after a GitHub release was created, prefer fixing the problem in a new
+commit and cutting a new patch release. Do not reuse or rewrite the existing tag
+without explicit user approval.
 
-```yaml
-archives:
-  - id: neo
-    files:
-      - LICENSE
-      - README.md
-      - CHANGELOG.md
-```
+### 9. Verify the published release
 
-## Local verification
-
-Run these checks before committing/tagging:
-
-```bash
-go test ./...
-go run ./cmd/neo-docs --check
-bash -n install.sh
-```
-
-If GoReleaser is installed locally, also run:
-
-```bash
-goreleaser check
-```
-
-If `goreleaser` is not installed, note that the local GoReleaser check was
-skipped and rely on the GitHub Actions release workflow.
-
-## Commit release metadata
-
-Stage only intended release files, usually:
-
-```bash
-git add CHANGELOG.md .goreleaser.yaml
-```
-
-If `.goreleaser.yaml` was not changed, stage only `CHANGELOG.md`.
-
-Review staged diff:
-
-```bash
-git diff --cached
-```
-
-Commit:
-
-```bash
-git commit -m "chore(release): prepare vX.Y.Z"
-```
-
-If there is nothing to commit because the changelog was already prepared, do not
-create an empty commit unless the user explicitly asks.
-
-## Tag and push
-
-Create an annotated tag:
-
-```bash
-git tag -a vX.Y.Z -m "vX.Y.Z"
-```
-
-Push the commit, then the tag:
-
-```bash
-git push origin HEAD:main
-git push origin vX.Y.Z
-```
-
-If releasing from a branch intentionally, replace `main` only with explicit user
-approval. The release workflow triggers from the pushed tag.
-
-## Watch the release workflow
-
-Find and watch the run:
-
-```bash
-gh run list --repo owainlewis/neo --workflow release.yml --limit 5
-gh run watch <run-id> --repo owainlewis/neo --exit-status
-```
-
-If the run fails, inspect logs:
-
-```bash
-gh run view <run-id> --repo owainlewis/neo --log-failed
-```
-
-Common failure: Homebrew token problems. If GitHub release publishing succeeded
-but Homebrew failed, fix the config/secret, then cut a new patch release. Do not
-reuse the already-pushed tag unless the user explicitly approves destructive tag
-movement.
-
-## Post-release verification
-
-Verify the GitHub release:
-
-```bash
-gh release view vX.Y.Z --repo owainlewis/neo \
-  --json tagName,url,assets,publishedAt,isPrerelease,targetCommitish \
-  --jq '{tagName,publishedAt,isPrerelease,targetCommitish,url,assets:[.assets[].name]}'
-```
+Confirm the GitHub release exists for the new tag and is not a prerelease.
 
 Expected assets:
 
@@ -223,56 +134,37 @@ Expected assets:
 - `neo_linux_amd64.tar.gz`
 - `neo_linux_arm64.tar.gz`
 
-Verify the installer resolves the latest release by checking the release exists.
-Do not pipe remote install scripts into bash as a test unless the user explicitly
-asks for an install test.
+Because the installer resolves the latest stable GitHub release, a successful
+latest release with those assets is enough to confirm the download install path.
+Do not run remote install scripts unless the user asks for an install test.
 
-If the Homebrew token is configured, verify the tap update:
+### 10. Verify Homebrew, when enabled
 
-```bash
-gh api repos/owainlewis/homebrew-tap/commits/main \
-  --jq '{sha:.sha[0:7], message:.commit.message, authorDate:.commit.author.date}'
+If the Homebrew token was configured, confirm the tap repository was updated.
+The expected result is a commit in `owainlewis/homebrew-tap` like:
 
-gh api repos/owainlewis/homebrew-tap/contents/Casks/neo.rb?ref=main \
-  --jq .content | base64 --decode | sed -n '1,80p'
+```text
+Brew cask update for neo vX.Y.Z
 ```
 
-Expected Homebrew evidence:
+Also confirm `Casks/neo.rb` contains the released version without the leading
+`v`, for example:
 
-- Latest tap commit message: `Brew cask update for neo vX.Y.Z`.
-- `Casks/neo.rb` contains `version "X.Y.Z"`.
-- URLs point at `https://github.com/owainlewis/neo/releases/download/v#{version}/...`.
-
-Optionally, if Homebrew is available and the user approves an install/update
-check:
-
-```bash
-brew update
-brew info --cask owainlewis/tap/neo
+```ruby
+version "X.Y.Z"
 ```
 
-## Final response template
+If the token was missing or Homebrew publishing was skipped, clearly report that
+GitHub release publishing succeeded but Homebrew was not updated.
 
-Report:
+## Final report
+
+End with a concise release summary:
 
 - Version released.
 - GitHub release URL.
 - Assets published.
-- Whether the release workflow passed.
-- Whether Homebrew tap was updated, with tap commit evidence.
-- Checks run locally.
-- Any unrelated working-tree changes left untouched.
-
-Example:
-
-```text
-Released vX.Y.Z: https://github.com/owainlewis/neo/releases/tag/vX.Y.Z
-
-Published assets: checksums.txt, neo_darwin_amd64.tar.gz, ...
-Release workflow: passed.
-Homebrew tap: updated at owainlewis/homebrew-tap <short-sha>, commit
-"Brew cask update for neo vX.Y.Z"; Casks/neo.rb version is "X.Y.Z".
-
-Local checks: go test ./..., go run ./cmd/neo-docs --check, bash -n install.sh,
-goreleaser check.
-```
+- Release workflow result.
+- Homebrew tap result, including tap commit evidence when available.
+- Local checks that were run.
+- Any unrelated local changes that were intentionally left untouched.
