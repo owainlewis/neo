@@ -72,6 +72,7 @@ homebrew_casks:
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    skip_upload: "{{ if .Env.HOMEBREW_TAP_GITHUB_TOKEN }}false{{ else }}true{{ end }}"
     directory: Casks
     homepage: https://github.com/owainlewis/neo
     description: Fast, minimalist coding agent written in Go
