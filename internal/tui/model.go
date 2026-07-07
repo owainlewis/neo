@@ -158,6 +158,13 @@ type approvalState struct {
 	expanded bool
 }
 
+type turnStats struct {
+	tools    int
+	errors   int
+	workflow bool
+	direct   bool
+}
+
 type model struct {
 	ctx      context.Context
 	ag       *agent.Agent
@@ -192,6 +199,7 @@ type model struct {
 	workflow            *workflowBlock
 	workflowVisible     bool
 	autoWorkflowPending bool
+	turn                turnStats
 	activeTree          *treeBlock         // block receiving new top-level subagent trees
 	treeIndex           map[int]*treeBlock // supervisor node id -> the block holding it
 	approval            *approvalState
@@ -565,6 +573,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendBlock(approvalBlock{req: msg.req})
 
 	case sendResultMsg:
+		elapsed := time.Since(m.busySince)
 		m.busy = false
 		m.currentTool = nil
 		if m.sendCancel != nil {
@@ -575,6 +584,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendBlock(noticeBlock{text: "turn canceled"})
 		} else if msg.err != nil && !errors.Is(msg.err, agent.ErrMaxTurns) {
 			m.appendBlock(errorBlock{err: msg.err})
+		} else if summary, ok := m.resultSummary(msg.err, elapsed); ok {
+			m.appendBlock(summary)
 		}
 		cmds = append(cmds, refreshBranch())
 
@@ -693,6 +704,7 @@ func (m *model) submitUserTurn(displayText, agentText string, images []string) t
 	}
 	m.busy = true
 	m.busySince = time.Now()
+	m.turn = turnStats{}
 	m.caption = randomCaption()
 	m.setDotColor(colDotThinking)
 	return m.startSend(sent, images)
@@ -808,6 +820,7 @@ func (m *model) handleBangCommand(line string) tea.Cmd {
 	}
 	m.busy = true
 	m.busySince = time.Now()
+	m.turn = turnStats{direct: true}
 	m.caption = randomCaption()
 	m.setDotColor(colDotThinking)
 	return m.startTool("bash", map[string]any{"command": command})
@@ -846,6 +859,35 @@ func (m *model) toggleApprovalPreview() bool {
 	return false
 }
 
+func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBlock, bool) {
+	if !m.turn.direct && m.turn.tools == 0 && !m.turn.workflow {
+		return resultSummaryBlock{}, false
+	}
+	failed := err != nil || m.turn.errors > 0
+	label := "Done"
+	if failed {
+		label = "Finished with issues"
+	}
+	parts := []string{}
+	if m.turn.tools > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", m.turn.tools, plural("tool", m.turn.tools)))
+	}
+	if m.turn.workflow {
+		parts = append(parts, "plan updated")
+	}
+	if m.turn.direct {
+		parts = append(parts, "command complete")
+	}
+	return resultSummaryBlock{label: label, detail: strings.Join(parts, " · "), elapsed: elapsed, failed: failed}, true
+}
+
+func plural(word string, n int) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}
+
 // setDotColor swaps the spinner's foreground so the pulsing dot reflects
 // the current state (thinking vs. tool-active). Called from Update on the
 // transitions that actually change state.
@@ -866,12 +908,9 @@ func (m *model) statusLine() string {
 	var body string
 	switch {
 	case m.currentTool != nil:
-		body = toolVerb(m.currentTool.name, m.currentTool.args)
-	case elapsed >= elapsedThreshold:
-		// Long think with no active tool — drop in a playful caption.
-		body = m.caption
+		body = "Neo is " + toolVerb(m.currentTool.name, m.currentTool.args)
 	default:
-		body = "thinking"
+		body = "Neo is thinking"
 	}
 
 	line := " " + m.spin.View() + " " + styMuted.Render(body)
@@ -1003,10 +1042,12 @@ func (m *model) handleEvent(e agent.Event) {
 		}
 	case agent.EventToolCall:
 		if e.Name == "workflow" {
+			m.turn.workflow = true
 			// The workflow tool mutates the checklist through workflowEventMsg;
 			// don't show a duplicate generic tool card.
 			break
 		}
+		m.turn.tools++
 		m.noteWorkflowActivity(toolActivity(e.Name, e.Args))
 		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now()}
 		m.currentTool = &tc
@@ -1026,6 +1067,9 @@ func (m *model) handleEvent(e agent.Event) {
 			elapsed = time.Since(m.currentTool.startAt)
 		}
 		m.currentTool = nil
+		if e.IsError {
+			m.turn.errors++
+		}
 		if e.Name == "agent" {
 			// Success renders in the tree. Failures/denials keep an error card
 			// so the output is inspectable.
@@ -1088,6 +1132,7 @@ func (m *model) maybeStartWorkflowFromUserText(text string) {
 }
 
 func (m *model) handleWorkflowEvent(ev workflow.Event) {
+	m.turn.workflow = true
 	if ev.Action == "clear" {
 		m.workflow = nil
 		m.workflowVisible = true

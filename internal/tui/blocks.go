@@ -29,6 +29,32 @@ func (b userBlock) render(width int, _ *glamour.TermRenderer) string {
 
 type textBlock struct{ text string }
 
+// resultSummaryBlock is a compact completion receipt for turns that performed
+// visible work. It is intentionally one line so it adds polish without
+// stealing focus from the assistant response.
+type resultSummaryBlock struct {
+	label   string
+	detail  string
+	elapsed time.Duration
+	failed  bool
+}
+
+func (b resultSummaryBlock) render(width int, _ *glamour.TermRenderer) string {
+	glyph := styAccent.Render("✓")
+	if b.failed {
+		glyph = styErr.Render("✗")
+	}
+	parts := []string{strings.TrimSpace(b.label)}
+	if strings.TrimSpace(b.detail) != "" {
+		parts = append(parts, strings.TrimSpace(b.detail))
+	}
+	if b.elapsed > 0 {
+		parts = append(parts, formatElapsed(b.elapsed))
+	}
+	line := glyph + " " + strings.Join(parts, styMuted.Render(" · "))
+	return styResultSummary.Width(width - 2).Render(line)
+}
+
 // workflowBlock is the visible task plan for a multi-step user request. The
 // model updates high-level semantic status through the workflow tool; regular
 // tool and agent events attach lightweight activity automatically.
@@ -44,12 +70,17 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	if title == "" {
 		title = "Workflow"
 	}
-	sb.WriteString(styAccent.Render(title) + "\n")
+	done, failed, skipped := workflowCounts(b.items)
+	total := len(b.items)
+	meta := fmt.Sprintf("%d/%d", done+failed+skipped, total)
+	sb.WriteString(styAccent.Render(title) + styMuted.Render("  "+meta) + "\n")
 	for _, item := range b.items {
-		glyph := "○"
+		glyph := styMuted.Render("○")
+		textStyle := lipgloss.NewStyle()
 		switch item.Status {
 		case workflow.Running:
 			glyph = styTool.Render("●")
+			textStyle = styTool
 		case workflow.Done:
 			glyph = styAccent.Render("✓")
 		case workflow.Failed:
@@ -57,13 +88,34 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 		case workflow.Skipped:
 			glyph = styMuted.Render("-")
 		}
-		line := fmt.Sprintf("%s %s", glyph, item.Text)
+		line := fmt.Sprintf("%s %s", glyph, textStyle.Render(item.Text))
 		if strings.TrimSpace(item.Detail) != "" {
 			line += styMuted.Render(" — " + truncate(oneLine(item.Detail), max(width-8, 20)))
 		}
 		sb.WriteString(line + "\n")
 	}
+	if total > 0 && done+failed+skipped == total {
+		label := "Plan complete"
+		if failed > 0 {
+			label = "Plan finished with issues"
+		}
+		sb.WriteString(styMuted.Render(label + fmt.Sprintf(" · %d/%d steps", done+failed+skipped, total)))
+	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func workflowCounts(items []workflow.Item) (done, failed, skipped int) {
+	for _, item := range items {
+		switch item.Status {
+		case workflow.Done:
+			done++
+		case workflow.Failed:
+			failed++
+		case workflow.Skipped:
+			skipped++
+		}
+	}
+	return done, failed, skipped
 }
 
 func (b textBlock) render(width int, md *glamour.TermRenderer) string {

@@ -540,8 +540,8 @@ func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) 
 	if got := len(m.ag.Transcript()); got != 0 {
 		t.Fatalf("agent transcript length = %d, want 0", got)
 	}
-	if len(m.blocks) != 2 {
-		t.Fatalf("expected tool call and result blocks, got %d", len(m.blocks))
+	if len(m.blocks) != 3 {
+		t.Fatalf("expected tool call, result, and summary blocks, got %d", len(m.blocks))
 	}
 	tc, ok := m.blocks[0].(toolCallBlock)
 	if !ok {
@@ -556,6 +556,13 @@ func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) 
 	}
 	if tr.isError || tr.text != "echo hello" {
 		t.Fatalf("unexpected tool result: %+v", tr)
+	}
+	rs, ok := m.blocks[2].(resultSummaryBlock)
+	if !ok {
+		t.Fatalf("expected resultSummaryBlock, got %T", m.blocks[2])
+	}
+	if rs.label != "Done" || !strings.Contains(rs.detail, "command complete") {
+		t.Fatalf("unexpected summary: %+v", rs)
 	}
 }
 
