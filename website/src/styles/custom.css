@@ -1,0 +1,166 @@
+/* Minimalist theme: sans-serif type, muted slate neutrals + one desaturated
+   accent, golden-ratio type scale. Monospace is reserved for actual code
+   (Starlight's --sl-font-mono), not headings or UI chrome. */
+
+/*
+ * Starlight's color scale runs gray-1 (closest to the --white/text token)
+ * through gray-6/7 (closest to the --black/bg token) — the same six
+ * variable names mean opposite ends of the ramp in light vs dark, since
+ * "white" and "black" always refer to text and bg respectively, not to
+ * literal light/dark. Both theme blocks below follow that direction; mixing
+ * it up produces low-contrast text (this broke once already — see custom
+ * CSS in website/README.md if it happens again).
+ */
+:root,
+:root[data-theme='light'] {
+  /* No --sl-font override: headings and body fall back to --sl-font-system
+     (Starlight's own system-sans stack), not a display/mono face. */
+  --sl-font-system: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+
+  /* Golden-ratio-derived scale (~1.25 per step, converging on phi across a
+     couple of steps) instead of Starlight's default jumps — used mainly for
+     headings; 2xs/xs/sm/base are left at Starlight's defaults since those
+     are UI chrome sizes, not content typography. */
+  --sl-text-lg: 1.25rem;
+  --sl-text-xl: 1.5rem;
+  --sl-text-2xl: 1.75rem;
+  --sl-text-3xl: 2rem;
+  --sl-text-4xl: 2.5rem;
+  --sl-text-5xl: 3.25rem;
+  --sl-text-6xl: 4.25rem;
+
+  /* Accent: a single muted, desaturated slate — not a saturated brand color. */
+  --sl-color-accent-low: #e7ebee;
+  --sl-color-accent: #4c5f70;
+  --sl-color-accent-high: #2c3946;
+
+  --sl-color-white: #1c1f23; /* text */
+  --sl-color-gray-1: #33383e;
+  --sl-color-gray-2: #565c64;
+  --sl-color-gray-3: #767d86;
+  --sl-color-gray-4: #9aa1a8;
+  --sl-color-gray-5: #d8dbde;
+  --sl-color-gray-6: #eef0f2;
+  --sl-color-gray-7: #f6f7f8;
+  --sl-color-black: #fbfcfc; /* bg */
+
+  --sl-radius-medium: 0.375rem;
+  --sl-radius-large: 0.5rem;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #263139;
+  --sl-color-accent: #8fa2b0;
+  --sl-color-accent-high: #c3d0d8;
+
+  --sl-color-white: #eef0f2; /* text */
+  --sl-color-gray-1: #c7ccd1;
+  --sl-color-gray-2: #9aa1a8;
+  --sl-color-gray-3: #767d86;
+  --sl-color-gray-4: #565c64;
+  --sl-color-gray-5: #33383e;
+  --sl-color-gray-6: #212427;
+  --sl-color-black: #16181a; /* bg */
+}
+
+/* Tighter, quieter chrome. */
+.sl-markdown-content h1,
+.sl-markdown-content h2 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.hero h1 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.hero .tagline {
+  color: var(--sl-color-gray-2);
+}
+
+/* Fake terminal window around the hero screenshot: title bar + traffic
+   lights, so a plain PNG reads as "a real terminal", not a floating image. */
+.term-frame {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: #111315;
+  box-shadow: 0 1.5rem 3rem -1.5rem rgba(0, 0, 0, 0.35);
+}
+
+.term-frame-bar {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  background: #17191b;
+  border-bottom: 1px solid #262a2d;
+}
+
+.term-frame-bar span {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: #34383c;
+}
+
+.term-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Splash-page prose: center section headings like a landing page, not a
+   docs article. .sl-markdown-content is a sibling of .sl-container (which
+   wraps .hero), not of .hero itself, so scope through their shared parent.
+   Starlight renders headings as inline elements inside a `.sl-heading-wrapper`
+   div (so the anchor-link icon can hug the last word) — the wrapper, not the
+   heading, is what needs centering, since the inline h2 shrinks to fit its
+   own text and text-align on it alone has nothing to distribute. */
+.content-panel:has(.hero) .sl-markdown-content .sl-heading-wrapper.level-h2 {
+  text-align: center;
+  margin-block: 3rem 1.25rem;
+}
+
+.content-panel:has(.hero) .sl-markdown-content h2 {
+  font-size: var(--sl-text-2xl);
+}
+
+.content-panel:has(.hero) .sl-markdown-content > p {
+  text-align: center;
+  color: var(--sl-color-gray-2);
+}
+
+/* Center the whole Expressive Code frame (title bar + pre + copy button)
+   as one unit. Narrowing just `pre` leaves its wrapping `.expressive-code`
+   / `figure.frame` — which owns the terminal title bar — at full width,
+   producing a title bar wider than the code box sitting inside it. */
+.content-panel:has(.hero) .sl-markdown-content .expressive-code {
+  max-width: 42rem;
+  margin-inline: auto;
+}
+
+/* Cards: subtle tinted surface instead of a plain outline, quiet hover lift. */
+.card {
+  box-shadow: none !important;
+  border-radius: 0.625rem !important;
+  border-color: var(--sl-color-gray-5) !important;
+  background-color: var(--sl-color-gray-6);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--sl-color-gray-4) !important;
+  transform: translateY(-1px);
+}
+
+.card .title {
+  font-size: var(--sl-text-lg);
+  font-weight: 600;
+}
+
+/* Code blocks: quieter border, no glow. Monospace stays here on purpose. */
+.expressive-code {
+  --ec-brdRad: 0.375rem;
+}

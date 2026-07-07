@@ -1,0 +1,55 @@
+---
+title: Neo
+description: A terminal-first coding agent, written in Go.
+template: splash
+editUrl: false
+hero:
+  title: Neo
+  tagline: An inspectable, fast, local coding agent for your terminal — not a hidden browser workflow.
+  image:
+    html: |
+      <div class="term-frame">
+        <div class="term-frame-bar">
+          <span></span><span></span><span></span>
+        </div>
+        <img src="/images/neo-splash.png" alt="Neo's terminal splash screen" />
+      </div>
+  actions:
+    - text: Get started
+      link: /docs/install/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/owainlewis/neo
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## One binary. A small, inspectable tool surface.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash
+```
+
+Also available via `brew install --cask owainlewis/tap/neo` and `go install github.com/owainlewis/neo/cmd/neo@latest`.
+No account, no telemetry, nothing running you can't see. Full options in the [install guide](/docs/install/).
+
+## Why Neo
+
+<CardGrid>
+	<Card title="Small tool surface">
+		Read, search, shell, and edit tools are inspectable and permissioned — nothing runs behind
+		your back.
+	</Card>
+	<Card title="Visible workflows">
+		Ask Neo to run a multi-step task and watch a live checklist while the agent works.
+	</Card>
+	<Card title="Skills & prompt commands">
+		Reusable prompt snippets and Markdown slash commands, project-local or global.
+	</Card>
+	<Card title="Modular core">
+		The agent loop is policy-free. Capabilities are injected and can be toggled in config.
+	</Card>
+</CardGrid>

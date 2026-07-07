@@ -483,6 +483,18 @@ internal/tools/         bash, read_file, write_file, edit_file, grep, glob
 internal/tui/           Bubble Tea terminal UI
 ```
 
+## Docs Site
+
+A browsable docs site lives in [`website/`](website/), built with Astro + Starlight and deployed
+to Cloudflare Pages. It covers install, quick start, and the same generated developer reference
+described below, organized into a proper sidebar with search. Run it locally with:
+
+```bash
+cd website
+bun install
+bun run dev
+```
+
 ## Developer Docs
 
 If you want to use Neo, the README should be enough to get you started.
