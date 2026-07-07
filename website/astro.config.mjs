@@ -8,7 +8,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Neo',
-      description: 'A terminal-first coding agent, written in Go.',
+      description: 'A workflow-first coding agent for your terminal, written in Go.',
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/owainlewis/neo' }],
       editLink: {
