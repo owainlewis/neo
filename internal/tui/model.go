@@ -865,9 +865,12 @@ func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBl
 	if !m.turn.direct && m.turn.tools == 0 && !m.turn.workflow {
 		return resultSummaryBlock{}, false
 	}
-	failed := err != nil || m.turn.errors > 0
+	maxTurns := errors.Is(err, agent.ErrMaxTurns)
+	failed := !maxTurns && (err != nil || m.turn.errors > 0)
 	label := "Done"
-	if failed {
+	if maxTurns {
+		label = "Paused"
+	} else if failed {
 		label = "Finished with issues"
 	}
 	parts := []string{}
@@ -879,6 +882,9 @@ func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBl
 	}
 	if m.turn.direct {
 		parts = append(parts, "command complete")
+	}
+	if maxTurns {
+		parts = append(parts, "reply to continue")
 	}
 	return resultSummaryBlock{label: label, detail: strings.Join(parts, " · "), elapsed: elapsed, failed: failed}, true
 }

@@ -72,9 +72,14 @@ type Agent struct {
 	usage    llm.Usage
 }
 
+// DefaultMaxTurns is a high safety fuse for runaway tool loops, not a normal
+// work budget. Coding tasks can legitimately need many model/tool cycles; the
+// model should usually stop because it is done, not because Neo reached this.
+const DefaultMaxTurns = 500
+
 func New(cfg Config) *Agent {
 	if cfg.MaxTurns == 0 {
-		cfg.MaxTurns = 100
+		cfg.MaxTurns = DefaultMaxTurns
 	}
 	if cfg.Tools == nil {
 		cfg.Tools = tools.NewRegistry()

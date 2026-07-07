@@ -17,7 +17,7 @@ import (
 // must be explicit.
 var defaultStepTools = []string{"bash", "read_file", "grep", "glob"}
 
-const defaultStepMaxTurns = 100
+const defaultStepMaxTurns = agent.DefaultMaxTurns
 
 // AgentRunner runs agent steps on neo's core agent loop. Each step gets a
 // fresh agent (amnesiac by design) with a registry filtered to the step's

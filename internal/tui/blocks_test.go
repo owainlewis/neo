@@ -35,7 +35,7 @@ func TestTextBlockRenderTrimsMarkdownEdgeNewlines(t *testing.T) {
 
 func TestMaxTurnsBlockRenderShowsLimitAndContinuationHint(t *testing.T) {
 	out := plain(maxTurnsBlock{limit: 50}.render(80, nil))
-	if want := "hit turn limit (50). Reply to continue."; !strings.Contains(out, want) {
+	if want := "Paused after 50 steps. Reply to continue."; !strings.Contains(out, want) {
 		t.Fatalf("rendered block missing %q: %q", want, out)
 	}
 }

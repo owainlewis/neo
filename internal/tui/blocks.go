@@ -318,9 +318,9 @@ func (b errorBlock) render(width int, _ *glamour.TermRenderer) string {
 type maxTurnsBlock struct{ limit int }
 
 func (b maxTurnsBlock) render(width int, _ *glamour.TermRenderer) string {
-	msg := "hit turn limit. Reply to continue."
+	msg := "Paused after reaching Neo's safety step limit. Reply to continue."
 	if b.limit > 0 {
-		msg = fmt.Sprintf("hit turn limit (%d). Reply to continue.", b.limit)
+		msg = fmt.Sprintf("Paused after %d steps. Reply to continue.", b.limit)
 	}
 	return accentCard(styMuted.Render(msg), colWarn)
 }
