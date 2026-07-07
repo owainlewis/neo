@@ -1,11 +1,11 @@
 ---
 title: Neo
-description: A terminal-first coding agent, written in Go.
+description: A workflow-first coding agent for your terminal, written in Go.
 template: splash
 editUrl: false
 hero:
   title: Neo
-  tagline: An inspectable, fast, local coding agent for your terminal — not a hidden browser workflow.
+  tagline: A workflow-first coding agent for your terminal. Encode a checklist once — Neo runs the agent through it step by step, with live progress instead of a black box.
   image:
     html: |
       <div class="term-frame">
@@ -27,7 +27,7 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## One binary. A small, inspectable tool surface.
+## One line. Any provider you already pay for.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash
@@ -39,17 +39,20 @@ No account, no telemetry, nothing running you can't see. Full options in the [in
 ## Why Neo
 
 <CardGrid>
-	<Card title="Small tool surface">
-		Read, search, shell, and edit tools are inspectable and permissioned — nothing runs behind
-		your back.
+	<Card title="Workflow-first">
+		Encode a checklist once — in a prompt, a skill, or an `AGENTS.md` — and Neo runs the agent
+		through it step by step, with a live checklist instead of a black box.
 	</Card>
-	<Card title="Visible workflows">
-		Ask Neo to run a multi-step task and watch a live checklist while the agent works.
+	<Card title="Sensible defaults">
+		Permission modes, `AGENTS.md` support, and visible workflows all work the moment you install
+		Neo. Nothing to assemble before it's useful.
 	</Card>
-	<Card title="Skills & prompt commands">
-		Reusable prompt snippets and Markdown slash commands, project-local or global.
+	<Card title="Multi-provider">
+		Anthropic, OpenAI API key, or OpenAI subscription. Switch providers with one config line, not
+		a rewrite.
 	</Card>
-	<Card title="Modular core">
-		The agent loop is policy-free. Capabilities are injected and can be toggled in config.
+	<Card title="Minimalist">
+		A single Go binary, six built-in tools, no runtime dependency. The core agent loop stays
+		small and policy-free on purpose.
 	</Card>
 </CardGrid>

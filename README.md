@@ -3,34 +3,42 @@
 [![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Neo is a terminal-first coding agent written in Go for people who want an
-inspectable, fast local tool instead of a hidden browser workflow.
+Most coding agents are free-form: you type a request and hope the model picks
+the right sequence of steps. Neo is workflow-first — encode a checklist once,
+in a prompt, a skill, or an `AGENTS.md`, and Neo runs the agent through it step
+by step with live, visible progress instead of a black box. That checklist is
+what makes a multi-step task repeatable instead of a one-off improvisation.
 
-Run `neo` to open an interactive terminal UI where you can watch the agent read
-files, run commands, and make edits in real time. The codebase stays small on
-purpose: a policy-free core loop, with file, shell, session, and prompt features
-layered on as independent modules.
+Neo is also a single Go binary with sensible defaults (permission modes and
+workflows work out of the box, no plugins to assemble first) and support for
+multiple providers (Anthropic, OpenAI API key, or OpenAI subscription) so
+switching backends is a config line, not a rewrite.
 
 ![neo splash screen](docs/screenshot.png)
 
 ## Features
 
+- **Workflow-first.** Give Neo numbered steps, or ask it to plan a workflow,
+  and the TUI shows a live checklist while the agent works through each step
+  in order. Skills and prompt commands let you encode that checklist once and
+  reuse it.
+- **Sensible defaults.** Permission modes (`ask`, `trusted`, `readonly`),
+  `AGENTS.md` support, and visible workflows all work the moment you install
+  Neo — nothing to configure before it's useful.
+- **Multi-provider.** Anthropic, OpenAI (API key), or OpenAI (ChatGPT/Codex
+  subscription). Switch with one config line.
+- **Minimalist.** A single Go binary, six built-in tools (read, search, shell,
+  write, edit), no runtime dependency. The core agent loop is small and
+  policy-free on purpose — file, shell, session, and prompt features are
+  layered on as independent modules, not baked into the loop.
 - **Interactive chat.** `neo` opens a Bubble Tea terminal UI. Type a task and
   watch the agent work.
-- **Small tool surface.** Read, search, shell, and edit tools are inspectable
-  and permissioned.
-- **Permission modes.** Choose `ask`, `trusted`, or `readonly` depending on how
-  much approval you want before Neo runs tools.
-- **Visible workflows.** Ask Neo to run a workflow or provide numbered steps and
-  the TUI shows a live checklist while the agent works.
 - **AGENTS.md support.** Drop an `AGENTS.md` in your project (or `~/.neo/`) and
   its guidance is loaded into the agent's system prompt. Feature-flagged.
 - **Skills.** Reusable prompt snippets in `.neo/skills/<name>/SKILL.md`. Mention
   `$name` in a message and the skill's instructions are expanded into that turn.
 - **Prompt commands.** Markdown prompt templates in `.neo/commands/*.md` or
   `~/.neo/commands/*.md`. Invoke them as `/name args`.
-- **Modular core.** The agent loop knows nothing about coding, files, or project
-  context — capabilities are injected and can be toggled in config.
 
 ## Install
 
