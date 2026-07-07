@@ -24,10 +24,10 @@ func newTestAgent(t *testing.T, prov llm.Provider, ts ...tools.Tool) *Agent {
 	})
 }
 
-func TestAgent_DefaultMaxTurnsIs100(t *testing.T) {
+func TestAgent_DefaultMaxTurnsIsHighSafetyFuse(t *testing.T) {
 	ag := New(Config{Provider: &llmtest.FakeProvider{}})
-	if ag.cfg.MaxTurns != 100 {
-		t.Fatalf("default MaxTurns = %d, want 100", ag.cfg.MaxTurns)
+	if ag.cfg.MaxTurns != DefaultMaxTurns {
+		t.Fatalf("default MaxTurns = %d, want %d", ag.cfg.MaxTurns, DefaultMaxTurns)
 	}
 }
 

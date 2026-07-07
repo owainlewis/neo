@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/glamour/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/workflow"
 )
 
 func TestTextBlockRenderTrimsMarkdownEdgeNewlines(t *testing.T) {
@@ -33,7 +35,7 @@ func TestTextBlockRenderTrimsMarkdownEdgeNewlines(t *testing.T) {
 
 func TestMaxTurnsBlockRenderShowsLimitAndContinuationHint(t *testing.T) {
 	out := plain(maxTurnsBlock{limit: 50}.render(80, nil))
-	if want := "hit turn limit (50). Reply to continue."; !strings.Contains(out, want) {
+	if want := "Paused after 50 steps. Reply to continue."; !strings.Contains(out, want) {
 		t.Fatalf("rendered block missing %q: %q", want, out)
 	}
 }
@@ -169,4 +171,47 @@ func renderPlainBlocks(m *model) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+func TestWorkflowBlockRenderShowsProgressAndCompletion(t *testing.T) {
+	out := plain((&workflowBlock{
+		title: "Plan",
+		items: []workflow.Item{
+			{ID: "1", Text: "Inspect", Status: workflow.Done},
+			{ID: "2", Text: "Polish", Status: workflow.Done, Detail: "updated status line"},
+		},
+	}).render(80, nil))
+
+	for _, want := range []string{"Plan  2/2", "✓ Inspect", "updated status line", "Plan complete · 2/2 steps"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workflow render missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestStatusLineUsesSpecificNeoActivity(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	m.busySince = time.Now()
+	m.currentTool = &toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}
+
+	out := plain(m.statusLine())
+	if !strings.Contains(out, "Neo is reading internal/tui/model.go") {
+		t.Fatalf("status line missing specific activity: %q", out)
+	}
+
+	m.currentTool = nil
+	out = plain(m.statusLine())
+	if !strings.Contains(out, "Neo is thinking") {
+		t.Fatalf("status line missing thinking activity: %q", out)
+	}
+}
+
+func TestResultSummaryBlockRenderIsCompact(t *testing.T) {
+	out := plain(resultSummaryBlock{label: "Done", detail: "2 tools", elapsed: 2 * time.Second}.render(80, nil))
+	for _, want := range []string{"✓ Done", "2 tools", "2s"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("summary render missing %q: %q", want, out)
+		}
+	}
 }

@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -64,5 +65,44 @@ func TestWorkflowPanel_TabDoesNotStealPickerAcceptance(t *testing.T) {
 	}
 	if !m.workflowVisible {
 		t.Fatal("workflow visibility changed while picker handled Tab")
+	}
+}
+
+func TestWorkflowPanel_HidesWhenCompletedTurnFinishes(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	m.busySince = time.Now()
+	m.turn = turnStats{workflow: true}
+	m.workflow = &workflowBlock{title: "Workflow", items: []workflow.Item{
+		{ID: "1", Text: "inspect", Status: workflow.Done},
+		{ID: "2", Text: "test", Status: workflow.Done},
+	}}
+	m.workflowVisible = true
+
+	m.Update(sendResultMsg{})
+
+	if m.workflow == nil {
+		t.Fatal("completed workflow should remain available for inspection")
+	}
+	if m.workflowVisible {
+		t.Fatal("completed workflow should hide after the turn finishes")
+	}
+}
+
+func TestWorkflowPanel_ClearsCompletedWorkflowBeforeNextTurn(t *testing.T) {
+	m := makeTestModel()
+	m.workflow = &workflowBlock{title: "Old plan", items: []workflow.Item{
+		{ID: "1", Text: "old", Status: workflow.Done},
+		{ID: "2", Text: "done", Status: workflow.Skipped},
+	}}
+	m.workflowVisible = true
+
+	m.submitUserTurn("hello", "hello", nil)
+
+	if m.workflow != nil {
+		t.Fatalf("completed workflow should be cleared before next turn, got %+v", m.workflow)
+	}
+	if m.workflowVisible {
+		t.Fatal("cleared workflow should not remain visible")
 	}
 }

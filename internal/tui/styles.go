@@ -46,6 +46,9 @@ var (
 			Background(lipgloss.Color("52")).
 			Padding(0, 1)
 
+	styResultSummary = lipgloss.NewStyle().
+				Padding(0, 1)
+
 	// styInputBar renders the chat input as a single solid-color block with
 	// no borders — matching the OpenAI Codex composer. The vertical padding
 	// keeps the one-row textarea from feeling cramped now that the framing

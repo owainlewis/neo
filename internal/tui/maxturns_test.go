@@ -3,7 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/owainlewis/neo/internal/agent"
 )
@@ -32,6 +34,25 @@ func TestModel_SendResultSuppressesGenericMaxTurnsError(t *testing.T) {
 
 	if len(m.blocks) != 0 {
 		t.Fatalf("expected no generic error block, got %T", m.blocks[0])
+	}
+}
+
+func TestResultSummaryTreatsMaxTurnsAsPause(t *testing.T) {
+	m := makeTestModel()
+	m.turn = turnStats{tools: 3, workflow: true}
+
+	summary, ok := m.resultSummary(fmt.Errorf("agent stopped: %w", agent.ErrMaxTurns), 2*time.Second)
+	if !ok {
+		t.Fatal("expected summary")
+	}
+	if summary.failed {
+		t.Fatal("max turns should not render as a failed summary")
+	}
+	if summary.label != "Paused" {
+		t.Fatalf("label = %q, want Paused", summary.label)
+	}
+	if !strings.Contains(summary.detail, "reply to continue") {
+		t.Fatalf("detail missing continuation hint: %q", summary.detail)
 	}
 }
 
