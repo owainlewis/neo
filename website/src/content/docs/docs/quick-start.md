@@ -57,7 +57,7 @@ Neo reads the first config file it finds in this order:
 2. `~/.neo/config.yaml`
 3. Embedded defaults
 
-See the [configuration reference](/docs/config/) for the full set of options.
+See the [configuration reference](/docs/reference/config/) for the full set of options.
 
 ## 4. Start your first chat
 
@@ -87,4 +87,4 @@ If you built Neo locally but did not install it onto your `PATH`, run `./neo` in
 | `neo resume <id>` | Resume a saved chat |
 | `neo login` / `neo logout` | Set up or remove OpenAI subscription auth |
 
-See the full [CLI reference](/docs/cli/) for every command and flag.
+See the full [CLI reference](/docs/reference/cli/) for every command and flag.

@@ -47,12 +47,23 @@
 
   --sl-radius-medium: 0.375rem;
   --sl-radius-large: 0.5rem;
+
+  /* Aside colors default to fully saturated hues (vivid blue/green/orange/red)
+     — mute the "note" aside to match the rest of the palette instead of
+     standing out as a random bright blue box. */
+  --sl-color-blue-low: #e7ebee;
+  --sl-color-blue: #4c5f70;
+  --sl-color-blue-high: #2c3946;
 }
 
 :root[data-theme='dark'] {
   --sl-color-accent-low: #263139;
   --sl-color-accent: #8fa2b0;
   --sl-color-accent-high: #c3d0d8;
+
+  --sl-color-blue-low: #263139;
+  --sl-color-blue: #8fa2b0;
+  --sl-color-blue-high: #c3d0d8;
 
   --sl-color-white: #eef0f2; /* text */
   --sl-color-gray-1: #c7ccd1;

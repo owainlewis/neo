@@ -18,17 +18,27 @@ export default defineConfig({
       pagination: false,
       sidebar: [
         {
-          label: 'Start here',
+          label: 'Get started',
           items: [
-            { label: 'Overview', slug: 'docs/reference' },
             { label: 'Install', slug: 'docs/install' },
             { label: 'Quick start', slug: 'docs/quick-start' },
           ],
         },
         {
-          label: 'Guides',
+          label: 'Reference',
           items: [
-            { label: 'Overview', slug: 'docs/reference/guides' },
+            { label: 'CLI', slug: 'docs/reference/cli' },
+            { label: 'Configuration', slug: 'docs/reference/config' },
+            { label: 'Sessions', slug: 'docs/reference/sessions' },
+            { label: 'Tools', slug: 'docs/reference/tools' },
+          ],
+        },
+        {
+          label: 'Internals (for contributors)',
+          items: [
+            { label: 'Overview', slug: 'docs/reference' },
+            { label: 'Architecture', slug: 'docs/reference/architecture' },
+            { label: 'Prompt caching', slug: 'docs/reference/prompt-caching' },
             { label: 'Agent loop', slug: 'docs/reference/guides/agent-loop' },
             { label: 'System prompt', slug: 'docs/reference/guides/system-prompt' },
             { label: 'Tools', slug: 'docs/reference/guides/tools' },
@@ -37,17 +47,6 @@ export default defineConfig({
             { label: 'Sessions', slug: 'docs/reference/guides/sessions' },
             { label: 'Compaction', slug: 'docs/reference/guides/compaction' },
             { label: 'Memory', slug: 'docs/reference/guides/memory' },
-          ],
-        },
-        {
-          label: 'Reference',
-          items: [
-            { label: 'Architecture', slug: 'docs/reference/architecture' },
-            { label: 'CLI', slug: 'docs/reference/cli' },
-            { label: 'Configuration', slug: 'docs/reference/config' },
-            { label: 'Sessions', slug: 'docs/reference/sessions' },
-            { label: 'Tools', slug: 'docs/reference/tools' },
-            { label: 'Prompt caching', slug: 'docs/reference/prompt-caching' },
           ],
         },
       ],
