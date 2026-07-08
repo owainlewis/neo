@@ -37,6 +37,26 @@ func TestModel_SendResultSuppressesGenericMaxTurnsError(t *testing.T) {
 	}
 }
 
+// TestModel_SendResultDoesNotDuplicateMaxTurnsSummary reproduces the real
+// max-turns flow: EventMaxTurnsReached appends a maxTurnsBlock, then
+// sendResultMsg fires with the wrapped ErrMaxTurns. If the turn did tool
+// work, resultSummary would otherwise also produce a second, misleading
+// "Finished with issues" card.
+func TestModel_SendResultDoesNotDuplicateMaxTurnsSummary(t *testing.T) {
+	m := makeTestModel()
+	m.turn = turnStats{tools: 3}
+
+	m.handleEvent(agent.Event{Kind: agent.EventMaxTurnsReached, MaxTurns: 50, Err: agent.ErrMaxTurns})
+	m.Update(sendResultMsg{err: fmt.Errorf("agent stopped: %w", agent.ErrMaxTurns)})
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("expected only the maxTurnsBlock, got %d blocks: %#v", len(m.blocks), m.blocks)
+	}
+	if _, ok := m.blocks[0].(maxTurnsBlock); !ok {
+		t.Fatalf("expected maxTurnsBlock, got %T", m.blocks[0])
+	}
+}
+
 func TestResultSummaryTreatsMaxTurnsAsPause(t *testing.T) {
 	m := makeTestModel()
 	m.turn = turnStats{tools: 3, workflow: true}
