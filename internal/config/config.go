@@ -21,6 +21,7 @@ const (
 	defaultOpenAIModel     = "gpt-4o"
 	defaultCodexModel      = "gpt-5-codex"
 	defaultOpenRouterModel = "anthropic/claude-sonnet-4.5"
+	defaultGoogleModel     = "gemini-2.5-pro"
 	defaultProvider        = "anthropic"
 
 	// OpenAI auth modes (the openai_auth config key).
@@ -37,7 +38,7 @@ var embeddedConfigYAML []byte
 
 // Config is the parsed neo.yaml.
 type Config struct {
-	// Provider selects the LLM backend: "anthropic" (default), "openai", or "openrouter".
+	// Provider selects the LLM backend: "anthropic" (default), "openai", "openrouter", or "google".
 	Provider string `yaml:"provider"`
 	// OpenAIAuth selects how the "openai" provider authenticates: "api_key"
 	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex
@@ -196,6 +197,8 @@ func defaultModelFor(provider, openAIAuth string) string {
 		return defaultOpenAIModel
 	case "openrouter":
 		return defaultOpenRouterModel
+	case "google":
+		return defaultGoogleModel
 	default:
 		return defaultModel
 	}

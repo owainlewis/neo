@@ -12,6 +12,7 @@ import (
 
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
+	"github.com/owainlewis/neo/internal/llm/google"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/session"
@@ -41,6 +42,25 @@ func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
 		if strings.Contains(choice.ID, "codex") {
 			t.Fatalf("api-key model picker should not list Codex model %q", choice.ID)
 		}
+	}
+}
+
+func TestModelChoices_GoogleListsGeminiModels(t *testing.T) {
+	choices := modelChoices(context.Background(), &config.Config{Provider: "google"})
+	if len(choices) == 0 {
+		t.Fatal("expected google model choices")
+	}
+	if choices[0].ID != google.DefaultModel {
+		t.Fatalf("first google choice = %q, want default %q", choices[0].ID, google.DefaultModel)
+	}
+	foundFlash := false
+	for _, choice := range choices {
+		if strings.HasPrefix(choice.ID, "gemini-") && strings.Contains(choice.ID, "flash") {
+			foundFlash = true
+		}
+	}
+	if !foundFlash {
+		t.Fatalf("expected at least one Gemini Flash choice: %#v", choices)
 	}
 }
 

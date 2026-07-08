@@ -17,10 +17,11 @@ First hit wins. Config files are not merged.
 # Override by creating ./neo.yaml in a project, or ~/.neo/config.yaml globally.
 # The first file found wins — config files are NOT merged.
 
-# LLM backend: "anthropic" (default), "openai", or "openrouter".
+# LLM backend: "anthropic" (default), "openai", "openrouter", or "google".
 # anthropic  → requires ANTHROPIC_API_KEY
 # openai     → uses the Responses API; auth via openai_auth (below)
 # openrouter → uses Chat Completions via OPENROUTER_API_KEY
+# google     → uses Gemini via GOOGLE_API_KEY
 provider: anthropic
 
 # How the "openai" provider authenticates (ignored for other providers):
@@ -93,6 +94,13 @@ features:
 #
 # provider: openrouter
 # model: <provider/model-id>
+#
+# --- Google Gemini -----------------------------------------------------------
+# Requires: export GOOGLE_API_KEY=...
+# Models: https://ai.google.dev/gemini-api/docs/models
+#
+# provider: google
+# model: gemini-2.5-pro
 # ----------------------------------------------------------------------------
 ```
 
@@ -104,6 +112,7 @@ features:
 | `provider: openai` with `openai_auth: api_key` | `OPENAI_API_KEY` | `internal/llm/openai.Client` |
 | `provider: openai` with `openai_auth: subscription` | ChatGPT/Codex device-code credentials from `~/.neo/auth.json` | `internal/llm/openai.CodexClient` |
 | `provider: openrouter` | `OPENROUTER_API_KEY` | `internal/llm/openrouter` |
+| `provider: google` | `GOOGLE_API_KEY` | `internal/llm/google` |
 
 Subscription credentials are created with `neo login` and removed with `neo logout`. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 

@@ -21,6 +21,7 @@ import (
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
+	"github.com/owainlewis/neo/internal/llm/google"
 	"github.com/owainlewis/neo/internal/llm/openai"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/logx"
@@ -216,10 +217,12 @@ func mustProvider(cfg *config.Config) llm.Provider {
 		}
 	case "openrouter":
 		prov, err = openrouter.New()
+	case "google":
+		prov, err = google.New()
 	case "anthropic", "":
 		prov, err = anthropic.New()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\", \"openai\", or \"openrouter\")\n", cfg.Provider)
+		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\", \"openai\", \"openrouter\", or \"google\")\n", cfg.Provider)
 		os.Exit(1)
 	}
 	if err != nil {
@@ -458,6 +461,12 @@ func modelChoices(ctx context.Context, cfg *config.Config) []tui.ModelChoice {
 		}
 	case "openrouter":
 		return openRouterModelChoices(ctx)
+	case "google":
+		return []tui.ModelChoice{
+			{ID: google.DefaultModel, Name: "Gemini 2.5 Pro", Description: "Default Google Gemini model for coding and agentic tasks"},
+			{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Description: "Faster, lower-cost Gemini 2.5 model"},
+			{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", Description: "Fast Gemini 2.0 model"},
+		}
 	default:
 		return []tui.ModelChoice{
 			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Description: "Default Anthropic model"},
@@ -624,7 +633,7 @@ func doctorChecks() []doctorCheck {
 
 func doctorProviderCheck(cfg *config.Config) doctorCheck {
 	switch cfg.Provider {
-	case "anthropic", "openai", "openrouter":
+	case "anthropic", "openai", "openrouter", "google":
 		return doctorCheck{Status: doctorPass, Name: "provider", Detail: cfg.Provider}
 	default:
 		return doctorCheck{Status: doctorFail, Name: "provider", Detail: fmt.Sprintf("unknown provider %q", cfg.Provider)}
@@ -637,6 +646,8 @@ func doctorCredentialCheck(cfg *config.Config) doctorCheck {
 		return envCredentialCheck("ANTHROPIC_API_KEY")
 	case "openrouter":
 		return envCredentialCheck("OPENROUTER_API_KEY")
+	case "google":
+		return envCredentialCheck("GOOGLE_API_KEY")
 	case "openai":
 		if cfg.SubscriptionAuth() {
 			store, err := auth.DefaultStore()

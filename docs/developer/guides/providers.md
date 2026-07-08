@@ -4,7 +4,7 @@
 
 ## The Simple Idea
 
-A provider is the adapter between Neo and a model API. Neo speaks its own small internal language; providers translate that into Anthropic or OpenAI requests.
+A provider is the adapter between Neo and a model API. Neo speaks its own small internal language; providers translate that into Anthropic, OpenAI, OpenRouter, or Gemini requests.
 
 ## The Problem
 
@@ -33,6 +33,7 @@ The core loop sends an `llm.Request`. The provider returns an `llm.Response`. Ev
 | `provider: openai` + `openai_auth: api_key` | `OPENAI_API_KEY` | `internal/llm/openai.Client` |
 | `provider: openai` + `openai_auth: subscription` | `neo login` device-code credentials | `internal/llm/openai.CodexClient` |
 | `provider: openrouter` | `OPENROUTER_API_KEY` | `internal/llm/openrouter` |
+| `provider: google` | `GOOGLE_API_KEY` | `internal/llm/google` |
 
 ## How Models Are Chosen
 
@@ -44,7 +45,7 @@ In the TUI, `/model` opens a model picker. It changes the active model for the c
 
 - Provider adapters should translate, not decide product behavior.
 - Retry and response parsing belong in provider packages.
-- The core agent loop should not care whether a response came from Anthropic or OpenAI.
+- The core agent loop should not care whether a response came from Anthropic, OpenAI, OpenRouter, or Google.
 - Subscription/Codex auth is experimental and should be documented carefully.
 
 ## Where To Look
@@ -54,5 +55,6 @@ In the TUI, `/model` opens a model picker. It changes the active model for the c
 - `internal/llm/openai`: OpenAI adapters.
 - `internal/llm/chatcompletions`: reusable OpenAI-compatible Chat Completions translation.
 - `internal/llm/openrouter`: OpenRouter adapter wiring.
+- `internal/llm/google`: Google Gemini adapter.
 - `internal/auth`: subscription credential storage and refresh.
 - `cmd/neo/main.go`: provider selection.
