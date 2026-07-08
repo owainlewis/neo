@@ -582,7 +582,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if errors.Is(msg.err, context.Canceled) {
 			m.appendBlock(noticeBlock{text: "turn canceled"})
-		} else if msg.err != nil && !errors.Is(msg.err, agent.ErrMaxTurns) {
+		} else if errors.Is(msg.err, agent.ErrMaxTurns) {
+			// EventMaxTurnsReached already appended a maxTurnsBlock
+			// describing this turn; don't also emit a result summary.
+		} else if msg.err != nil {
 			m.appendBlock(errorBlock{err: msg.err})
 		} else if summary, ok := m.resultSummary(msg.err, elapsed); ok {
 			m.appendBlock(summary)
@@ -687,8 +690,8 @@ func makeView(content string) tea.View {
 }
 
 // elapsedThreshold is how long a turn has to run before we surface an
-// elapsed-time counter or fall back to the playful caption. Short turns
-// shouldn't flicker numbers or trivia at the user.
+// elapsed-time counter in the status line. Short turns shouldn't flicker
+// numbers at the user.
 const elapsedThreshold = 3 * time.Second
 
 const defaultPlaceholder = "Ask neo anything…   ↩ send"
@@ -1173,7 +1176,6 @@ func (m *model) maybeStartWorkflowFromUserText(text string) {
 }
 
 func (m *model) handleWorkflowEvent(ev workflow.Event) {
-	m.turn.workflow = true
 	if ev.Action == "clear" {
 		m.workflow = nil
 		m.workflowVisible = true
@@ -1181,6 +1183,7 @@ func (m *model) handleWorkflowEvent(ev workflow.Event) {
 		m.refreshViewport()
 		return
 	}
+	m.turn.workflow = true
 	if ev.Action == "create" {
 		if m.autoWorkflowPending && m.workflow != nil {
 			m.workflow.title = ev.State.Title
