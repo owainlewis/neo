@@ -566,6 +566,7 @@ func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) 
 		Policy:   permission.New("trusted", "."),
 	})
 	m := makeTestModel()
+	m.verbose = true // exercise the full tool-result rendering path
 	m.ag = ag
 	m.ag.SetEventHandler(m.handleEvent)
 
@@ -608,6 +609,42 @@ func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) 
 	}
 	if rs.label != "Done" || !strings.Contains(rs.detail, "command complete") {
 		t.Fatalf("unexpected summary: %+v", rs)
+	}
+}
+
+func TestBangCommand_ConciseModeOmitsSuccessfulToolResult(t *testing.T) {
+	prov := &llmtest.FakeProvider{}
+	ag := agent.New(agent.Config{
+		Model:    "test",
+		Provider: prov,
+		Tools:    tools.NewRegistry(tuiEchoTool{}),
+		Policy:   permission.New("trusted", "."),
+	})
+	m := makeTestModel() // verbose defaults to false
+	m.ag = ag
+	m.ag.SetEventHandler(m.handleEvent)
+
+	cmd := m.handleBangCommand("!echo hello")
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
+	m.Update(cmd())
+
+	if len(m.blocks) != 2 {
+		t.Fatalf("expected tool call and summary blocks only, got %d: %+v", len(m.blocks), m.blocks)
+	}
+	tc, ok := m.blocks[0].(toolCallBlock)
+	if !ok {
+		t.Fatalf("expected toolCallBlock, got %T", m.blocks[0])
+	}
+	if tc.verbose {
+		t.Fatal("expected concise tool call block")
+	}
+	if !strings.Contains(tc.render(80, nil), "Running echo hello...") {
+		t.Fatalf("expected concise status line, got %q", tc.render(80, nil))
+	}
+	if _, ok := m.blocks[1].(resultSummaryBlock); !ok {
+		t.Fatalf("expected resultSummaryBlock, got %T", m.blocks[1])
 	}
 }
 

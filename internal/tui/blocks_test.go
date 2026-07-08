@@ -116,6 +116,43 @@ func TestToolResultBlockCanRenderCompactAndExpanded(t *testing.T) {
 	}
 }
 
+func TestToolCallBlockRendersConciseStatusLineByDefault(t *testing.T) {
+	out := plain(toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}.render(80, nil))
+	if out != "Reading internal/tui/model.go..." {
+		t.Fatalf("concise tool call render = %q, want a plain status line", out)
+	}
+}
+
+func TestToolCallBlockRendersFullCardWhenVerbose(t *testing.T) {
+	out := plain(toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}, verbose: true}.render(80, nil))
+	if !strings.Contains(out, "read internal/tui/model.go") {
+		t.Fatalf("verbose tool call render missing card header: %q", out)
+	}
+	if strings.Contains(out, "Reading internal/tui/model.go...") {
+		t.Fatalf("verbose render should not use the concise status line: %q", out)
+	}
+}
+
+func TestToolStatusLineCoversRoutineTools(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"bash", map[string]any{"command": "npm test"}, "Running npm test..."},
+		{"read_file", map[string]any{"path": "a.go"}, "Reading a.go..."},
+		{"write_file", map[string]any{"path": "a.go"}, "Writing a.go..."},
+		{"edit_file", map[string]any{"path": "a.go"}, "Editing a.go..."},
+		{"grep", map[string]any{"pattern": "TODO"}, "Searching TODO..."},
+		{"glob", map[string]any{"pattern": "**/*.go"}, "Matching **/*.go..."},
+	}
+	for _, tc := range cases {
+		if got := toolStatusLine(tc.name, tc.args); got != tc.want {
+			t.Fatalf("toolStatusLine(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestToggleLatestToolResultExpansionPreservesBlockOrder(t *testing.T) {
 	m := makeTestModel()
 	m.blocks = []block{

@@ -415,6 +415,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		tui.WithModelChoices(modelChoices(ctx, cfg)),
 		tui.WithStepEvents(stepEvents),
 		tui.WithWorkflowEvents(workflowEvents),
+		tui.WithVerbose(cfg.VerboseEnabled()),
 	); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

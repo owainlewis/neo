@@ -51,6 +51,14 @@ features:
   skills: true      # discover .neo/skills, advertise them, expand $name and /name references
   prompt_caching: true # cache_control the static system prompt prefix to cut input cost
 
+# Tool activity rendering during chat:
+#   verbose: false (default) → concise one-line status per tool call (e.g.
+#                              "read <path>"); errors always show in full
+#   verbose: true            → full tool call/result cards, including file
+#                              contents and command output
+output:
+  verbose: false
+
 # ----------------------------------------------------------------------------
 # Example provider configurations
 # ----------------------------------------------------------------------------
@@ -126,6 +134,15 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | `memory` | `true` | Load and update project-root `memory.md`. |
 | `skills` | `true` | Discover skills and expand $name references or /name slash invocations. |
 | `prompt_caching` | `true` | Mark the stable system prompt prefix as cacheable when the provider supports it. |
+
+## Output
+
+`output.verbose` is tri-state, same as feature flags: absent or `false` means concise mode (the default).
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `output.verbose: false` | (default) | Show concise one-line status for routine tool calls (e.g. reading a file, running a command). Errors and failures always render in full. |
+| `output.verbose: true` | | Restore full tool call/result cards, including complete file contents and command output. |
 
 ## Permissions
 
