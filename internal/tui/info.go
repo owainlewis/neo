@@ -69,6 +69,9 @@ func (m *model) slashCommands() []slashCommand {
 	for _, c := range commands {
 		used[c.cmd] = true
 	}
+	if memorySlashCommand.cmd != "" {
+		used[memorySlashCommand.cmd] = true
+	}
 	for _, s := range m.skills {
 		cmd := "/" + s.Name
 		if used[cmd] {

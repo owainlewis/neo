@@ -230,6 +230,31 @@ func TestSkillSlashInvocationExpandsBodyWithArguments(t *testing.T) {
 	}
 }
 
+func TestSkillSlashInvocationDoesNotRescanExpandedBody(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
+	m := makeTestModel()
+	m.ag = agent.New(agent.Config{Model: "test", Provider: prov, Policy: permission.New("trusted", ".")})
+	m.skills = []skills.Skill{
+		{Name: "review", Description: "review a diff", Body: "Mention $commit as an example."},
+		{Name: "commit", Description: "write a commit", Body: "Commit instructions."},
+	}
+
+	cmd := m.handleSlashCommand("/review staged diff")
+	if cmd == nil {
+		t.Fatal("expected skill command to start a send")
+	}
+	m.Update(cmd())
+
+	got := prov.Calls[0].Messages[len(prov.Calls[0].Messages)-1].Content[0].Text
+	if strings.Contains(got, "Commit instructions.") {
+		t.Fatalf("slash skill body should not be rescanned for skill refs, got:\n%s", got)
+	}
+	want := "[skill: review]\nMention $commit as an example.\n\nArguments:\nstaged diff"
+	if got != want {
+		t.Fatalf("sent prompt = %q, want %q", got, want)
+	}
+}
+
 func TestSkillSlashCommandCannotOverrideBuiltInCommand(t *testing.T) {
 	m := makeTestModel()
 	m.skills = []skills.Skill{{Name: "help", Description: "custom help", Body: "not help"}}
@@ -248,6 +273,25 @@ func TestSkillSlashCommandCannotOverrideBuiltInCommand(t *testing.T) {
 	for _, c := range m.slashCommands() {
 		if c.cmd == "/help" && c.desc == "custom help" {
 			t.Fatal("skill command should not override built-in /help")
+		}
+	}
+}
+
+func TestSkillSlashCommandCannotAppearAsDisabledMemoryCommand(t *testing.T) {
+	m := makeTestModel()
+	m.memoryEnabled = false
+	m.skills = []skills.Skill{{Name: "memory", Description: "custom memory", Body: "not memory"}}
+
+	help := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
+	if strings.Contains(help, "/memory") {
+		t.Fatalf("help should not advertise disabled /memory skill: %s", help)
+	}
+
+	m.input.SetValue("/m")
+	m.updateSlashPicker()
+	for _, match := range m.picker.matches {
+		if match.cmd == "/memory" {
+			t.Fatalf("picker should not advertise disabled /memory skill: %+v", m.picker.matches)
 		}
 	}
 }

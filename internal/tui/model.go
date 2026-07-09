@@ -690,15 +690,23 @@ const elapsedThreshold = 3 * time.Second
 const defaultPlaceholder = "Ask neo anything…   ↩ send"
 
 func (m *model) submitUserTurn(displayText, agentText string, images []string) tea.Cmd {
+	return m.submitUserTurnWithSkillExpansion(displayText, agentText, images, true)
+}
+
+func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, images []string, expandSkillRefs bool) tea.Cmd {
 	m.clearTerminalWorkflow()
 	m.appendBlock(userBlock{text: displayText})
 	m.maybeStartWorkflowFromUserText(agentText)
 	if len(images) > 0 {
 		m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
 	}
-	sent, used := skills.Expand(agentText, m.skills)
-	if len(used) > 0 {
-		m.appendBlock(noticeBlock{text: "applied skill: " + strings.Join(used, ", ")})
+	sent := agentText
+	if expandSkillRefs {
+		var used []string
+		sent, used = skills.Expand(agentText, m.skills)
+		if len(used) > 0 {
+			m.appendBlock(noticeBlock{text: "applied skill: " + strings.Join(used, ", ")})
+		}
 	}
 	m.busy = true
 	m.busySince = time.Now()
@@ -749,7 +757,7 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 			}
 			args := strings.TrimSpace(strings.TrimPrefix(line, cmd))
 			expanded := skills.ExpandInvocation(sk, args)
-			send := m.submitUserTurn(line, expanded, nil)
+			send := m.submitUserTurnWithSkillExpansion(line, expanded, nil, false)
 			m.appendBlock(noticeBlock{text: "applied skill: " + sk.Name})
 			return send
 		}
