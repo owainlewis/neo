@@ -32,8 +32,7 @@ compaction:
 features:
   agents_file: true # load AGENTS.md (project tree + ~/.neo) into the system prompt
   memory: true      # load and update project-root memory.md
-  skills: true      # discover .neo/skills, advertise them, expand $name references
-  prompt_commands: true # discover .neo/commands slash prompt templates
+  skills: true      # discover .neo/skills, advertise them, expand $name and /name references
   prompt_caching: true # cache_control the static system prompt prefix to cut input cost
 
 # ----------------------------------------------------------------------------

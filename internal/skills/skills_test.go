@@ -114,7 +114,7 @@ func TestAugment_ListsNameAndDescription(t *testing.T) {
 		{Name: "review", Description: "audit a diff", Body: "x"},
 		{Name: "commit", Description: "write a commit", Body: "y"},
 	})
-	for _, want := range []string{"# Available skills", "$review", "audit a diff", "$commit", "write a commit"} {
+	for _, want := range []string{"# Available skills", "$review", "audit a diff", "$commit", "write a commit", "`/name args`"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("catalog missing %q:\n%s", want, out)
 		}
@@ -163,5 +163,13 @@ func TestExpand_EachSkillOnceInOrder(t *testing.T) {
 	}
 	if strings.Count(got, "BB") != 1 {
 		t.Errorf("skill b should be expanded once, got:\n%s", got)
+	}
+}
+
+func TestExpandInvocation_IncludesBodyAndArguments(t *testing.T) {
+	got := ExpandInvocation(Skill{Name: "review", Body: "Look for bugs."}, "internal/tui")
+	want := "[skill: review]\nLook for bugs.\n\nArguments:\ninternal/tui"
+	if got != want {
+		t.Fatalf("expanded invocation = %q, want %q", got, want)
 	}
 }

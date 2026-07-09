@@ -26,7 +26,6 @@ import (
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
-	"github.com/owainlewis/neo/internal/promptcmd"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
@@ -374,9 +373,9 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	model := sessionModel(cfg, sess.Metadata)
 
 	// Skills are loaded once: the catalog is advertised in the system prompt
-	// (via chatSystem), and the same slice drives $name expansion in the TUI.
+	// (via chatSystem), and the same slice drives $name and /name expansion in
+	// the TUI.
 	sk := loadSkills(cfg, cwd)
-	pc := loadPromptCommands(cfg, cwd)
 
 	system, systemBlocks := chatSystem(cfg, cwd, sk)
 	ag := agent.New(agent.Config{
@@ -404,7 +403,6 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		tui.WithAfterSend(saveSession),
 		tui.WithPermissionMode(cfg.Permissions.Mode),
 		tui.WithProjectMemory(root, cfg.MemoryEnabled()),
-		tui.WithPromptCommands(pc),
 		tui.WithSessions(store, sess, func(resumed *session.Session) {
 			sess = resumed
 		}),
@@ -755,17 +753,4 @@ func loadSkills(cfg *config.Config, cwd string) []skills.Skill {
 		return nil
 	}
 	return sk
-}
-
-// loadPromptCommands discovers prompt-file slash commands when enabled. Bad
-// command files warn and are skipped so one local typo does not block startup.
-func loadPromptCommands(cfg *config.Config, cwd string) []promptcmd.Command {
-	if !cfg.PromptCommandsEnabled() || cwd == "" {
-		return nil
-	}
-	commands, warnings := promptcmd.Load(cwd)
-	for _, err := range warnings {
-		fmt.Fprintf(os.Stderr, "warning: commands: %v\n", err)
-	}
-	return commands
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/permission"
-	"github.com/owainlewis/neo/internal/promptcmd"
+	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -177,13 +177,13 @@ func TestSlashCommand_MemoryDisabledBehavesAsUnknown(t *testing.T) {
 	}
 }
 
-func TestPromptCommandsAppearInHelpAndPicker(t *testing.T) {
+func TestSkillsAppearInHelpAndPicker(t *testing.T) {
 	m := makeTestModel()
-	m.promptCommands = []promptcmd.Command{{Name: "review", Description: "review a diff", Body: "Review this."}}
+	m.skills = []skills.Skill{{Name: "review", Description: "review a diff", Body: "Review this."}}
 
 	help := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
 	if !strings.Contains(help, "/review") || !strings.Contains(help, "review a diff") {
-		t.Fatalf("help missing prompt command: %s", help)
+		t.Fatalf("help missing skill command: %s", help)
 	}
 
 	m.input.SetValue("/r")
@@ -193,15 +193,15 @@ func TestPromptCommandsAppearInHelpAndPicker(t *testing.T) {
 	}
 }
 
-func TestPromptCommandInvocationExpandsBodyWithArguments(t *testing.T) {
+func TestSkillSlashInvocationExpandsBodyWithArguments(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
 	m := makeTestModel()
 	m.ag = agent.New(agent.Config{Model: "test", Provider: prov, Policy: permission.New("trusted", ".")})
-	m.promptCommands = []promptcmd.Command{{Name: "review", Description: "review a diff", Body: "Review $ARGUMENTS carefully."}}
+	m.skills = []skills.Skill{{Name: "review", Description: "review a diff", Body: "Review carefully."}}
 
 	cmd := m.handleSlashCommand("/review internal/tui")
 	if cmd == nil {
-		t.Fatal("expected prompt command to start a send")
+		t.Fatal("expected skill command to start a send")
 	}
 	m.Update(cmd())
 
@@ -209,7 +209,8 @@ func TestPromptCommandInvocationExpandsBodyWithArguments(t *testing.T) {
 		t.Fatalf("provider calls = %d, want 1", len(prov.Calls))
 	}
 	got := prov.Calls[0].Messages[len(prov.Calls[0].Messages)-1].Content[0].Text
-	if got != "Review internal/tui carefully." {
+	want := "[skill: review]\nReview carefully.\n\nArguments:\ninternal/tui"
+	if got != want {
 		t.Fatalf("sent prompt = %q", got)
 	}
 	if len(m.blocks) < 2 {
@@ -220,7 +221,7 @@ func TestPromptCommandInvocationExpandsBodyWithArguments(t *testing.T) {
 	}
 	foundNotice := false
 	for _, b := range m.blocks {
-		if nb, ok := b.(noticeBlock); ok && strings.Contains(nb.text, "expanded command: /review") {
+		if nb, ok := b.(noticeBlock); ok && strings.Contains(nb.text, "applied skill: review") {
 			foundNotice = true
 		}
 	}
@@ -229,9 +230,34 @@ func TestPromptCommandInvocationExpandsBodyWithArguments(t *testing.T) {
 	}
 }
 
-func TestPromptCommandCannotOverrideBuiltInCommand(t *testing.T) {
+func TestSkillSlashInvocationDoesNotRescanExpandedBody(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
 	m := makeTestModel()
-	m.promptCommands = []promptcmd.Command{{Name: "help", Description: "custom help", Body: "not help"}}
+	m.ag = agent.New(agent.Config{Model: "test", Provider: prov, Policy: permission.New("trusted", ".")})
+	m.skills = []skills.Skill{
+		{Name: "review", Description: "review a diff", Body: "Mention $commit as an example."},
+		{Name: "commit", Description: "write a commit", Body: "Commit instructions."},
+	}
+
+	cmd := m.handleSlashCommand("/review staged diff")
+	if cmd == nil {
+		t.Fatal("expected skill command to start a send")
+	}
+	m.Update(cmd())
+
+	got := prov.Calls[0].Messages[len(prov.Calls[0].Messages)-1].Content[0].Text
+	if strings.Contains(got, "Commit instructions.") {
+		t.Fatalf("slash skill body should not be rescanned for skill refs, got:\n%s", got)
+	}
+	want := "[skill: review]\nMention $commit as an example.\n\nArguments:\nstaged diff"
+	if got != want {
+		t.Fatalf("sent prompt = %q, want %q", got, want)
+	}
+}
+
+func TestSkillSlashCommandCannotOverrideBuiltInCommand(t *testing.T) {
+	m := makeTestModel()
+	m.skills = []skills.Skill{{Name: "help", Description: "custom help", Body: "not help"}}
 
 	m.handleSlashCommand("/help")
 
@@ -241,12 +267,31 @@ func TestPromptCommandCannotOverrideBuiltInCommand(t *testing.T) {
 	if _, ok := m.blocks[0].(helpBlock); !ok {
 		t.Fatalf("expected built-in help block, got %T", m.blocks[0])
 	}
-	if _, ok := m.promptCommand("/Help"); ok {
-		t.Fatal("custom command should not override built-in names with different casing")
+	if _, ok := m.slashSkill("/Help"); ok {
+		t.Fatal("skill command should not override built-in names with different casing")
 	}
 	for _, c := range m.slashCommands() {
 		if c.cmd == "/help" && c.desc == "custom help" {
-			t.Fatal("custom command should not override built-in /help")
+			t.Fatal("skill command should not override built-in /help")
+		}
+	}
+}
+
+func TestSkillSlashCommandCannotAppearAsDisabledMemoryCommand(t *testing.T) {
+	m := makeTestModel()
+	m.memoryEnabled = false
+	m.skills = []skills.Skill{{Name: "memory", Description: "custom memory", Body: "not memory"}}
+
+	help := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
+	if strings.Contains(help, "/memory") {
+		t.Fatalf("help should not advertise disabled /memory skill: %s", help)
+	}
+
+	m.input.SetValue("/m")
+	m.updateSlashPicker()
+	for _, match := range m.picker.matches {
+		if match.cmd == "/memory" {
+			t.Fatalf("picker should not advertise disabled /memory skill: %+v", m.picker.matches)
 		}
 	}
 }
