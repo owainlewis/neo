@@ -20,8 +20,7 @@ OpenRouter) so switching backends is a config line, not a rewrite.
 
 - **Workflow-first.** Give Neo numbered steps, or ask it to plan a workflow,
   and the TUI shows a live checklist while the agent works through each step
-  in order. Skills and prompt commands let you encode that checklist once and
-  reuse it.
+  in order. Skills let you encode that checklist once and reuse it.
 - **Sensible defaults.** Permission modes (`ask`, `trusted`, `readonly`),
   `AGENTS.md` support, and visible workflows all work the moment you install
   Neo — nothing to configure before it's useful.
@@ -36,9 +35,8 @@ OpenRouter) so switching backends is a config line, not a rewrite.
 - **AGENTS.md support.** Drop an `AGENTS.md` in your project (or `~/.neo/`) and
   its guidance is loaded into the agent's system prompt. Feature-flagged.
 - **Skills.** Reusable prompt snippets in `.neo/skills/<name>/SKILL.md`. Mention
-  `$name` in a message and the skill's instructions are expanded into that turn.
-- **Prompt commands.** Markdown prompt templates in `.neo/commands/*.md` or
-  `~/.neo/commands/*.md`. Invoke them as `/name args`.
+  `$name` in a message or run `/name args` and the skill's instructions are
+  expanded into that turn.
 
 ## Install
 
@@ -225,8 +223,7 @@ Summarize this repository and suggest a good first change.
 | `permissions.mode` | `ask` | Prompt before bash and file mutations |
 | `compaction.context_window_tokens` | `200000` | Compact at 70% of this context window estimate |
 | `features.agents_file` | `true` | Load `AGENTS.md` instructions |
-| `features.skills` | `true` | Enable `.neo/skills` discovery and `$name` expansion |
-| `features.prompt_commands` | `true` | Enable `.neo/commands` slash prompt templates |
+| `features.skills` | `true` | Enable `.neo/skills` discovery and `$name` or `/name args` expansion |
 | `features.prompt_caching` | `true` | Cache the stable system prompt prefix when supported |
 
 ## Usage
@@ -283,10 +280,8 @@ Slash commands keep common actions out of the chat transcript:
 | `/memory <text>` | Append a project memory entry |
 | `/clear` | Clear the current transcript |
 
-Custom prompt commands from `.neo/commands/*.md` and
-`~/.neo/commands/*.md` also appear in `/help` and the slash picker.
-Built-in commands keep priority, and project commands override global commands
-with the same name.
+Skills also appear in `/help` and the slash picker as `/name`. Built-in
+commands keep priority over skills with the same name.
 
 Small examples:
 
@@ -295,7 +290,7 @@ Small examples:
 /permissions        # switch between ask, trusted, readonly
 /sessions           # resume a saved session for this workspace
 /memory prefer table-driven tests   # append a project memory entry
-/review staged diff # run .neo/commands/review.md with arguments
+/review staged diff # apply the review skill with arguments
 !git status         # run a shell command through Neo's bash tool
 read @README        # type @ to search workspace files, then tab/enter to insert
 ```
@@ -330,47 +325,19 @@ You are reviewing a code change. Work from the actual diff…
 ```
 
 Neo advertises each skill's **name + description** in the system prompt (so the
-model knows they exist), and when you mention **`$name`** in a message it expands
-that skill's full body into the turn:
+model knows they exist). When you mention **`$name`** in a message, or run
+**`/name args`** from the TUI, Neo expands that skill's full body into the turn:
 
 ```
 use the $review skill on my changes
-```
-
-Project skills override global ones of the same name. This repo ships
-`$review`, `$commit`, and `$coordinator-worker` under `.neo/skills/` as working
-examples. Disable the feature by setting `skills: false` (see Configuration).
-
-## Prompt Commands
-
-Prompt commands are slash-triggered prompt templates for daily shortcuts. Put a
-Markdown file in `.neo/commands/<name>.md` for a project command, or
-`~/.neo/commands/<name>.md` for a global command:
-
-```markdown
----
-name: review
-description: review the current diff
----
-
-Review $ARGUMENTS for correctness, tests, and simple design.
-```
-
-Run it from the TUI:
-
-```text
 /review staged diff
 ```
 
-Neo shows only the command name and description in help and autocomplete. The
-body is not added to the system prompt. It expands into the user turn only when
-you run the command.
-
-Trailing arguments replace `$ARGUMENTS` or `{{args}}` when either placeholder is
-present. If the template has no placeholder, Neo appends the arguments under an
-`Arguments:` heading. Project commands override global commands with the same
-name. Built-in slash commands such as `/help` always keep priority. Disable the
-feature with `prompt_commands: false` (see Configuration).
+Project skills override global ones of the same name. This repo ships
+`/review`, `/commit`, and `/coordinator-worker` under `.neo/skills/` as working
+examples. Built-in slash commands such as `/help` always keep priority over
+skills with the same name. Disable the feature by setting `skills: false` (see
+Configuration).
 
 For a read-only coordinator-worker smoke test, try:
 
@@ -459,8 +426,7 @@ compaction:
 features:
   agents_file: true   # load AGENTS.md into the system prompt
   memory: true        # load and update project-root memory.md
-  skills: true        # discover .neo/skills, advertise them, expand $name
-  prompt_commands: true # discover .neo/commands slash prompt templates
+  skills: true        # discover .neo/skills, advertise them, expand $name and /name
   prompt_caching: true # cache the static system prompt prefix
 ```
 
@@ -508,9 +474,8 @@ internal/config/        Config loading and feature flags
 internal/config/defaults/   Embedded neo.yaml
 internal/llm/           Provider interface + Anthropic and OpenAI adapters
 internal/projectctx/    AGENTS.md discovery and system-prompt injection
-internal/promptcmd/     Prompt-file slash command discovery and expansion
 internal/session/       Saved session metadata and transcripts
-internal/skills/        skill discovery, catalog, and $name expansion
+internal/skills/        skill discovery, catalog, and $name or /name expansion
 internal/tools/         bash, read_file, write_file, edit_file, grep, glob
 internal/tui/           Bubble Tea terminal UI
 ```

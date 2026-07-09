@@ -25,7 +25,6 @@ import (
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
-	"github.com/owainlewis/neo/internal/promptcmd"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workflow"
@@ -41,7 +40,6 @@ type Options struct {
 	ModelChoices    []ModelChoice
 	ProjectRoot     string
 	MemoryEnabled   bool
-	PromptCommands  []promptcmd.Command
 	StepEvents      <-chan factory.Event
 	WorkflowEvents  <-chan workflow.Event
 }
@@ -73,10 +71,6 @@ func WithProjectMemory(root string, enabled bool) Option {
 		opts.ProjectRoot = root
 		opts.MemoryEnabled = enabled
 	}
-}
-
-func WithPromptCommands(commands []promptcmd.Command) Option {
-	return func(opts *Options) { opts.PromptCommands = commands }
 }
 
 // WithStepEvents subscribes the TUI to the factory supervisor's event
@@ -217,7 +211,8 @@ type model struct {
 	// from inside raw mode (which leaks the OSC 11 reply into the textarea).
 	mdStyleName string
 
-	// skills drives $name expansion of the user's input before it's sent.
+	// skills drives $name expansion of the user's input and /name skill
+	// invocations before a turn is sent.
 	skills []skills.Skill
 
 	afterSend         func() error
@@ -229,7 +224,6 @@ type model struct {
 	modelChoices      []ModelChoice
 	projectRoot       string
 	memoryEnabled     bool
-	promptCommands    []promptcmd.Command
 }
 
 func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
@@ -334,7 +328,6 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		modelChoices:      normalizeModelChoices(modelTag, opts.ModelChoices),
 		projectRoot:       opts.ProjectRoot,
 		memoryEnabled:     opts.MemoryEnabled,
-		promptCommands:    opts.PromptCommands,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -749,15 +742,15 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 			}
 		}
 	default:
-		if pc, ok := m.promptCommand(cmd); ok {
+		if sk, ok := m.slashSkill(cmd); ok {
 			if m.busy {
 				m.appendBlock(errorBlock{err: fmt.Errorf("%s is unavailable while a turn is running", cmd)})
 				return nil
 			}
 			args := strings.TrimSpace(strings.TrimPrefix(line, cmd))
-			expanded := promptcmd.Expand(pc, args)
+			expanded := skills.ExpandInvocation(sk, args)
 			send := m.submitUserTurn(line, expanded, nil)
-			m.appendBlock(noticeBlock{text: "expanded command: " + cmd})
+			m.appendBlock(noticeBlock{text: "applied skill: " + sk.Name})
 			return send
 		}
 		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: %s — try /help", cmd)})

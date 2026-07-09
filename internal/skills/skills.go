@@ -1,10 +1,12 @@
 // Package skills discovers user-defined skills (SKILL.md files) and surfaces
-// them to the chat agent in two ways:
+// them to the chat agent in three ways:
 //
 //   - Advertise: a lightweight catalog (name + description) is composed into the
 //     system prompt via Augment, so the model knows which skills exist.
 //   - Expand: when the user's message mentions a skill by `$name`, Expand pulls
 //     that skill's full body into the turn.
+//   - ExpandInvocation: when the user invokes `/name args`, ExpandInvocation
+//     turns the skill body plus args into the agent turn.
 //
 // Like projectctx, this is a layered capability gated by a feature flag
 // (features.skills) and wired at the chat surface — the core agent loop is
@@ -29,9 +31,9 @@ const fileName = "SKILL.md"
 // Skill is one discovered skill: how it's invoked, what it's for, and the body
 // that gets expanded into a turn when invoked.
 type Skill struct {
-	Name        string // invocation name (lowercased); referenced as $name
+	Name        string // invocation name (lowercased); referenced as $name or /name
 	Description string // one-line summary, shown in the advertised catalog
-	Body        string // full instructions, expanded on $name reference
+	Body        string // full instructions, expanded when invoked
 	Path        string // source SKILL.md path
 }
 
@@ -155,7 +157,7 @@ func Augment(base string, sk []Skill) string {
 	b.WriteString(base)
 	b.WriteString("\n\n# Available skills\n\n")
 	b.WriteString("These named skills can be applied to a task. The user invokes one by ")
-	b.WriteString("mentioning `$name` in a message; its instructions are then expanded into ")
+	b.WriteString("mentioning `$name` in a message or by running `/name args`; its instructions are then expanded into ")
 	b.WriteString("that turn. You may also suggest a relevant skill by name.\n")
 	for _, s := range sk {
 		b.WriteString("\n- `$")
@@ -206,4 +208,17 @@ func Expand(input string, sk []Skill) (string, []string) {
 	}
 	b.WriteString(input)
 	return b.String(), used
+}
+
+// ExpandInvocation renders one slash-invoked skill body with optional trailing
+// arguments. The skill body is always included, and args are appended in a
+// labelled section so the model can distinguish workflow instructions from the
+// user's task-specific input.
+func ExpandInvocation(s Skill, args string) string {
+	body := strings.TrimSpace(s.Body)
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return fmt.Sprintf("[skill: %s]\n%s", s.Name, body)
+	}
+	return fmt.Sprintf("[skill: %s]\n%s\n\nArguments:\n%s", s.Name, body, args)
 }

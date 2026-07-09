@@ -72,11 +72,10 @@ type Compaction struct {
 // so a minimal neo.yaml still gets the full experience; set a flag to false to
 // turn the capability off explicitly.
 type Features struct {
-	AgentsFile     *bool `yaml:"agents_file"`     // load AGENTS.md into the chat system prompt
-	Memory         *bool `yaml:"memory"`          // load and update project-root memory.md
-	Skills         *bool `yaml:"skills"`          // discover and expand $name skills
-	PromptCommands *bool `yaml:"prompt_commands"` // discover and expand prompt-file slash commands
-	PromptCaching  *bool `yaml:"prompt_caching"`  // cache the static system prompt prefix
+	AgentsFile    *bool `yaml:"agents_file"`    // load AGENTS.md into the chat system prompt
+	Memory        *bool `yaml:"memory"`         // load and update project-root memory.md
+	Skills        *bool `yaml:"skills"`         // discover and expand $name and /name skills
+	PromptCaching *bool `yaml:"prompt_caching"` // cache the static system prompt prefix
 }
 
 // AgentsFileEnabled reports whether AGENTS.md loading is on (default: true).
@@ -84,11 +83,6 @@ func (c *Config) AgentsFileEnabled() bool { return featureEnabled(c.Features.Age
 
 // SkillsEnabled reports whether skill loading is on (default: true).
 func (c *Config) SkillsEnabled() bool { return featureEnabled(c.Features.Skills, true) }
-
-// PromptCommandsEnabled reports whether prompt-file slash commands are on (default: true).
-func (c *Config) PromptCommandsEnabled() bool {
-	return featureEnabled(c.Features.PromptCommands, true)
-}
 
 // MemoryEnabled reports whether project memory loading is on (default: true).
 func (c *Config) MemoryEnabled() bool { return featureEnabled(c.Features.Memory, true) }

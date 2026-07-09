@@ -296,29 +296,6 @@ func TestFeatures_SkillsDefaultsOnExplicitFalseDisables(t *testing.T) {
 	})
 }
 
-func TestFeatures_PromptCommandsDefaultsOnExplicitFalseDisables(t *testing.T) {
-	withTempDir(t, func(dir string) {
-		t.Setenv("HOME", dir)
-		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
-		cfg, err := Load()
-		if err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		if !cfg.PromptCommandsEnabled() {
-			t.Fatal("expected prompt commands to default on when omitted")
-		}
-
-		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\nfeatures:\n  prompt_commands: false\n")
-		cfg, err = Load()
-		if err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		if cfg.PromptCommandsEnabled() {
-			t.Fatal("expected prompt commands disabled when set to false")
-		}
-	})
-}
-
 func TestFeatures_MemoryDefaultsOnExplicitFalseDisables(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
