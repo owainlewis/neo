@@ -21,7 +21,7 @@ import (
 
 const (
 	DefaultEndpoint = "https://generativelanguage.googleapis.com/v1beta/models"
-	DefaultModel    = "gemini-2.5-pro"
+	DefaultModel    = "gemini-3.5-flash"
 )
 
 // Client talks to Google's Gemini GenerateContent API.
@@ -55,6 +55,9 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 	if model == "" {
 		model = DefaultModel
 	}
+	if err := validateRequest(req); err != nil {
+		return nil, err
+	}
 	apiReq := buildRequest(req)
 	body, err := json.Marshal(apiReq)
 	if err != nil {
@@ -87,7 +90,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			}
 			continue
 		}
-		if status == 429 || status >= 500 {
+		if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500 {
 			lastErr = fmt.Errorf("google %d: %s", status, string(raw))
 			if attempt == maxRetries {
 				return nil, lastErr
@@ -110,6 +113,30 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 	return nil, lastErr
 }
 
+func validateRequest(req llm.Request) error {
+	supportedImages := map[string]bool{
+		"image/png":  true,
+		"image/jpeg": true,
+		"image/webp": true,
+		"image/heic": true,
+		"image/heif": true,
+	}
+	for _, message := range req.Messages {
+		for _, block := range message.Content {
+			if block.Type != "image" || block.Source == nil || block.Source.Data == "" {
+				continue
+			}
+			if block.Source.Type != "" && block.Source.Type != "base64" {
+				return fmt.Errorf("google: unsupported image source type %q", block.Source.Type)
+			}
+			if !supportedImages[block.Source.MediaType] {
+				return fmt.Errorf("google: unsupported image media type %q", block.Source.MediaType)
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Client) doRequest(ctx context.Context, model string, body []byte) ([]byte, int, retry.RetryAfter, error) {
 	httpClient := c.HTTP
 	if httpClient == nil {
@@ -120,14 +147,12 @@ func (c *Client) doRequest(ctx context.Context, model string, body []byte) ([]by
 	if err != nil {
 		return nil, 0, retry.Absent(), err
 	}
-	q := u.Query()
-	q.Set("key", c.APIKey)
-	u.RawQuery = q.Encode()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, retry.Absent(), err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", c.APIKey)
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return nil, 0, retry.Absent(), err
@@ -161,6 +186,32 @@ type part struct {
 	InlineData       *inlineData       `json:"inlineData,omitempty"`
 	FunctionCall     *functionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *functionResponse `json:"functionResponse,omitempty"`
+	Thought          bool              `json:"thought,omitempty"`
+	ThoughtSignature string            `json:"thoughtSignature,omitempty"`
+	Raw              json.RawMessage   `json:"-"`
+}
+
+// UnmarshalJSON keeps the original Gemini part so opaque thought metadata can
+// be replayed byte-for-byte on the next request. The API requires this for
+// thinking-model function-call continuations.
+func (p *part) UnmarshalJSON(data []byte) error {
+	type wirePart part
+	var decoded wirePart
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*p = part(decoded)
+	p.Raw = append(p.Raw[:0], data...)
+	return nil
+}
+
+// MarshalJSON emits a preserved response part unchanged when it is replayed.
+func (p part) MarshalJSON() ([]byte, error) {
+	if len(p.Raw) > 0 {
+		return p.Raw, nil
+	}
+	type wirePart part
+	return json.Marshal(wirePart(p))
 }
 
 type inlineData struct {
@@ -191,10 +242,15 @@ type functionDeclaration struct {
 }
 
 type response struct {
-	Candidates []candidate `json:"candidates"`
-	Usage      *struct {
+	Candidates     []candidate `json:"candidates"`
+	PromptFeedback *struct {
+		BlockReason string `json:"blockReason"`
+	} `json:"promptFeedback,omitempty"`
+	Usage *struct {
 		PromptTokenCount     int `json:"promptTokenCount"`
 		CandidatesTokenCount int `json:"candidatesTokenCount"`
+		ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+		CachedTokenCount     int `json:"cachedContentTokenCount"`
 	} `json:"usageMetadata,omitempty"`
 	Error *struct {
 		Message string `json:"message"`
@@ -202,8 +258,9 @@ type response struct {
 }
 
 type candidate struct {
-	Content      content `json:"content"`
-	FinishReason string  `json:"finishReason"`
+	Content       content `json:"content"`
+	FinishReason  string  `json:"finishReason"`
+	FinishMessage string  `json:"finishMessage"`
 }
 
 func buildRequest(req llm.Request) request {
@@ -236,9 +293,9 @@ func systemText(req llm.Request) string {
 
 func toContents(messages []llm.Message) []content {
 	out := make([]content, 0, len(messages))
-	toolNames := map[string]string{}
+	toolRefs := map[string]toolRef{}
 	for _, m := range messages {
-		parts := toParts(m.Content, toolNames)
+		parts := toParts(m.Content, toolRefs)
 		if len(parts) == 0 {
 			continue
 		}
@@ -251,39 +308,80 @@ func toContents(messages []llm.Message) []content {
 	return out
 }
 
-func toParts(blocks []llm.ContentBlock, toolNames map[string]string) []part {
+type toolRef struct {
+	name   string
+	wireID string
+}
+
+func toParts(blocks []llm.ContentBlock, toolRefs map[string]toolRef) []part {
 	parts := make([]part, 0, len(blocks))
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
 			if b.Text != "" {
-				parts = append(parts, part{Text: b.Text})
+				if p, ok := replayPart(b); ok && p.Text == b.Text {
+					parts = append(parts, p)
+				} else {
+					parts = append(parts, part{Text: b.Text})
+				}
 			}
 		case "image":
 			if b.Source != nil && b.Source.Data != "" {
-				mt := b.Source.MediaType
-				if mt == "" {
-					mt = "application/octet-stream"
-				}
-				parts = append(parts, part{InlineData: &inlineData{MimeType: mt, Data: b.Source.Data}})
+				parts = append(parts, part{InlineData: &inlineData{MimeType: b.Source.MediaType, Data: b.Source.Data}})
 			}
 		case "tool_use":
-			if b.ID != "" && b.Name != "" {
-				toolNames[b.ID] = b.Name
+			wireID := b.ID
+			if p, ok := replayPart(b); ok && p.FunctionCall != nil && p.FunctionCall.Name == b.Name {
+				parts = append(parts, p)
+				wireID = p.FunctionCall.ID
+			} else {
+				parts = append(parts, part{FunctionCall: &functionCall{ID: b.ID, Name: b.Name, Args: b.Input}})
 			}
-			parts = append(parts, part{FunctionCall: &functionCall{ID: b.ID, Name: b.Name, Args: b.Input}})
+			toolRefs[b.ID] = toolRef{name: b.Name, wireID: wireID}
 		case "tool_result":
 			name := b.Name
-			if name == "" {
-				name = toolNames[b.ToolUseID]
+			wireID := b.ToolUseID
+			if ref, ok := toolRefs[b.ToolUseID]; ok {
+				if name == "" {
+					name = ref.name
+				}
+				wireID = ref.wireID
 			}
 			if name == "" {
 				name = b.ToolUseID
 			}
-			parts = append(parts, part{FunctionResponse: &functionResponse{ID: b.ToolUseID, Name: name, Response: map[string]any{"content": b.Content, "is_error": b.IsError}}})
+			response := map[string]any{"output": b.Content}
+			if b.IsError {
+				response = map[string]any{"error": b.Content}
+			}
+			parts = append(parts, part{FunctionResponse: &functionResponse{ID: wireID, Name: name, Response: response}})
+		case "raw":
+			if p, ok := replayPart(b); ok {
+				parts = append(parts, p)
+			}
 		}
 	}
 	return parts
+}
+
+// replayPart accepts Gemini thought metadata and raw function-call parts. The
+// latter preserves unsigned calls in a parallel response without turning Neo's
+// synthetic internal IDs into Gemini wire IDs.
+func replayPart(b llm.ContentBlock) (part, bool) {
+	if len(b.Raw) == 0 {
+		return part{}, false
+	}
+	var p part
+	if err := json.Unmarshal(b.Raw, &p); err != nil {
+		return part{}, false
+	}
+	if b.Type == "tool_use" && p.FunctionCall != nil {
+		return p, true
+	}
+	if !p.Thought && p.ThoughtSignature == "" {
+		return part{}, false
+	}
+	return p, true
 }
 
 func toTools(specs []llm.ToolSpec) []tool {
@@ -302,31 +400,64 @@ func toLLMResponse(out response) (*llm.Response, error) {
 		return nil, fmt.Errorf("google: %s", out.Error.Message)
 	}
 	if len(out.Candidates) == 0 {
+		if out.PromptFeedback != nil && out.PromptFeedback.BlockReason != "" {
+			return nil, fmt.Errorf("google: prompt blocked with %s", out.PromptFeedback.BlockReason)
+		}
 		return nil, fmt.Errorf("google: no candidates returned")
 	}
 	cand := out.Candidates[0]
+	if cand.FinishReason != "" && cand.FinishReason != "STOP" && cand.FinishReason != "MAX_TOKENS" {
+		if cand.FinishMessage != "" {
+			return nil, fmt.Errorf("google: generation stopped with %s: %s", cand.FinishReason, cand.FinishMessage)
+		}
+		return nil, fmt.Errorf("google: generation stopped with %s", cand.FinishReason)
+	}
 	blocks := make([]llm.ContentBlock, 0, len(cand.Content.Parts))
+	missingIDs := map[string]int{}
 	for _, p := range cand.Content.Parts {
+		raw := preservedPart(p)
+		if p.Thought && p.FunctionCall == nil {
+			blocks = append(blocks, llm.ContentBlock{Type: "raw", Raw: raw})
+			continue
+		}
 		if p.Text != "" {
-			blocks = append(blocks, llm.ContentBlock{Type: "text", Text: p.Text})
+			blocks = append(blocks, llm.ContentBlock{Type: "text", Text: p.Text, Raw: raw})
 		}
 		if p.FunctionCall != nil {
 			id := p.FunctionCall.ID
 			if id == "" {
+				missingIDs[p.FunctionCall.Name]++
 				id = p.FunctionCall.Name
+				if n := missingIDs[p.FunctionCall.Name]; n > 1 {
+					id = fmt.Sprintf("%s_%d", id, n)
+				}
 			}
 			input := p.FunctionCall.Args
 			if input == nil {
 				input = map[string]any{}
 			}
-			blocks = append(blocks, llm.ContentBlock{Type: "tool_use", ID: id, Name: p.FunctionCall.Name, Input: input})
+			blocks = append(blocks, llm.ContentBlock{Type: "tool_use", ID: id, Name: p.FunctionCall.Name, Input: input, Raw: raw})
+		}
+		if p.Text == "" && p.FunctionCall == nil && len(raw) > 0 {
+			blocks = append(blocks, llm.ContentBlock{Type: "raw", Raw: raw})
 		}
 	}
 	resp := &llm.Response{Content: blocks, StopReason: stopReason(cand)}
 	if out.Usage != nil {
-		resp.Usage = llm.Usage{InputTokens: out.Usage.PromptTokenCount, OutputTokens: out.Usage.CandidatesTokenCount}
+		resp.Usage = llm.Usage{
+			InputTokens:     out.Usage.PromptTokenCount,
+			OutputTokens:    out.Usage.CandidatesTokenCount + out.Usage.ThoughtsTokenCount,
+			CacheReadTokens: out.Usage.CachedTokenCount,
+		}
 	}
 	return resp, nil
+}
+
+func preservedPart(p part) json.RawMessage {
+	if p.FunctionCall == nil && !p.Thought && p.ThoughtSignature == "" {
+		return nil
+	}
+	return append(json.RawMessage(nil), p.Raw...)
 }
 
 func stopReason(c candidate) string {

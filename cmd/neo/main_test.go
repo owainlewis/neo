@@ -64,6 +64,14 @@ func TestModelChoices_GoogleListsGeminiModels(t *testing.T) {
 	}
 }
 
+func TestUsageDocumentsGoogleProvider(t *testing.T) {
+	for _, want := range []string{`"google"`, "GOOGLE_API_KEY"} {
+		if !strings.Contains(usageText, want) {
+			t.Fatalf("usage does not contain %q", want)
+		}
+	}
+}
+
 func TestModelChoices_OpenRouterFallsBackWhenCatalogueUnavailable(t *testing.T) {
 	// Point the picker at an unroutable network so the live fetch fails fast;
 	// the picker must still return the provider default rather than nothing.

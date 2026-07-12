@@ -407,7 +407,7 @@ These guides explain Neo's core features in plain language. The reference docs s
 | [System prompt](system-prompt.md) | What instructions Neo gives the model and how project context is added. |
 | [Tools](tools.md) | How Neo lets the model read files, search, run commands, and edit. |
 | [Permissions](permissions.md) | Why approvals exist and how ` + "`ask`" + `, ` + "`trusted`" + `, and ` + "`readonly`" + ` work. |
-| [Providers](providers.md) | How Anthropic, OpenAI API-key auth, and OpenAI subscription auth plug in. |
+| [Providers](providers.md) | How Anthropic, OpenAI, OpenRouter, and Google Gemini plug in. |
 | [Sessions](sessions.md) | How Neo saves and resumes conversations. |
 | [Compaction](compaction.md) | Why long chats need context management and what Neo has today. |
 | [Memory](memory.md) | What memory means for a coding agent and what should stay out of scope. |

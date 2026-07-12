@@ -100,7 +100,7 @@ features:
 # Models: https://ai.google.dev/gemini-api/docs/models
 #
 # provider: google
-# model: gemini-2.5-pro
+# model: gemini-3.5-flash
 # ----------------------------------------------------------------------------
 ```
 

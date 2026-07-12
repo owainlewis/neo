@@ -46,7 +46,10 @@ func TestComplete_BuildsRequestWithSystemPromptMessagesAndTools(t *testing.T) {
 	var path, key string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
-		key = r.URL.Query().Get("key")
+		key = r.Header.Get("x-goog-api-key")
+		if r.URL.RawQuery != "" {
+			t.Errorf("API key must not be placed in URL query: %q", r.URL.RawQuery)
+		}
 		if got := r.Header.Get("Content-Type"); got != "application/json" {
 			t.Errorf("content-type = %q", got)
 		}
@@ -62,7 +65,10 @@ func TestComplete_BuildsRequestWithSystemPromptMessagesAndTools(t *testing.T) {
 		Model:     "gemini-test",
 		System:    "you are neo",
 		MaxTokens: 123,
-		Messages:  []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "hello"}}}},
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{
+			{Type: "text", Text: "hello"},
+			{Type: "image", Source: &llm.ImageSource{Type: "base64", MediaType: "image/png", Data: "aW1hZ2U="}},
+		}}},
 		Tools: []llm.ToolSpec{{Name: "bash", Description: "run shell", InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{"cmd": map[string]any{"type": "string"}},
@@ -76,13 +82,17 @@ func TestComplete_BuildsRequestWithSystemPromptMessagesAndTools(t *testing.T) {
 		t.Fatalf("path = %q", path)
 	}
 	if key != "test-key" {
-		t.Fatalf("api key query = %q", key)
+		t.Fatalf("api key header = %q", key)
 	}
 	if captured.SystemInstruction == nil || captured.SystemInstruction.Parts[0].Text != "you are neo" {
 		t.Fatalf("bad system instruction: %+v", captured.SystemInstruction)
 	}
 	if len(captured.Contents) != 1 || captured.Contents[0].Role != "user" || captured.Contents[0].Parts[0].Text != "hello" {
 		t.Fatalf("bad contents: %+v", captured.Contents)
+	}
+	image := captured.Contents[0].Parts[1].InlineData
+	if image == nil || image.MimeType != "image/png" || image.Data != "aW1hZ2U=" {
+		t.Fatalf("bad inline image: %+v", image)
 	}
 	if captured.GenerationConfig == nil || captured.GenerationConfig.MaxOutputTokens != 123 {
 		t.Fatalf("bad generation config: %+v", captured.GenerationConfig)
@@ -99,7 +109,7 @@ func TestComplete_BuildsRequestWithSystemPromptMessagesAndTools(t *testing.T) {
 func TestComplete_ParsesTextResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2}}`))
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"thoughtsTokenCount":3,"cachedContentTokenCount":4}}`))
 	}))
 	defer srv.Close()
 
@@ -110,7 +120,7 @@ func TestComplete_ParsesTextResponse(t *testing.T) {
 	if resp.StopReason != "end_turn" || len(resp.Content) != 1 || resp.Content[0].Type != "text" || resp.Content[0].Text != "hi" {
 		t.Fatalf("bad response: %+v", resp)
 	}
-	if resp.Usage.InputTokens != 7 || resp.Usage.OutputTokens != 2 {
+	if resp.Usage.InputTokens != 7 || resp.Usage.OutputTokens != 5 || resp.Usage.CacheReadTokens != 4 {
 		t.Fatalf("bad usage: %+v", resp.Usage)
 	}
 }
@@ -159,7 +169,251 @@ func TestComplete_SerializesToolResultContinuation(t *testing.T) {
 		t.Fatalf("bad replayed function call: %+v", captured.Contents[0])
 	}
 	result := captured.Contents[1].Parts[0].FunctionResponse
-	if captured.Contents[1].Role != "user" || result == nil || result.ID != "call_1" || result.Name != "bash" || result.Response["content"] != "file.txt" {
+	if captured.Contents[1].Role != "user" || result == nil || result.ID != "call_1" || result.Name != "bash" || result.Response["output"] != "file.txt" {
 		t.Fatalf("bad function response: %+v", captured.Contents[1])
+	}
+}
+
+func TestComplete_PreservesThoughtSignatureAcrossToolContinuation(t *testing.T) {
+	var requests []request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured request
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		requests = append(requests, captured)
+		w.WriteHeader(http.StatusOK)
+		if len(requests) == 1 {
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"bash","args":{"cmd":"pwd"}},"thoughtSignature":"opaque-signature"}]},"finishReason":"STOP"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"done"}]},"finishReason":"STOP"}]}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	first, err := client.Complete(context.Background(), llm.Request{Model: "gemini-test"})
+	if err != nil {
+		t.Fatalf("first complete: %v", err)
+	}
+	if len(first.Content) != 1 || first.Content[0].Type != "tool_use" || first.Content[0].ID != "bash" {
+		t.Fatalf("bad tool response: %+v", first.Content)
+	}
+	if len(first.Content[0].Raw) == 0 {
+		t.Fatal("tool call did not preserve its Gemini part")
+	}
+
+	messages := []llm.Message{
+		{Role: llm.RoleAssistant, Content: first.Content},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: first.Content[0].ID, Content: "/repo"}}},
+	}
+	if _, err := client.Complete(context.Background(), llm.Request{Model: "gemini-test", Messages: messages}); err != nil {
+		t.Fatalf("continuation complete: %v", err)
+	}
+
+	call := requests[1].Contents[0].Parts[0]
+	if call.ThoughtSignature != "opaque-signature" || call.FunctionCall == nil || call.FunctionCall.ID != "" {
+		t.Fatalf("signature-bearing call was not replayed unchanged: %+v", call)
+	}
+	result := requests[1].Contents[1].Parts[0].FunctionResponse
+	if result == nil || result.Name != "bash" || result.ID != "" || result.Response["output"] != "/repo" {
+		t.Fatalf("function response did not retain the call's wire identity: %+v", result)
+	}
+}
+
+func TestComplete_PreservesEmptySignaturePartWithoutShowingItAsText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"visible"},{"text":"","thoughtSignature":"tail-signature"}]},"finishReason":"STOP"}]}`))
+	}))
+	defer srv.Close()
+
+	resp, err := newTestClient(srv).Complete(context.Background(), llm.Request{Model: "gemini-test"})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if len(resp.Content) != 2 || resp.Content[0].Type != "text" || resp.Content[0].Text != "visible" || resp.Content[1].Type != "raw" {
+		t.Fatalf("unexpected content: %+v", resp.Content)
+	}
+	parts := toContents([]llm.Message{{Role: llm.RoleAssistant, Content: resp.Content}})[0].Parts
+	if len(parts) != 2 || parts[1].ThoughtSignature != "tail-signature" || parts[1].Text != "" {
+		t.Fatalf("empty signature part was not replayed: %+v", parts)
+	}
+}
+
+func TestComplete_DoesNotExposeThoughtParts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"internal summary","thought":true,"thoughtSignature":"thought-signature"},{"text":"answer"}]},"finishReason":"STOP"}]}`))
+	}))
+	defer srv.Close()
+
+	resp, err := newTestClient(srv).Complete(context.Background(), llm.Request{Model: "gemini-test"})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if len(resp.Content) != 2 || resp.Content[0].Type != "raw" || resp.Content[1].Text != "answer" {
+		t.Fatalf("unexpected content: %+v", resp.Content)
+	}
+}
+
+func TestComplete_AssignsUniqueInternalIDsToParallelCallsWithoutWireIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read","args":{"path":"a"}}},{"functionCall":{"name":"read","args":{"path":"b"}}}]},"finishReason":"STOP"}]}`))
+	}))
+	defer srv.Close()
+
+	resp, err := newTestClient(srv).Complete(context.Background(), llm.Request{Model: "gemini-test"})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if len(resp.Content) != 2 || resp.Content[0].ID != "read" || resp.Content[1].ID != "read_2" {
+		t.Fatalf("parallel tool IDs are not unique: %+v", resp.Content)
+	}
+}
+
+func TestComplete_PreservesAllParallelCallsAcrossContinuation(t *testing.T) {
+	var requests []request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured request
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		requests = append(requests, captured)
+		if len(requests) == 1 {
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read","args":{"path":"a"}},"thoughtSignature":"parallel-signature"},{"functionCall":{"name":"read","args":{"path":"b"}}}]},"finishReason":"STOP"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"done"}]},"finishReason":"STOP"}]}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	first, err := client.Complete(context.Background(), llm.Request{Model: "gemini-test"})
+	if err != nil {
+		t.Fatalf("first complete: %v", err)
+	}
+	if len(first.Content) != 2 || first.Content[0].ID != "read" || first.Content[1].ID != "read_2" {
+		t.Fatalf("unexpected internal calls: %+v", first.Content)
+	}
+	if len(first.Content[0].Raw) == 0 || len(first.Content[1].Raw) == 0 {
+		t.Fatalf("not all parallel calls preserved: %+v", first.Content)
+	}
+
+	messages := []llm.Message{
+		{Role: llm.RoleAssistant, Content: first.Content},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{
+			{Type: "tool_result", ToolUseID: first.Content[0].ID, Content: "A"},
+			{Type: "tool_result", ToolUseID: first.Content[1].ID, Content: "B"},
+		}},
+	}
+	if _, err := client.Complete(context.Background(), llm.Request{Model: "gemini-test", Messages: messages}); err != nil {
+		t.Fatalf("continuation complete: %v", err)
+	}
+
+	modelParts := requests[1].Contents[0].Parts
+	if len(modelParts) != 2 || modelParts[0].FunctionCall.ID != "" || modelParts[1].FunctionCall.ID != "" {
+		t.Fatalf("parallel calls gained synthetic wire IDs: %+v", modelParts)
+	}
+	if modelParts[0].ThoughtSignature != "parallel-signature" || modelParts[1].ThoughtSignature != "" {
+		t.Fatalf("parallel signatures moved between parts: %+v", modelParts)
+	}
+	if modelParts[0].FunctionCall.Args["path"] != "a" || modelParts[1].FunctionCall.Args["path"] != "b" {
+		t.Fatalf("parallel call order changed: %+v", modelParts)
+	}
+	resultParts := requests[1].Contents[1].Parts
+	if len(resultParts) != 2 || resultParts[0].FunctionResponse.ID != "" || resultParts[1].FunctionResponse.ID != "" {
+		t.Fatalf("parallel results gained synthetic wire IDs: %+v", resultParts)
+	}
+	if resultParts[0].FunctionResponse.Response["output"] != "A" || resultParts[1].FunctionResponse.Response["output"] != "B" {
+		t.Fatalf("parallel result order changed: %+v", resultParts)
+	}
+}
+
+func TestComplete_UsesErrorFieldForFailedToolResult(t *testing.T) {
+	parts := toContents([]llm.Message{
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", ID: "call_1", Name: "bash"}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: "call_1", Content: "denied", IsError: true}}},
+	})[1].Parts
+	response := parts[0].FunctionResponse.Response
+	if response["error"] != "denied" || response["output"] != nil {
+		t.Fatalf("bad failed function response: %+v", response)
+	}
+}
+
+func TestComplete_ReturnsNonStopFinishReasonAsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"SAFETY"}]}`))
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(srv).Complete(context.Background(), llm.Request{Model: "gemini-test"})
+	if err == nil || !strings.Contains(err.Error(), "SAFETY") {
+		t.Fatalf("expected SAFETY error, got %v", err)
+	}
+}
+
+func TestComplete_ReturnsPromptBlockReason(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"}}`))
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(srv).Complete(context.Background(), llm.Request{Model: "gemini-test"})
+	if err == nil || !strings.Contains(err.Error(), "PROHIBITED_CONTENT") {
+		t.Fatalf("expected prompt block reason, got %v", err)
+	}
+}
+
+func TestComplete_RetriesRequestTimeout(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			http.Error(w, "timeout", http.StatusRequestTimeout)
+			return
+		}
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	client.MaxRetries = 1
+	resp, err := client.Complete(context.Background(), llm.Request{Model: "gemini-test"})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if attempts != 2 || len(resp.Content) != 1 || resp.Content[0].Text != "ok" {
+		t.Fatalf("retry result: attempts=%d response=%+v", attempts, resp)
+	}
+}
+
+func TestComplete_RejectsUnsupportedImageBeforeSending(t *testing.T) {
+	sent := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = true
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(srv).Complete(context.Background(), llm.Request{Messages: []llm.Message{{
+		Role: llm.RoleUser,
+		Content: []llm.ContentBlock{{
+			Type:   "image",
+			Source: &llm.ImageSource{Type: "base64", MediaType: "image/gif", Data: "R0lGODlh"},
+		}},
+	}}})
+	if err == nil || !strings.Contains(err.Error(), "image/gif") {
+		t.Fatalf("expected unsupported image error, got %v", err)
+	}
+	if sent {
+		t.Fatal("unsupported image reached Gemini API")
+	}
+}
+
+func TestToParts_DropsForeignRawBlocks(t *testing.T) {
+	parts := toContents([]llm.Message{{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+		{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","encrypted_content":"secret"}`)},
+		{Type: "text", Text: "answer"},
+	}}})[0].Parts
+	if len(parts) != 1 || parts[0].Text != "answer" {
+		t.Fatalf("foreign raw block leaked into Gemini request: %+v", parts)
 	}
 }

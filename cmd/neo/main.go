@@ -102,8 +102,7 @@ func main() {
 	}
 }
 
-func printUsage() {
-	fmt.Println(`neo — a Go coding agent
+const usageText = `neo — a Go coding agent
 
 USAGE:
   neo                Interactive chat mode (default)
@@ -125,16 +124,20 @@ USAGE:
 
 CONFIG:
   Reads neo.yaml (cwd) → ~/.neo/config.yaml → embedded defaults.
-  Select a backend with the "provider" key: "anthropic" (default), "openai", or "openrouter".
+  Select a backend with the "provider" key: "anthropic" (default), "openai", "openrouter", or "google".
 
   ANTHROPIC_API_KEY    required when provider is "anthropic"
   OPENAI_API_KEY       required when provider is "openai" with api_key auth
   OPENROUTER_API_KEY   required when provider is "openrouter"
+  GOOGLE_API_KEY       required when provider is "google"
 
   To use a ChatGPT subscription instead of an API key, set in neo.yaml:
     provider: openai
     openai_auth: subscription
-  then run "neo login".`)
+  then run "neo login".`
+
+func printUsage() {
+	fmt.Println(usageText)
 }
 
 func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
@@ -463,9 +466,9 @@ func modelChoices(ctx context.Context, cfg *config.Config) []tui.ModelChoice {
 		return openRouterModelChoices(ctx)
 	case "google":
 		return []tui.ModelChoice{
-			{ID: google.DefaultModel, Name: "Gemini 2.5 Pro", Description: "Default Google Gemini model for coding and agentic tasks"},
-			{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Description: "Faster, lower-cost Gemini 2.5 model"},
-			{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", Description: "Fast Gemini 2.0 model"},
+			{ID: google.DefaultModel, Name: "Gemini 3.5 Flash", Description: "Stable Google Gemini model for coding and agentic tasks"},
+			{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", Description: "Higher-capability preview model for complex coding tasks"},
+			{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash-Lite", Description: "Lower-cost stable Gemini model"},
 		}
 	default:
 		return []tui.ModelChoice{

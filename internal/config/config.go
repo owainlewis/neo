@@ -21,7 +21,7 @@ const (
 	defaultOpenAIModel     = "gpt-4o"
 	defaultCodexModel      = "gpt-5-codex"
 	defaultOpenRouterModel = "anthropic/claude-sonnet-4.5"
-	defaultGoogleModel     = "gemini-2.5-pro"
+	defaultGoogleModel     = "gemini-3.5-flash"
 	defaultProvider        = "anthropic"
 
 	// OpenAI auth modes (the openai_auth config key).
