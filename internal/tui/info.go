@@ -36,6 +36,7 @@ var keyBindings = []struct {
 	{"↩", "send"},
 	{"⌥↩", "newline"},
 	{"!cmd", "run shell command"},
+	{"pgup/pgdn", "scroll transcript"},
 	{"tab", "toggle workflow panel (accepts picker selection first)"},
 	{"ctrl+o", "expand/collapse latest truncated tool output"},
 	{"esc", "cancel the current turn"},

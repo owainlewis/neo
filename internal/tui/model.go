@@ -282,13 +282,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	ta.Focus()
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
-	vp.MouseWheelEnabled = true
-	// Content is word-wrapped to the viewport width, so there is nothing to
-	// scroll to horizontally. A horizontal trackpad swipe emits a wheel-right
-	// (or shift+wheel) event that would otherwise slide the whole view
-	// sideways — which reads as a bug. Zeroing the horizontal step disables
-	// that motion while leaving vertical wheel scrolling intact.
-	vp.SetHorizontalStep(0)
+	vp.MouseWheelEnabled = false
 
 	sp := spinner.New()
 	sp.Spinner = statusSpinner
@@ -513,6 +507,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 			m.updateInlinePickers()
 			m.syncInputHeight()
+		case "pgup":
+			m.viewport.PageUp()
+		case "pgdown":
+			m.viewport.PageDown()
 		case "tab":
 			if m.files.visible && m.acceptFilePicker() {
 				m.syncInputHeight()
@@ -679,8 +677,10 @@ func (m *model) View() tea.View {
 }
 
 // makeView wraps a rendered string with the v2 View settings we want for
-// every frame: alt screen + cell-motion mouse, plus a request for keyboard
-// enhancements. ReportAlternateKeys asks terminals that speak the Kitty
+// every frame: alt screen, no mouse capture, and a request for keyboard
+// enhancements. Mouse reporting prevents terminals from using a normal drag
+// to select visible output, so transcript scrolling uses page-up/page-down.
+// ReportAlternateKeys asks terminals that speak the Kitty
 // keyboard protocol (Kitty, Ghostty, WezTerm, recent iTerm2) to disambiguate
 // shift+enter from a bare enter, which is what lets shift+enter insert a
 // newline there. On terminals without it, alt+enter / ctrl+j remain the
@@ -688,7 +688,6 @@ func (m *model) View() tea.View {
 func makeView(content string) tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
 	v.KeyboardEnhancements.ReportAlternateKeys = true
 	return v
 }
