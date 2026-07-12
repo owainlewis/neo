@@ -1116,6 +1116,12 @@ func (m *model) handleEvent(e agent.Event) {
 		m.appendBlock(tc)
 	case agent.EventToolResult:
 		if e.Name == "workflow" {
+			// Successful workflow calls are represented by the checklist UI, but
+			// failures may not produce a workflow event and must remain visible.
+			if e.IsError {
+				m.turn.errors++
+				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true})
+			}
 			break
 		}
 		elapsed := time.Duration(0)

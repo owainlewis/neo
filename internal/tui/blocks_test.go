@@ -194,6 +194,27 @@ func TestToolEventsAlwaysRenderFailures(t *testing.T) {
 	}
 }
 
+func TestWorkflowToolFailureRendersAndMarksTurnFailed(t *testing.T) {
+	m := makeTestModel()
+	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "workflow", Args: map[string]any{"action": "create"}})
+	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "workflow", Text: "invalid workflow action", IsError: true})
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("blocks = %d, want workflow failure: %#v", len(m.blocks), m.blocks)
+	}
+	result, ok := m.blocks[0].(toolResultBlock)
+	if !ok || !result.isError || result.text != "invalid workflow action" {
+		t.Fatalf("workflow failure = %#v", m.blocks[0])
+	}
+	if m.turn.errors != 1 {
+		t.Fatalf("turn errors = %d, want 1", m.turn.errors)
+	}
+	summary, ok := m.resultSummary(nil, time.Second)
+	if !ok || !summary.failed || summary.label != "Finished with issues" {
+		t.Fatalf("workflow failure summary = %#v, ok=%v", summary, ok)
+	}
+}
+
 func TestTranscriptReplayRespectsOutputModeAndKeepsFailures(t *testing.T) {
 	messages := []llm.Message{
 		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", Name: "read_file", Input: map[string]any{"path": "main.go"}}}},
