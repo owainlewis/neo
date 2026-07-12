@@ -287,7 +287,7 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| ` + "`output.verbose: false`" + ` | (default) | Show concise one-line status for routine tool calls (e.g. reading a file, running a command). Errors and failures always render in full. |
+| ` + "`output.verbose: false`" + ` | (default) | Show concise one-line status for routine agent tool calls (e.g. reading a file, running a command). Errors, failures, and direct ` + "`!`" + ` command output always render in full. |
 | ` + "`output.verbose: true`" + ` | | Restore full tool call/result cards, including complete file contents and command output. |
 
 ## Permissions

@@ -485,8 +485,9 @@ ownership/permission changes, `git clean -fd`, and `git reset --hard`.
 Neo defaults to concise tool output: a one-line status per tool call (e.g.
 `read internal/tui/model.go`) instead of full file contents or command
 output. Errors and failed tool calls always render in full, even in concise
-mode. Set `output.verbose: true` in `neo.yaml` to restore the full tool
-call/result cards.
+mode. Output from direct `!` shell commands also remains visible because it was
+explicitly requested. Set `output.verbose: true` in `neo.yaml` to restore the
+full tool call/result cards.
 
 ## Tools
 

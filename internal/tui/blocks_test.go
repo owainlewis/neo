@@ -9,6 +9,7 @@ import (
 	"charm.land/glamour/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -149,6 +150,77 @@ func TestToolStatusLineCoversRoutineTools(t *testing.T) {
 	for _, tc := range cases {
 		if got := toolStatusLine(tc.name, tc.args); got != tc.want {
 			t.Fatalf("toolStatusLine(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestToolEventsRenderSuccessfulResultsOnlyWhenVerbose(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		verbose    bool
+		wantBlocks int
+	}{
+		{name: "concise", wantBlocks: 1},
+		{name: "verbose", verbose: true, wantBlocks: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := makeTestModel()
+			m.verbose = tc.verbose
+			m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "read_file", Args: map[string]any{"path": "main.go"}})
+			m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "read_file", Text: "package main"})
+
+			if len(m.blocks) != tc.wantBlocks {
+				t.Fatalf("blocks = %d, want %d: %#v", len(m.blocks), tc.wantBlocks, m.blocks)
+			}
+			call, ok := m.blocks[0].(toolCallBlock)
+			if !ok || call.verbose != tc.verbose {
+				t.Fatalf("tool call = %#v, want verbose=%v", m.blocks[0], tc.verbose)
+			}
+		})
+	}
+}
+
+func TestToolEventsAlwaysRenderFailures(t *testing.T) {
+	m := makeTestModel()
+	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "bash", Args: map[string]any{"command": "false"}})
+	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "bash", Text: "exit 1", IsError: true})
+
+	if len(m.blocks) != 2 {
+		t.Fatalf("blocks = %d, want call and failure: %#v", len(m.blocks), m.blocks)
+	}
+	result, ok := m.blocks[1].(toolResultBlock)
+	if !ok || !result.isError || result.text != "exit 1" {
+		t.Fatalf("failure result = %#v", m.blocks[1])
+	}
+}
+
+func TestTranscriptReplayRespectsOutputModeAndKeepsFailures(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", Name: "read_file", Input: map[string]any{"path": "main.go"}}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", Content: "package main"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", Name: "bash", Input: map[string]any{"command": "false"}}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", Content: "exit 1", IsError: true}}},
+	}
+
+	concise := makeTestModel()
+	concise.appendTranscript(messages)
+	if len(concise.blocks) != 3 {
+		t.Fatalf("concise replay blocks = %d, want two calls and one failure: %#v", len(concise.blocks), concise.blocks)
+	}
+	if result, ok := concise.blocks[2].(toolResultBlock); !ok || !result.isError {
+		t.Fatalf("concise replay did not preserve failure: %#v", concise.blocks[2])
+	}
+
+	verbose := makeTestModel()
+	verbose.verbose = true
+	verbose.appendTranscript(messages)
+	if len(verbose.blocks) != 4 {
+		t.Fatalf("verbose replay blocks = %d, want calls and results: %#v", len(verbose.blocks), verbose.blocks)
+	}
+	for _, index := range []int{0, 2} {
+		call, ok := verbose.blocks[index].(toolCallBlock)
+		if !ok || !call.verbose {
+			t.Fatalf("verbose replay call at %d = %#v", index, verbose.blocks[index])
 		}
 	}
 }

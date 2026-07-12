@@ -566,7 +566,6 @@ func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) 
 		Policy:   permission.New("trusted", "."),
 	})
 	m := makeTestModel()
-	m.verbose = true // exercise the full tool-result rendering path
 	m.ag = ag
 	m.ag.SetEventHandler(m.handleEvent)
 
@@ -612,7 +611,7 @@ func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) 
 	}
 }
 
-func TestBangCommand_ConciseModeOmitsSuccessfulToolResult(t *testing.T) {
+func TestBangCommand_ConciseModeKeepsRequestedCommandOutput(t *testing.T) {
 	prov := &llmtest.FakeProvider{}
 	ag := agent.New(agent.Config{
 		Model:    "test",
@@ -630,8 +629,8 @@ func TestBangCommand_ConciseModeOmitsSuccessfulToolResult(t *testing.T) {
 	}
 	m.Update(cmd())
 
-	if len(m.blocks) != 2 {
-		t.Fatalf("expected tool call and summary blocks only, got %d: %+v", len(m.blocks), m.blocks)
+	if len(m.blocks) != 3 {
+		t.Fatalf("expected tool call, result, and summary blocks, got %d: %+v", len(m.blocks), m.blocks)
 	}
 	tc, ok := m.blocks[0].(toolCallBlock)
 	if !ok {
@@ -643,8 +642,12 @@ func TestBangCommand_ConciseModeOmitsSuccessfulToolResult(t *testing.T) {
 	if !strings.Contains(tc.render(80, nil), "Running echo hello...") {
 		t.Fatalf("expected concise status line, got %q", tc.render(80, nil))
 	}
-	if _, ok := m.blocks[1].(resultSummaryBlock); !ok {
-		t.Fatalf("expected resultSummaryBlock, got %T", m.blocks[1])
+	tr, ok := m.blocks[1].(toolResultBlock)
+	if !ok || tr.text != "echo hello" || tr.isError {
+		t.Fatalf("expected successful command output, got %#v", m.blocks[1])
+	}
+	if _, ok := m.blocks[2].(resultSummaryBlock); !ok {
+		t.Fatalf("expected resultSummaryBlock, got %T", m.blocks[2])
 	}
 }
 

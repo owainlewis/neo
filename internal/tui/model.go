@@ -1134,9 +1134,11 @@ func (m *model) handleEvent(e agent.Event) {
 			}
 			break
 		}
-		// In concise mode, routine successful results add no scannable
+		// In concise mode, routine successful agent results add no scannable
 		// information beyond the call's status line, so only errors render.
-		if m.verbose || e.IsError {
+		// Direct ! commands are user-requested output, not intermediate agent
+		// activity, and must remain visible in either mode.
+		if m.verbose || e.IsError || m.turn.direct {
 			m.appendBlock(toolResultBlock{
 				name:    e.Name,
 				text:    e.Text,
