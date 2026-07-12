@@ -25,6 +25,7 @@
 - `ANTHROPIC_API_KEY` is required when `provider: anthropic`.
 - `OPENAI_API_KEY` is required when `provider: openai` uses `openai_auth: api_key`.
 - `OPENROUTER_API_KEY` is required when `provider: openrouter`.
+- `GOOGLE_API_KEY` is required when `provider: google`.
 - `openai_auth: subscription` uses stored ChatGPT/Codex device-code credentials created by `neo login` instead of an API key.
 
 ## Runtime Notes

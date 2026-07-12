@@ -130,6 +130,23 @@ func TestLoad_OpenRouterProviderGetsOpenRouterDefaultModel(t *testing.T) {
 	})
 }
 
+func TestLoad_GoogleProviderGetsGoogleDefaultModel(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: google\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Provider != "google" {
+			t.Fatalf("provider: got %q want google", cfg.Provider)
+		}
+		if cfg.Model != defaultGoogleModel {
+			t.Fatalf("model: got %q want %q", cfg.Model, defaultGoogleModel)
+		}
+	})
+}
+
 func TestLoad_OpenAIDefaultsToAPIKeyAuth(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)

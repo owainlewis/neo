@@ -11,8 +11,8 @@ what makes a multi-step task repeatable instead of a one-off improvisation.
 
 Neo is also a single Go binary with sensible defaults (permission modes and
 workflows work out of the box, no plugins to assemble first) and support for
-multiple providers (Anthropic, OpenAI API key, OpenAI subscription, or
-OpenRouter) so switching backends is a config line, not a rewrite.
+multiple providers (Anthropic, OpenAI API key, OpenAI subscription, OpenRouter,
+or Google Gemini) so switching backends is a config line, not a rewrite.
 
 ![neo splash screen](docs/screenshot.png)
 
@@ -25,7 +25,7 @@ OpenRouter) so switching backends is a config line, not a rewrite.
   `AGENTS.md` support, and visible workflows all work the moment you install
   Neo — nothing to configure before it's useful.
 - **Multi-provider.** Anthropic, OpenAI (API key), OpenAI (ChatGPT/Codex
-  subscription), or OpenRouter. Switch with one config line.
+  subscription), OpenRouter, or Google Gemini. Switch with one config line.
 - **Minimalist.** A single Go binary, six built-in tools (read, search, shell,
   write, edit), no runtime dependency. The core agent loop is small and
   policy-free on purpose — file, shell, session, and prompt features are
@@ -108,8 +108,8 @@ README alone.
 
 ### 1. Choose a backend
 
-Neo defaults to Anthropic. Set `provider: openai` or `provider: openrouter` to
-use a different backend.
+Neo defaults to Anthropic. Set `provider: openai`, `provider: openrouter`, or
+`provider: google` to use a different backend.
 
 | Backend | What you need | Config | Extra step |
 |------|------|------|------|
@@ -117,6 +117,7 @@ use a different backend.
 | OpenAI API key | `OPENAI_API_KEY` | `provider: openai` | None |
 | OpenAI subscription | ChatGPT/Codex subscription | `provider: openai` and `openai_auth: subscription` | Run `neo login` once |
 | OpenRouter | `OPENROUTER_API_KEY` | `provider: openrouter` | None |
+| Google Gemini | `GOOGLE_API_KEY` | `provider: google` | None |
 
 If you are using OpenAI with an API key, you do not need `neo login`.
 `neo login` is only for the device-code subscription flow.
@@ -150,6 +151,12 @@ OpenRouter:
 export OPENROUTER_API_KEY="sk-or-..."
 ```
 
+Google Gemini:
+
+```bash
+export GOOGLE_API_KEY="..."
+```
+
 ### 3. Create `neo.yaml` only if you need a non-default backend
 
 Anthropic users can skip this step because `provider: anthropic` is the default.
@@ -172,6 +179,12 @@ OpenRouter:
 
 ```yaml
 provider: openrouter
+```
+
+Google Gemini:
+
+```yaml
+provider: google
 ```
 
 Neo reads the first config file it finds in this order:
@@ -218,7 +231,7 @@ Summarize this repository and suggest a good first change.
 
 | Key | Default | Meaning |
 |------|------|------|
-| `provider` | `anthropic` | Select `anthropic`, `openai`, or `openrouter` |
+| `provider` | `anthropic` | Select `anthropic`, `openai`, `openrouter`, or `google` |
 | `openai_auth` | `api_key` when using OpenAI | Choose `api_key` or `subscription` |
 | `permissions.mode` | `ask` | Prompt before bash and file mutations |
 | `compaction.context_window_tokens` | `200000` | Compact at 70% of this context window estimate |
@@ -364,9 +377,9 @@ Constraints:
 
 ## Configuration
 
-Neo defaults to Anthropic. Set `provider: openai` or `provider: openrouter` if
-you want a different backend. Config files are not merged; the first file
-found wins.
+Neo defaults to Anthropic. Set `provider: openai`, `provider: openrouter`, or
+`provider: google` if you want a different backend. Config files are not
+merged; the first file found wins.
 
 OpenAI API key:
 
@@ -388,13 +401,20 @@ OpenRouter:
 provider: openrouter
 ```
 
+Google Gemini:
+
+```yaml
+provider: google
+```
+
 **`neo.yaml` reference:**
 
 ```yaml
-# LLM backend: "anthropic" (default), "openai", or "openrouter".
+# LLM backend: "anthropic" (default), "openai", "openrouter", or "google".
 # anthropic  -> requires ANTHROPIC_API_KEY
 # openai     -> uses the Responses API; auth via openai_auth.
 # openrouter -> uses Chat Completions via OPENROUTER_API_KEY
+# google     -> uses Gemini via GOOGLE_API_KEY
 provider: anthropic
 
 # How the "openai" provider authenticates (ignored for other providers):
@@ -407,6 +427,7 @@ openai_auth: api_key
 #   openai + api_key         -> gpt-4o
 #   openai + subscription    -> gpt-5-codex
 #   openrouter               -> see OpenRouter's model catalogue
+#   google                   -> gemini-3.5-flash
 model: claude-opus-4-8
 
 # Tool permission mode:
@@ -472,7 +493,7 @@ internal/agent/         Core agent loop and event model
 internal/auth/          OpenAI subscription device-code auth and credential storage
 internal/config/        Config loading and feature flags
 internal/config/defaults/   Embedded neo.yaml
-internal/llm/           Provider interface + Anthropic and OpenAI adapters
+internal/llm/           Provider interface and provider adapters
 internal/projectctx/    AGENTS.md discovery and system-prompt injection
 internal/session/       Saved session metadata and transcripts
 internal/skills/        skill discovery, catalog, and $name or /name expansion

@@ -21,6 +21,7 @@ import (
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
+	"github.com/owainlewis/neo/internal/llm/google"
 	"github.com/owainlewis/neo/internal/llm/openai"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/logx"
@@ -101,8 +102,7 @@ func main() {
 	}
 }
 
-func printUsage() {
-	fmt.Println(`neo — a Go coding agent
+const usageText = `neo — a Go coding agent
 
 USAGE:
   neo                Interactive chat mode (default)
@@ -124,16 +124,20 @@ USAGE:
 
 CONFIG:
   Reads neo.yaml (cwd) → ~/.neo/config.yaml → embedded defaults.
-  Select a backend with the "provider" key: "anthropic" (default), "openai", or "openrouter".
+  Select a backend with the "provider" key: "anthropic" (default), "openai", "openrouter", or "google".
 
   ANTHROPIC_API_KEY    required when provider is "anthropic"
   OPENAI_API_KEY       required when provider is "openai" with api_key auth
   OPENROUTER_API_KEY   required when provider is "openrouter"
+  GOOGLE_API_KEY       required when provider is "google"
 
   To use a ChatGPT subscription instead of an API key, set in neo.yaml:
     provider: openai
     openai_auth: subscription
-  then run "neo login".`)
+  then run "neo login".`
+
+func printUsage() {
+	fmt.Println(usageText)
 }
 
 func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
@@ -216,10 +220,12 @@ func mustProvider(cfg *config.Config) llm.Provider {
 		}
 	case "openrouter":
 		prov, err = openrouter.New()
+	case "google":
+		prov, err = google.New()
 	case "anthropic", "":
 		prov, err = anthropic.New()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\", \"openai\", or \"openrouter\")\n", cfg.Provider)
+		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\", \"openai\", \"openrouter\", or \"google\")\n", cfg.Provider)
 		os.Exit(1)
 	}
 	if err != nil {
@@ -458,6 +464,12 @@ func modelChoices(ctx context.Context, cfg *config.Config) []tui.ModelChoice {
 		}
 	case "openrouter":
 		return openRouterModelChoices(ctx)
+	case "google":
+		return []tui.ModelChoice{
+			{ID: google.DefaultModel, Name: "Gemini 3.5 Flash", Description: "Stable Google Gemini model for coding and agentic tasks"},
+			{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", Description: "Higher-capability preview model for complex coding tasks"},
+			{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash-Lite", Description: "Lower-cost stable Gemini model"},
+		}
 	default:
 		return []tui.ModelChoice{
 			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Description: "Default Anthropic model"},
@@ -624,7 +636,7 @@ func doctorChecks() []doctorCheck {
 
 func doctorProviderCheck(cfg *config.Config) doctorCheck {
 	switch cfg.Provider {
-	case "anthropic", "openai", "openrouter":
+	case "anthropic", "openai", "openrouter", "google":
 		return doctorCheck{Status: doctorPass, Name: "provider", Detail: cfg.Provider}
 	default:
 		return doctorCheck{Status: doctorFail, Name: "provider", Detail: fmt.Sprintf("unknown provider %q", cfg.Provider)}
@@ -637,6 +649,8 @@ func doctorCredentialCheck(cfg *config.Config) doctorCheck {
 		return envCredentialCheck("ANTHROPIC_API_KEY")
 	case "openrouter":
 		return envCredentialCheck("OPENROUTER_API_KEY")
+	case "google":
+		return envCredentialCheck("GOOGLE_API_KEY")
 	case "openai":
 		if cfg.SubscriptionAuth() {
 			store, err := auth.DefaultStore()
