@@ -281,6 +281,15 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | ` + "`skills`" + ` | ` + "`true`" + ` | Discover skills and expand $name references or /name slash invocations. |
 | ` + "`prompt_caching`" + ` | ` + "`true`" + ` | Mark the stable system prompt prefix as cacheable when the provider supports it. |
 
+## Output
+
+` + "`output.verbose`" + ` is tri-state, same as feature flags: absent or ` + "`false`" + ` means concise mode (the default).
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| ` + "`output.verbose: false`" + ` | (default) | Show concise one-line status for routine agent tool calls (e.g. reading a file, running a command). Errors, failures, and direct ` + "`!`" + ` command output always render in full. |
+| ` + "`output.verbose: true`" + ` | | Restore full tool call/result cards, including complete file contents and command output. |
+
 ## Permissions
 
 ` + "`permissions.mode`" + ` defaults to ` + "`trusted`" + `.

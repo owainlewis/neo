@@ -48,6 +48,7 @@ type Config struct {
 	Features    Features    `yaml:"features"`
 	Compaction  Compaction  `yaml:"compaction"`
 	Permissions Permissions `yaml:"permissions"`
+	Output      Output      `yaml:"output"`
 
 	// source records where this config was loaded from (a file path or
 	// "embedded"); surfaced in diagnostics via Source().
@@ -58,6 +59,17 @@ type Config struct {
 type Permissions struct {
 	Mode string `yaml:"mode"`
 }
+
+// Output configures how Neo renders tool activity during a chat session.
+type Output struct {
+	// Verbose restores the full tool call/result rendering (complete file
+	// contents, command output, etc). Defaults to false: Neo shows concise
+	// one-line status for routine tool calls and still surfaces errors in full.
+	Verbose *bool `yaml:"verbose"`
+}
+
+// VerboseEnabled reports whether full tool output rendering is on (default: false).
+func (c *Config) VerboseEnabled() bool { return featureEnabled(c.Output.Verbose, false) }
 
 // Compaction configures when long transcripts are summarized.
 type Compaction struct {

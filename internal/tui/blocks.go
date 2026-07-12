@@ -141,15 +141,33 @@ type toolCallBlock struct {
 	name    string
 	args    map[string]any
 	startAt time.Time
+	// verbose selects full tool-card rendering. When false (the default),
+	// the block renders as a single concise status line instead.
+	verbose bool
 }
 
 func (b toolCallBlock) render(width int, _ *glamour.TermRenderer) string {
+	if !b.verbose {
+		return styMuted.Render(toolStatusLine(b.name, b.args))
+	}
 	header, body := toolCardContent(b.name, b.args)
 	card := styTool.Render(header)
 	if body != "" {
 		card += "\n" + styMuted.Render(body)
 	}
 	return styCardTool.Width(width - 2).Render(card)
+}
+
+// toolStatusLine renders the concise, one-line "what is Neo doing" status
+// shown by default for routine tool calls, reusing the same present-tense
+// phrasing as the busy spinner (see toolCardContent for the full verbose
+// card equivalent).
+func toolStatusLine(name string, args map[string]any) string {
+	verb := toolVerb(name, args)
+	if verb == "" {
+		return ""
+	}
+	return strings.ToUpper(verb[:1]) + verb[1:] + "..."
 }
 
 type toolResultBlock struct {

@@ -9,6 +9,7 @@ import (
 	"charm.land/glamour/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -113,6 +114,135 @@ func TestToolResultBlockCanRenderCompactAndExpanded(t *testing.T) {
 	short := plain(toolResultBlock{text: numberedLines(3)}.render(80, nil))
 	if strings.Contains(short, "ctrl+o") {
 		t.Fatalf("short result should not show expansion help:\n%s", short)
+	}
+}
+
+func TestToolCallBlockRendersConciseStatusLineByDefault(t *testing.T) {
+	out := plain(toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}.render(80, nil))
+	if out != "Reading internal/tui/model.go..." {
+		t.Fatalf("concise tool call render = %q, want a plain status line", out)
+	}
+}
+
+func TestToolCallBlockRendersFullCardWhenVerbose(t *testing.T) {
+	out := plain(toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}, verbose: true}.render(80, nil))
+	if !strings.Contains(out, "read internal/tui/model.go") {
+		t.Fatalf("verbose tool call render missing card header: %q", out)
+	}
+	if strings.Contains(out, "Reading internal/tui/model.go...") {
+		t.Fatalf("verbose render should not use the concise status line: %q", out)
+	}
+}
+
+func TestToolStatusLineCoversRoutineTools(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"bash", map[string]any{"command": "npm test"}, "Running npm test..."},
+		{"read_file", map[string]any{"path": "a.go"}, "Reading a.go..."},
+		{"write_file", map[string]any{"path": "a.go"}, "Writing a.go..."},
+		{"edit_file", map[string]any{"path": "a.go"}, "Editing a.go..."},
+		{"grep", map[string]any{"pattern": "TODO"}, "Searching TODO..."},
+		{"glob", map[string]any{"pattern": "**/*.go"}, "Matching **/*.go..."},
+	}
+	for _, tc := range cases {
+		if got := toolStatusLine(tc.name, tc.args); got != tc.want {
+			t.Fatalf("toolStatusLine(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestToolEventsRenderSuccessfulResultsOnlyWhenVerbose(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		verbose    bool
+		wantBlocks int
+	}{
+		{name: "concise", wantBlocks: 1},
+		{name: "verbose", verbose: true, wantBlocks: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := makeTestModel()
+			m.verbose = tc.verbose
+			m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "read_file", Args: map[string]any{"path": "main.go"}})
+			m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "read_file", Text: "package main"})
+
+			if len(m.blocks) != tc.wantBlocks {
+				t.Fatalf("blocks = %d, want %d: %#v", len(m.blocks), tc.wantBlocks, m.blocks)
+			}
+			call, ok := m.blocks[0].(toolCallBlock)
+			if !ok || call.verbose != tc.verbose {
+				t.Fatalf("tool call = %#v, want verbose=%v", m.blocks[0], tc.verbose)
+			}
+		})
+	}
+}
+
+func TestToolEventsAlwaysRenderFailures(t *testing.T) {
+	m := makeTestModel()
+	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "bash", Args: map[string]any{"command": "false"}})
+	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "bash", Text: "exit 1", IsError: true})
+
+	if len(m.blocks) != 2 {
+		t.Fatalf("blocks = %d, want call and failure: %#v", len(m.blocks), m.blocks)
+	}
+	result, ok := m.blocks[1].(toolResultBlock)
+	if !ok || !result.isError || result.text != "exit 1" {
+		t.Fatalf("failure result = %#v", m.blocks[1])
+	}
+}
+
+func TestWorkflowToolFailureRendersAndMarksTurnFailed(t *testing.T) {
+	m := makeTestModel()
+	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "workflow", Args: map[string]any{"action": "create"}})
+	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "workflow", Text: "invalid workflow action", IsError: true})
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("blocks = %d, want workflow failure: %#v", len(m.blocks), m.blocks)
+	}
+	result, ok := m.blocks[0].(toolResultBlock)
+	if !ok || !result.isError || result.text != "invalid workflow action" {
+		t.Fatalf("workflow failure = %#v", m.blocks[0])
+	}
+	if m.turn.errors != 1 {
+		t.Fatalf("turn errors = %d, want 1", m.turn.errors)
+	}
+	summary, ok := m.resultSummary(nil, time.Second)
+	if !ok || !summary.failed || summary.label != "Finished with issues" {
+		t.Fatalf("workflow failure summary = %#v, ok=%v", summary, ok)
+	}
+}
+
+func TestTranscriptReplayRespectsOutputModeAndKeepsFailures(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", Name: "read_file", Input: map[string]any{"path": "main.go"}}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", Content: "package main"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", Name: "bash", Input: map[string]any{"command": "false"}}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", Content: "exit 1", IsError: true}}},
+	}
+
+	concise := makeTestModel()
+	concise.appendTranscript(messages)
+	if len(concise.blocks) != 3 {
+		t.Fatalf("concise replay blocks = %d, want two calls and one failure: %#v", len(concise.blocks), concise.blocks)
+	}
+	if result, ok := concise.blocks[2].(toolResultBlock); !ok || !result.isError {
+		t.Fatalf("concise replay did not preserve failure: %#v", concise.blocks[2])
+	}
+
+	verbose := makeTestModel()
+	verbose.verbose = true
+	verbose.appendTranscript(messages)
+	if len(verbose.blocks) != 4 {
+		t.Fatalf("verbose replay blocks = %d, want calls and results: %#v", len(verbose.blocks), verbose.blocks)
+	}
+	for _, index := range []int{0, 2} {
+		call, ok := verbose.blocks[index].(toolCallBlock)
+		if !ok || !call.verbose {
+			t.Fatalf("verbose replay call at %d = %#v", index, verbose.blocks[index])
+		}
 	}
 }
 

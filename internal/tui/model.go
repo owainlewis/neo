@@ -42,6 +42,7 @@ type Options struct {
 	MemoryEnabled   bool
 	StepEvents      <-chan factory.Event
 	WorkflowEvents  <-chan workflow.Event
+	Verbose         bool
 }
 
 type Option func(*Options)
@@ -82,6 +83,14 @@ func WithStepEvents(ch <-chan factory.Event) Option {
 
 func WithWorkflowEvents(ch <-chan workflow.Event) Option {
 	return func(opts *Options) { opts.WorkflowEvents = ch }
+}
+
+// WithVerbose controls tool activity rendering: false (the default) shows a
+// concise one-line status per tool call and hides successful tool result
+// bodies; true restores full tool call/result cards. Errors always render in
+// full regardless of this setting.
+func WithVerbose(verbose bool) Option {
+	return func(opts *Options) { opts.Verbose = verbose }
 }
 
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
@@ -224,6 +233,7 @@ type model struct {
 	modelChoices      []ModelChoice
 	projectRoot       string
 	memoryEnabled     bool
+	verbose           bool
 }
 
 func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
@@ -328,6 +338,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		modelChoices:      normalizeModelChoices(modelTag, opts.ModelChoices),
 		projectRoot:       opts.ProjectRoot,
 		memoryEnabled:     opts.MemoryEnabled,
+		verbose:           opts.Verbose,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -1094,7 +1105,7 @@ func (m *model) handleEvent(e agent.Event) {
 		}
 		m.turn.tools++
 		m.noteWorkflowActivity(toolActivity(e.Name, e.Args))
-		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now()}
+		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now(), verbose: m.verbose}
 		m.currentTool = &tc
 		if e.Name == "agent" {
 			// The supervisor's "start" event draws this call as a tree
@@ -1105,6 +1116,12 @@ func (m *model) handleEvent(e agent.Event) {
 		m.appendBlock(tc)
 	case agent.EventToolResult:
 		if e.Name == "workflow" {
+			// Successful workflow calls are represented by the checklist UI, but
+			// failures may not produce a workflow event and must remain visible.
+			if e.IsError {
+				m.turn.errors++
+				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true})
+			}
 			break
 		}
 		elapsed := time.Duration(0)
@@ -1123,12 +1140,18 @@ func (m *model) handleEvent(e agent.Event) {
 			}
 			break
 		}
-		m.appendBlock(toolResultBlock{
-			name:    e.Name,
-			text:    e.Text,
-			isError: e.IsError,
-			elapsed: elapsed,
-		})
+		// In concise mode, routine successful agent results add no scannable
+		// information beyond the call's status line, so only errors render.
+		// Direct ! commands are user-requested output, not intermediate agent
+		// activity, and must remain visible in either mode.
+		if m.verbose || e.IsError || m.turn.direct {
+			m.appendBlock(toolResultBlock{
+				name:    e.Name,
+				text:    e.Text,
+				isError: e.IsError,
+				elapsed: elapsed,
+			})
+		}
 	case agent.EventError:
 		m.appendBlock(errorBlock{err: e.Err})
 	case agent.EventMaxTurnsReached:
@@ -1366,7 +1389,9 @@ func (m *model) appendTranscript(messages []llm.Message) {
 				m.blocks = append(m.blocks, userBlock{text: strings.Join(textParts, "\n")})
 			}
 			for _, block := range toolResults {
-				m.blocks = append(m.blocks, toolResultBlock{text: block.Content, isError: block.IsError})
+				if m.verbose || block.IsError {
+					m.blocks = append(m.blocks, toolResultBlock{text: block.Content, isError: block.IsError})
+				}
 			}
 		case llm.RoleAssistant:
 			for _, block := range msg.Content {
@@ -1376,7 +1401,7 @@ func (m *model) appendTranscript(messages []llm.Message) {
 						m.blocks = append(m.blocks, textBlock{text: block.Text})
 					}
 				case "tool_use":
-					m.blocks = append(m.blocks, toolCallBlock{name: block.Name, args: block.Input})
+					m.blocks = append(m.blocks, toolCallBlock{name: block.Name, args: block.Input, verbose: m.verbose})
 				}
 			}
 		}

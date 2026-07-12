@@ -449,6 +449,14 @@ features:
   memory: true        # load and update project-root memory.md
   skills: true        # discover .neo/skills, advertise them, expand $name and /name
   prompt_caching: true # cache the static system prompt prefix
+
+# Tool activity rendering during chat:
+#   verbose: false (default) -> concise one-line status per tool call;
+#                                errors always show in full
+#   verbose: true            -> full tool call/result cards (file contents,
+#                                command output, etc)
+output:
+  verbose: false
 ```
 
 ### Permissions
@@ -471,6 +479,15 @@ command can still affect files outside the repo if the command does so. Keep
 `ask` mode on when you want to review all shell commands first; `trusted` still
 asks before high-risk commands such as `rm -rf`, `sudo`, recursive
 ownership/permission changes, `git clean -fd`, and `git reset --hard`.
+
+### Output
+
+Neo defaults to concise tool output: a one-line status per tool call (e.g.
+`read internal/tui/model.go`) instead of full file contents or command
+output. Errors and failed tool calls always render in full, even in concise
+mode. Output from direct `!` shell commands also remains visible because it was
+explicitly requested. Set `output.verbose: true` in `neo.yaml` to restore the
+full tool call/result cards.
 
 ## Tools
 

@@ -313,6 +313,48 @@ func TestFeatures_SkillsDefaultsOnExplicitFalseDisables(t *testing.T) {
 	})
 }
 
+func TestOutput_VerboseDefaultsOffWhenAbsent(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.VerboseEnabled() {
+			t.Fatal("expected output.verbose to default off when omitted")
+		}
+	})
+}
+
+func TestOutput_VerboseExplicitTrueEnables(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\noutput:\n  verbose: true\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if !cfg.VerboseEnabled() {
+			t.Fatal("expected output.verbose: true to enable verbose output")
+		}
+	})
+}
+
+func TestOutput_VerboseExplicitFalseStaysOff(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\noutput:\n  verbose: false\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.VerboseEnabled() {
+			t.Fatal("expected output.verbose: false to stay off")
+		}
+	})
+}
+
 func TestFeatures_MemoryDefaultsOnExplicitFalseDisables(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
