@@ -52,9 +52,9 @@ features:
   prompt_caching: true # cache_control the static system prompt prefix to cut input cost
 
 # Tool activity rendering during chat:
-#   verbose: false (default) → concise one-line status per tool call (e.g.
-#                              "read <path>"); errors and direct ! command
-#                              output always show in full
+#   verbose: false (default) → live activity plus concise completed receipts
+#                              (e.g. "Read <path>"); errors and direct !
+#                              command output always show in full
 #   verbose: true            → full tool call/result cards, including file
 #                              contents and command output
 output:
@@ -142,7 +142,7 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| `output.verbose: false` | (default) | Show concise one-line status for routine agent tool calls (e.g. reading a file, running a command). Errors, failures, and direct `!` command output always render in full. |
+| `output.verbose: false` | (default) | Show live in-flight activity and concise completed receipts (e.g. a file read or command run). Errors, failures, and direct `!` command output always render in full. |
 | `output.verbose: true` | | Restore full tool call/result cards, including complete file contents and command output. |
 
 ## Permissions

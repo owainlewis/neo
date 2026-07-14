@@ -132,9 +132,8 @@ func (b textBlock) render(width int, md *glamour.TermRenderer) string {
 type thinkingBlock struct{ text string }
 
 func (b thinkingBlock) render(width int, _ *glamour.TermRenderer) string {
-	header := styMuted.Render("▸ thinking")
-	body := styThinking.Render(wrap(b.text, width-2))
-	return header + "\n" + body
+	body := strings.ReplaceAll(wrap(b.text, width-2), "\n", "\n  ")
+	return styDim.Render("• ") + styThinking.Render(body)
 }
 
 type toolCallBlock struct {
@@ -148,7 +147,7 @@ type toolCallBlock struct {
 
 func (b toolCallBlock) render(width int, _ *glamour.TermRenderer) string {
 	if !b.verbose {
-		return styMuted.Render(toolStatusLine(b.name, b.args))
+		return styMuted.Render(toolReceiptLine(b.name, b.args))
 	}
 	header, body := toolCardContent(b.name, b.args)
 	card := styTool.Render(header)
@@ -158,16 +157,25 @@ func (b toolCallBlock) render(width int, _ *glamour.TermRenderer) string {
 	return styCardTool.Width(width - 2).Render(card)
 }
 
-// toolStatusLine renders the concise, one-line "what is Neo doing" status
-// shown by default for routine tool calls, reusing the same present-tense
-// phrasing as the busy spinner (see toolCardContent for the full verbose
-// card equivalent).
-func toolStatusLine(name string, args map[string]any) string {
-	verb := toolVerb(name, args)
-	if verb == "" {
-		return ""
+// toolReceiptLine renders a concise, past-tense record of completed work.
+// Present-tense activity belongs in the live status row, so history never
+// leaves finished calls looking as though they are still running.
+func toolReceiptLine(name string, args map[string]any) string {
+	switch name {
+	case "bash":
+		return "Ran " + truncate(oneLine(stringArg(args, "command")), 80)
+	case "read_file":
+		return "Read " + shortPath(stringArg(args, "path"))
+	case "write_file":
+		return "Wrote " + shortPath(stringArg(args, "path"))
+	case "edit_file":
+		return "Edited " + shortPath(stringArg(args, "path"))
+	case "grep":
+		return "Searched " + truncate(oneLine(stringArg(args, "pattern")), 60)
+	case "glob":
+		return "Matched " + truncate(oneLine(stringArg(args, "pattern")), 60)
 	}
-	return strings.ToUpper(verb[:1]) + verb[1:] + "..."
+	return "Used " + name
 }
 
 type toolResultBlock struct {

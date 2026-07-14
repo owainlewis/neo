@@ -639,8 +639,8 @@ func TestBangCommand_ConciseModeKeepsRequestedCommandOutput(t *testing.T) {
 	if tc.verbose {
 		t.Fatal("expected concise tool call block")
 	}
-	if !strings.Contains(tc.render(80, nil), "Running echo hello...") {
-		t.Fatalf("expected concise status line, got %q", tc.render(80, nil))
+	if !strings.Contains(tc.render(80, nil), "Ran echo hello") {
+		t.Fatalf("expected concise receipt, got %q", tc.render(80, nil))
 	}
 	tr, ok := m.blocks[1].(toolResultBlock)
 	if !ok || tr.text != "echo hello" || tr.isError {

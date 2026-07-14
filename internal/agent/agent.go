@@ -16,12 +16,13 @@ import (
 type EventKind string
 
 const (
-	EventAssistantText   EventKind = "assistant_text"
-	EventToolCall        EventKind = "tool_call"
-	EventToolResult      EventKind = "tool_result"
-	EventDone            EventKind = "done"
-	EventError           EventKind = "error"
-	EventMaxTurnsReached EventKind = "max_turns_reached"
+	EventAssistantText       EventKind = "assistant_text"
+	EventAssistantCommentary EventKind = "assistant_commentary"
+	EventToolCall            EventKind = "tool_call"
+	EventToolResult          EventKind = "tool_result"
+	EventDone                EventKind = "done"
+	EventError               EventKind = "error"
+	EventMaxTurnsReached     EventKind = "max_turns_reached"
 )
 
 var ErrMaxTurns = errors.New("max turns reached")
@@ -251,11 +252,16 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 		// if a tool panics or an early return is added later.
 		assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: resp.Content}
 		var toolResults []llm.ContentBlock
+		hasTools := hasToolUse(resp.Content)
 		for _, block := range resp.Content {
 			switch block.Type {
 			case "text":
 				if block.Text != "" {
-					a.emit(Event{Kind: EventAssistantText, Text: block.Text})
+					kind := EventAssistantText
+					if hasTools {
+						kind = EventAssistantCommentary
+					}
+					a.emit(Event{Kind: kind, Text: block.Text})
 					finalText.WriteString(block.Text)
 					finalText.WriteString("\n")
 				}
@@ -298,6 +304,15 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 	logx.Debug("agent max turns reached", "max_turns", a.cfg.MaxTurns)
 	a.emit(Event{Kind: EventMaxTurnsReached, MaxTurns: a.cfg.MaxTurns, Err: ErrMaxTurns})
 	return strings.TrimSpace(finalText.String()), ErrMaxTurns
+}
+
+func hasToolUse(content []llm.ContentBlock) bool {
+	for _, block := range content {
+		if block.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) (string, bool) {

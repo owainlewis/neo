@@ -85,8 +85,8 @@ func WithWorkflowEvents(ch <-chan workflow.Event) Option {
 	return func(opts *Options) { opts.WorkflowEvents = ch }
 }
 
-// WithVerbose controls tool activity rendering: false (the default) shows a
-// concise one-line status per tool call and hides successful tool result
+// WithVerbose controls tool activity rendering: false (the default) shows live
+// activity and concise completed receipts while hiding successful tool result
 // bodies; true restores full tool call/result cards. Errors always render in
 // full regardless of this setting.
 func WithVerbose(verbose bool) Option {
@@ -181,7 +181,6 @@ type model struct {
 	viewport viewport.Model
 	input    textarea.Model
 	spin     spinner.Model
-	caption  string
 	picker   commandPicker
 	files    filePicker
 	sessions sessionBrowser
@@ -319,7 +318,6 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		viewport:          vp,
 		input:             ta,
 		spin:              sp,
-		caption:           randomCaption(),
 		files:             newFilePicker(workspace.Root(absCWD)),
 		md:                md,
 		skills:            sk,
@@ -347,10 +345,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(
-		m.spin.Tick,
-		rotateCaptionEvery(3*time.Second),
-	)
+	return m.spin.Tick
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -563,6 +558,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.busy {
 			m.setDotColor(colDotThinking)
 		}
+		m.layout()
 
 	case approvalRequestMsg:
 		logx.Debug("tui approval requested", "tool", msg.req.ToolName, "reason", msg.req.Reason)
@@ -573,11 +569,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.approval = &approvalState{req: msg.req, reply: msg.reply}
 		m.appendBlock(approvalBlock{req: msg.req})
+		m.layout()
 
 	case sendResultMsg:
 		elapsed := time.Since(m.busySince)
 		m.busy = false
 		m.currentTool = nil
+		m.layout()
 		if m.sendCancel != nil {
 			m.sendCancel()
 			m.sendCancel = nil
@@ -615,12 +613,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(msg.branch) != "" {
 			m.branch = msg.branch
 		}
-
-	case rotateCaptionMsg:
-		if m.busy {
-			m.caption = randomCaption()
-		}
-		cmds = append(cmds, rotateCaptionEvery(3*time.Second))
 
 	default:
 		var cmd tea.Cmd
@@ -692,11 +684,6 @@ func makeView(content string) tea.View {
 	return v
 }
 
-// elapsedThreshold is how long a turn has to run before we surface an
-// elapsed-time counter in the status line. Short turns shouldn't flicker
-// numbers at the user.
-const elapsedThreshold = 3 * time.Second
-
 const defaultPlaceholder = "Ask neo anything…   ↩ send"
 
 func (m *model) submitUserTurn(displayText, agentText string, images []string) tea.Cmd {
@@ -721,7 +708,6 @@ func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, 
 	m.busy = true
 	m.busySince = time.Now()
 	m.turn = turnStats{}
-	m.caption = randomCaption()
 	m.setDotColor(colDotThinking)
 	return m.startSend(sent, images)
 }
@@ -837,7 +823,6 @@ func (m *model) handleBangCommand(line string) tea.Cmd {
 	m.busy = true
 	m.busySince = time.Now()
 	m.turn = turnStats{direct: true}
-	m.caption = randomCaption()
 	m.setDotColor(colDotThinking)
 	return m.startTool("bash", map[string]any{"command": command})
 }
@@ -926,20 +911,38 @@ func (m *model) statusLine() string {
 
 	elapsed := time.Since(m.busySince)
 
-	// Pick the body text based on what the agent is actually doing.
-	var body string
-	switch {
-	case m.currentTool != nil:
-		body = "Neo is " + toolVerb(m.currentTool.name, m.currentTool.args)
-	default:
-		body = "Neo is thinking"
+	hint := "esc to interrupt"
+	if m.approval != nil {
+		hint = "esc to deny"
 	}
-
-	line := " " + m.spin.View() + " " + styMuted.Render(body)
-	if elapsed >= elapsedThreshold {
-		line += "  " + styDim.Render(formatElapsed(elapsed))
+	header := fmt.Sprintf("Working (%s · %s)", formatElapsedCompact(elapsed), hint)
+	line := truncate(" "+m.spin.View()+" "+styMuted.Render(header), max(m.width, 1))
+	detail := ""
+	switch {
+	case m.approval != nil:
+		detail = "Waiting for approval"
+	case m.currentTool != nil:
+		detail = capitalize(toolVerb(m.currentTool.name, m.currentTool.args))
+	}
+	if detail != "" {
+		line += "\n" + truncate("   "+styDim.Render("└ "+detail), max(m.width, 1))
 	}
 	return line
+}
+
+func formatElapsedCompact(d time.Duration) string {
+	seconds := int(d.Seconds())
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	return fmt.Sprintf("%dm %02ds", seconds/60, seconds%60)
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return ""
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func formatElapsed(d time.Duration) string {
@@ -985,7 +988,7 @@ func (m *model) layout() {
 		pickerHeight = len(m.files.matches) + 1
 	}
 	workflowHeight := m.workflowPanelHeight()
-	chrome := inputHeight + pickerHeight + workflowHeight + 4 // status + footer lines + margin above/below input
+	chrome := inputHeight + pickerHeight + workflowHeight + 3 + m.statusLineHeight()
 	vpH := m.height - chrome
 	if vpH < 3 {
 		vpH = 3
@@ -1003,6 +1006,13 @@ func (m *model) layout() {
 			m.md = r
 		}
 	}
+}
+
+func (m *model) statusLineHeight() int {
+	if m.busy && (m.currentTool != nil || m.approval != nil) {
+		return 2
+	}
+	return 1
 }
 
 func (m *model) appendBlock(b block) {
@@ -1095,6 +1105,11 @@ func (m *model) handleEvent(e agent.Event) {
 		if strings.TrimSpace(e.Text) != "" {
 			m.appendBlock(textBlock{text: e.Text})
 		}
+	case agent.EventAssistantCommentary:
+		m.activeTree = nil
+		if strings.TrimSpace(e.Text) != "" {
+			m.appendBlock(thinkingBlock{text: e.Text})
+		}
 	case agent.EventToolCall:
 		if e.Name == "workflow" {
 			m.turn.workflow = true
@@ -1112,7 +1127,9 @@ func (m *model) handleEvent(e agent.Event) {
 			break
 		}
 		m.activeTree = nil
-		m.appendBlock(tc)
+		if m.verbose {
+			m.appendBlock(tc)
+		}
 	case agent.EventToolResult:
 		if e.Name == "workflow" {
 			// Successful workflow calls are represented by the checklist UI, but
@@ -1127,6 +1144,7 @@ func (m *model) handleEvent(e agent.Event) {
 		if m.currentTool != nil {
 			elapsed = time.Since(m.currentTool.startAt)
 		}
+		completedTool := m.currentTool
 		m.currentTool = nil
 		if e.IsError {
 			m.turn.errors++
@@ -1138,6 +1156,9 @@ func (m *model) handleEvent(e agent.Event) {
 				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true, elapsed: elapsed})
 			}
 			break
+		}
+		if !m.verbose && completedTool != nil {
+			m.appendBlock(*completedTool)
 		}
 		// In concise mode, routine successful agent results add no scannable
 		// information beyond the call's status line, so only errors render.
@@ -1393,11 +1414,16 @@ func (m *model) appendTranscript(messages []llm.Message) {
 				}
 			}
 		case llm.RoleAssistant:
+			hasTools := hasTranscriptToolUse(msg.Content)
 			for _, block := range msg.Content {
 				switch block.Type {
 				case "text":
 					if strings.TrimSpace(block.Text) != "" {
-						m.blocks = append(m.blocks, textBlock{text: block.Text})
+						if hasTools {
+							m.blocks = append(m.blocks, thinkingBlock{text: block.Text})
+						} else {
+							m.blocks = append(m.blocks, textBlock{text: block.Text})
+						}
 					}
 				case "tool_use":
 					m.blocks = append(m.blocks, toolCallBlock{name: block.Name, args: block.Input, verbose: m.verbose})
@@ -1406,6 +1432,15 @@ func (m *model) appendTranscript(messages []llm.Message) {
 		}
 	}
 	m.refreshViewport()
+}
+
+func hasTranscriptToolUse(content []llm.ContentBlock) bool {
+	for _, block := range content {
+		if block.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *model) startSend(text string, images []string) tea.Cmd {

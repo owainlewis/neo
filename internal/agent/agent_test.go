@@ -296,6 +296,11 @@ func TestAgent_MaxTurnsReturnsSentinelWithPartialText(t *testing.T) {
 	if !sawMaxTurnsEvent(events, 2) {
 		t.Fatalf("missing max-turns event in %#v", events)
 	}
+	for _, text := range []string{"first partial", "second partial"} {
+		if !sawEvent(events, EventAssistantCommentary, text) {
+			t.Fatalf("missing commentary event for %q in %#v", text, events)
+		}
+	}
 	assertToolUseResultsPaired(t, ag.Transcript())
 }
 
@@ -683,6 +688,15 @@ func sawMaxTurnsEvent(events []Event, limit int) bool {
 func sawToolResultEventWithText(events []Event, text string) bool {
 	for _, event := range events {
 		if event.Kind == EventToolResult && event.Text == text {
+			return true
+		}
+	}
+	return false
+}
+
+func sawEvent(events []Event, kind EventKind, text string) bool {
+	for _, event := range events {
+		if event.Kind == kind && event.Text == text {
 			return true
 		}
 	}

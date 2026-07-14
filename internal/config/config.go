@@ -63,8 +63,8 @@ type Permissions struct {
 // Output configures how Neo renders tool activity during a chat session.
 type Output struct {
 	// Verbose restores the full tool call/result rendering (complete file
-	// contents, command output, etc). Defaults to false: Neo shows concise
-	// one-line status for routine tool calls and still surfaces errors in full.
+	// contents, command output, etc). Defaults to false: Neo shows live activity
+	// and concise completed receipts while still surfacing errors in full.
 	Verbose *bool `yaml:"verbose"`
 }
 

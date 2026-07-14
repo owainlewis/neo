@@ -112,7 +112,7 @@ func (r *AgentRunner) registry(step Step, dir string, nodeID int) *tools.Registr
 // the child subagent's own start event renders it.
 func translate(e agent.Event) (AgentEvent, bool) {
 	switch e.Kind {
-	case agent.EventAssistantText:
+	case agent.EventAssistantText, agent.EventAssistantCommentary:
 		return AgentEvent{Kind: "text", Body: e.Text}, true
 	case agent.EventToolCall:
 		if e.Name == "agent" {

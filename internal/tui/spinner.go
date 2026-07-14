@@ -1,46 +1,19 @@
 package tui
 
 import (
-	"math/rand/v2"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
-	tea "charm.land/bubbletea/v2"
 )
 
-// Status spinner: a single dot that gently pulses on/off. Calm, not jittery.
-// Slow cadence (~2 frames/sec) keeps it from competing with the status text.
+// Status spinner: a dot that gently changes weight but never disappears.
+// Keeping a visible mark in every frame makes a slow provider response look
+// active instead of stalled.
 var statusSpinner = spinner.Spinner{
-	Frames: []string{"●", " "},
+	Frames: []string{"●", "◉"},
 	FPS:    time.Second / 2,
-}
-
-// Playful captions, shown only after a turn has been thinking for a while with
-// no active tool — i.e. the user is staring at the screen and deserves a wink.
-var spinnerCaptions = []string{
-	"Reticulating splines",
-	"Reverse engineering the universe",
-	"Mining bitcoins... kidding",
-	"Untangling pointers",
-	"Negotiating with the compiler",
-	"Compiling thoughts",
-	"Asking nicely",
-	"Consulting the rubber duck",
-	"Counting electrons",
-	"Polishing pixels",
-	"Petting the cat",
-}
-
-type rotateCaptionMsg struct{}
-
-func rotateCaptionEvery(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(time.Time) tea.Msg { return rotateCaptionMsg{} })
-}
-
-func randomCaption() string {
-	return spinnerCaptions[rand.IntN(len(spinnerCaptions))]
 }
 
 // toolVerb returns a present-tense status phrase for an in-flight tool call,
