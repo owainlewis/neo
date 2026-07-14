@@ -37,9 +37,9 @@ features:
   prompt_caching: true # cache_control the static system prompt prefix to cut input cost
 
 # Tool activity rendering during chat:
-#   verbose: false (default) → concise one-line status per tool call (e.g.
-#                              "read <path>"); errors and direct ! command
-#                              output always show in full
+#   verbose: false (default) → live activity plus concise completed receipts
+#                              (e.g. "Read <path>"); errors and direct !
+#                              command output always show in full
 #   verbose: true            → full tool call/result cards, including file
 #                              contents and command output
 output:

@@ -117,10 +117,10 @@ func TestToolResultBlockCanRenderCompactAndExpanded(t *testing.T) {
 	}
 }
 
-func TestToolCallBlockRendersConciseStatusLineByDefault(t *testing.T) {
+func TestToolCallBlockRendersConciseReceiptByDefault(t *testing.T) {
 	out := plain(toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}.render(80, nil))
-	if out != "Reading internal/tui/model.go..." {
-		t.Fatalf("concise tool call render = %q, want a plain status line", out)
+	if out != "Read internal/tui/model.go" {
+		t.Fatalf("concise tool call render = %q, want a completed receipt", out)
 	}
 }
 
@@ -129,27 +129,27 @@ func TestToolCallBlockRendersFullCardWhenVerbose(t *testing.T) {
 	if !strings.Contains(out, "read internal/tui/model.go") {
 		t.Fatalf("verbose tool call render missing card header: %q", out)
 	}
-	if strings.Contains(out, "Reading internal/tui/model.go...") {
-		t.Fatalf("verbose render should not use the concise status line: %q", out)
+	if strings.Contains(out, "Read internal/tui/model.go") {
+		t.Fatalf("verbose render should not use the concise receipt: %q", out)
 	}
 }
 
-func TestToolStatusLineCoversRoutineTools(t *testing.T) {
+func TestToolReceiptLineCoversRoutineTools(t *testing.T) {
 	cases := []struct {
 		name string
 		args map[string]any
 		want string
 	}{
-		{"bash", map[string]any{"command": "npm test"}, "Running npm test..."},
-		{"read_file", map[string]any{"path": "a.go"}, "Reading a.go..."},
-		{"write_file", map[string]any{"path": "a.go"}, "Writing a.go..."},
-		{"edit_file", map[string]any{"path": "a.go"}, "Editing a.go..."},
-		{"grep", map[string]any{"pattern": "TODO"}, "Searching TODO..."},
-		{"glob", map[string]any{"pattern": "**/*.go"}, "Matching **/*.go..."},
+		{"bash", map[string]any{"command": "npm test"}, "Ran npm test"},
+		{"read_file", map[string]any{"path": "a.go"}, "Read a.go"},
+		{"write_file", map[string]any{"path": "a.go"}, "Wrote a.go"},
+		{"edit_file", map[string]any{"path": "a.go"}, "Edited a.go"},
+		{"grep", map[string]any{"pattern": "TODO"}, "Searched TODO"},
+		{"glob", map[string]any{"pattern": "**/*.go"}, "Matched **/*.go"},
 	}
 	for _, tc := range cases {
-		if got := toolStatusLine(tc.name, tc.args); got != tc.want {
-			t.Fatalf("toolStatusLine(%q) = %q, want %q", tc.name, got, tc.want)
+		if got := toolReceiptLine(tc.name, tc.args); got != tc.want {
+			t.Fatalf("toolReceiptLine(%q) = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
@@ -185,12 +185,12 @@ func TestToolEventsAlwaysRenderFailures(t *testing.T) {
 	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "bash", Args: map[string]any{"command": "false"}})
 	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "bash", Text: "exit 1", IsError: true})
 
-	if len(m.blocks) != 2 {
-		t.Fatalf("blocks = %d, want call and failure: %#v", len(m.blocks), m.blocks)
+	if len(m.blocks) != 1 {
+		t.Fatalf("blocks = %d, want only failure without a success receipt: %#v", len(m.blocks), m.blocks)
 	}
-	result, ok := m.blocks[1].(toolResultBlock)
+	result, ok := m.blocks[0].(toolResultBlock)
 	if !ok || !result.isError || result.text != "exit 1" {
-		t.Fatalf("failure result = %#v", m.blocks[1])
+		t.Fatalf("failure result = %#v", m.blocks[0])
 	}
 }
 
@@ -243,6 +243,35 @@ func TestTranscriptReplayRespectsOutputModeAndKeepsFailures(t *testing.T) {
 		if !ok || !call.verbose {
 			t.Fatalf("verbose replay call at %d = %#v", index, verbose.blocks[index])
 		}
+	}
+}
+
+func TestToolPreambleRendersAsDimTraceLiveAndOnReplay(t *testing.T) {
+	m := makeTestModel()
+	m.handleEvent(agent.Event{Kind: agent.EventAssistantCommentary, Text: "I’ll inspect the load path first."})
+	if len(m.blocks) != 1 {
+		t.Fatalf("live blocks = %d, want 1", len(m.blocks))
+	}
+	if _, ok := m.blocks[0].(thinkingBlock); !ok {
+		t.Fatalf("live commentary block = %T, want thinkingBlock", m.blocks[0])
+	}
+	if got := strings.TrimSpace(plain(m.blocks[0].render(80, nil))); got != "• I’ll inspect the load path first." {
+		t.Fatalf("live commentary render = %q", got)
+	}
+
+	replay := makeTestModel()
+	replay.appendTranscript([]llm.Message{{
+		Role: llm.RoleAssistant,
+		Content: []llm.ContentBlock{
+			{Type: "text", Text: "I’ll inspect the load path first."},
+			{Type: "tool_use", Name: "read_file", Input: map[string]any{"path": "store.go"}},
+		},
+	}})
+	if len(replay.blocks) != 2 {
+		t.Fatalf("replay blocks = %d, want commentary and receipt", len(replay.blocks))
+	}
+	if _, ok := replay.blocks[0].(thinkingBlock); !ok {
+		t.Fatalf("replayed commentary block = %T, want thinkingBlock", replay.blocks[0])
 	}
 }
 
@@ -319,21 +348,78 @@ func TestWorkflowBlockRenderShowsProgressAndCompletion(t *testing.T) {
 	}
 }
 
-func TestStatusLineUsesSpecificNeoActivity(t *testing.T) {
+func TestStatusLineShowsWorkingStateAndRealActivity(t *testing.T) {
 	m := makeTestModel()
 	m.busy = true
-	m.busySince = time.Now()
+	m.busySince = time.Now().Add(-4 * time.Second)
 	m.currentTool = &toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}
 
 	out := plain(m.statusLine())
-	if !strings.Contains(out, "Neo is reading internal/tui/model.go") {
-		t.Fatalf("status line missing specific activity: %q", out)
+	for _, want := range []string{"Working (4s · esc to interrupt)", "└ Reading internal/tui/model.go"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status line missing %q: %q", want, out)
+		}
 	}
 
 	m.currentTool = nil
 	out = plain(m.statusLine())
-	if !strings.Contains(out, "Neo is thinking") {
-		t.Fatalf("status line missing thinking activity: %q", out)
+	if !strings.Contains(out, "Working (") || strings.Contains(out, "└") {
+		t.Fatalf("generic working state should not invent activity: %q", out)
+	}
+}
+
+func TestStatusSpinnerNeverDisappears(t *testing.T) {
+	for i, frame := range statusSpinner.Frames {
+		if strings.TrimSpace(frame) == "" {
+			t.Fatalf("spinner frame %d is blank", i)
+		}
+	}
+}
+
+func TestStatusLineHeightTracksActivityDetail(t *testing.T) {
+	m := makeTestModel()
+	if got := m.statusLineHeight(); got != 1 {
+		t.Fatalf("idle status height = %d, want 1", got)
+	}
+	m.busy = true
+	if got := m.statusLineHeight(); got != 1 {
+		t.Fatalf("generic working status height = %d, want 1", got)
+	}
+	m.currentTool = &toolCallBlock{name: "read_file"}
+	if got := m.statusLineHeight(); got != 2 {
+		t.Fatalf("activity status height = %d, want 2", got)
+	}
+}
+
+func TestStatusLineUsesApprovalHintAndFitsNarrowWidth(t *testing.T) {
+	m := makeTestModel()
+	m.width = 80
+	m.busy = true
+	m.busySince = time.Now()
+	m.currentTool = &toolCallBlock{
+		name: "read_file",
+		args: map[string]any{"path": "a/very/long/path/to/internal/tui/model.go"},
+	}
+	m.approval = &approvalState{}
+
+	approvalLine := strings.Split(plain(m.statusLine()), "\n")[0]
+	if !strings.Contains(approvalLine, "esc to deny") {
+		t.Fatalf("approval status missing deny hint: %q", approvalLine)
+	}
+	if strings.Contains(approvalLine, "interrupt") {
+		t.Fatalf("approval status advertises the wrong esc action: %q", approvalLine)
+	}
+
+	m.width = 24
+	m.approval = nil
+	lines := strings.Split(plain(m.statusLine()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("status lines = %d, want 2: %q", len(lines), lines)
+	}
+	for i, line := range lines {
+		if got := len([]rune(line)); got > m.width {
+			t.Fatalf("status line %d width = %d, want <= %d: %q", i, got, m.width, line)
+		}
 	}
 }
 

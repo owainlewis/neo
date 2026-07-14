@@ -451,7 +451,7 @@ features:
   prompt_caching: true # cache the static system prompt prefix
 
 # Tool activity rendering during chat:
-#   verbose: false (default) -> concise one-line status per tool call;
+#   verbose: false (default) -> live activity plus concise completed receipts;
 #                                errors always show in full
 #   verbose: true            -> full tool call/result cards (file contents,
 #                                command output, etc)
@@ -482,12 +482,13 @@ ownership/permission changes, `git clean -fd`, and `git reset --hard`.
 
 ### Output
 
-Neo defaults to concise tool output: a one-line status per tool call (e.g.
-`read internal/tui/model.go`) instead of full file contents or command
-output. Errors and failed tool calls always render in full, even in concise
-mode. Output from direct `!` shell commands also remains visible because it was
-explicitly requested. Set `output.verbose: true` in `neo.yaml` to restore the
-full tool call/result cards.
+Neo defaults to concise tool output. While a turn runs, a live row shows elapsed
+time, the interrupt key, and real in-flight activity. Completed calls leave
+short past-tense receipts (e.g. `Read internal/tui/model.go`) instead of full
+file contents or command output. Errors and failed tool calls always render in
+full, even in concise mode. Output from direct `!` shell commands also remains
+visible because it was explicitly requested. Set `output.verbose: true` in
+`neo.yaml` to restore the full tool call/result cards.
 
 ## Tools
 

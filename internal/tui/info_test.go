@@ -22,7 +22,7 @@ import (
 func TestHelpBlock_ListsHelpCommandAndKeys(t *testing.T) {
 	m := makeTestModel()
 	out := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
-	for _, want := range []string{"/help", "!cmd", "send", "newline", "pgup/pgdn", "ctrl+o", "quit"} {
+	for _, want := range []string{"/help", "!cmd", "send", "newline", "wheel/pgup/pgdn", "shift+drag", "ctrl+o", "quit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("/help missing %q: %s", want, out)
 		}
@@ -639,8 +639,8 @@ func TestBangCommand_ConciseModeKeepsRequestedCommandOutput(t *testing.T) {
 	if tc.verbose {
 		t.Fatal("expected concise tool call block")
 	}
-	if !strings.Contains(tc.render(80, nil), "Running echo hello...") {
-		t.Fatalf("expected concise status line, got %q", tc.render(80, nil))
+	if !strings.Contains(tc.render(80, nil), "Ran echo hello") {
+		t.Fatalf("expected concise receipt, got %q", tc.render(80, nil))
 	}
 	tr, ok := m.blocks[1].(toolResultBlock)
 	if !ok || tr.text != "echo hello" || tr.isError {
