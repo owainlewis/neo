@@ -70,10 +70,27 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	if title == "" {
 		title = "Workflow"
 	}
+	title = oneLine(title)
 	done, failed, skipped := workflowCounts(b.items)
 	total := len(b.items)
-	meta := fmt.Sprintf("%d/%d", done+failed+skipped, total)
-	sb.WriteString(styAccent.Render(title) + styMuted.Render("  "+meta) + "\n")
+	progress := fmt.Sprintf("%d/%d", done+failed+skipped, total)
+	meta := progress
+	if total > 0 && done+failed+skipped == total {
+		candidate := "complete · " + progress
+		if failed > 0 {
+			candidate = "issues · " + progress
+		}
+		if lipgloss.Width(candidate) <= width {
+			meta = candidate
+		}
+	}
+	metaWidth := lipgloss.Width(meta)
+	if metaWidth >= width {
+		return styMuted.Render(truncate(meta, max(width, 1)))
+	}
+	title = truncate(title, max(width-metaWidth-2, 1))
+	header := styAccent.Render(title) + styMuted.Render("  "+meta)
+	sb.WriteString(truncate(header, max(width, 1)) + "\n")
 	for _, item := range b.items {
 		glyph := styMuted.Render("○")
 		textStyle := lipgloss.NewStyle()
@@ -88,18 +105,14 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 		case workflow.Skipped:
 			glyph = styMuted.Render("-")
 		}
-		line := fmt.Sprintf("%s %s", glyph, textStyle.Render(item.Text))
+		content := oneLine(item.Text)
 		if strings.TrimSpace(item.Detail) != "" {
-			line += styMuted.Render(" — " + truncate(oneLine(item.Detail), max(width-8, 20)))
+			content += " — " + oneLine(item.Detail)
 		}
+		content = truncate(content, max(width-2, 1))
+		line := fmt.Sprintf("%s %s", glyph, textStyle.Render(content))
+		line = truncate(line, max(width, 1))
 		sb.WriteString(line + "\n")
-	}
-	if total > 0 && done+failed+skipped == total {
-		label := "Plan complete"
-		if failed > 0 {
-			label = "Plan finished with issues"
-		}
-		sb.WriteString(styMuted.Render(label + fmt.Sprintf(" · %d/%d steps", done+failed+skipped, total)))
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

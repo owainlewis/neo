@@ -341,7 +341,7 @@ func TestWorkflowBlockRenderShowsProgressAndCompletion(t *testing.T) {
 		},
 	}).render(80, nil))
 
-	for _, want := range []string{"Plan  2/2", "✓ Inspect", "updated status line", "Plan complete · 2/2 steps"} {
+	for _, want := range []string{"Plan  complete · 2/2", "✓ Inspect", "updated status line"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("workflow render missing %q:\n%s", want, out)
 		}
@@ -363,7 +363,7 @@ func TestStatusLineShowsWorkingStateAndRealActivity(t *testing.T) {
 
 	m.currentTool = nil
 	out = plain(m.statusLine())
-	if !strings.Contains(out, "Working (") || strings.Contains(out, "└") {
+	if !strings.Contains(out, "Working (") || strings.Contains(out, "└") || strings.Count(out, "\n") != 1 {
 		t.Fatalf("generic working state should not invent activity: %q", out)
 	}
 }
@@ -382,8 +382,8 @@ func TestStatusLineHeightTracksActivityDetail(t *testing.T) {
 		t.Fatalf("idle status height = %d, want 1", got)
 	}
 	m.busy = true
-	if got := m.statusLineHeight(); got != 1 {
-		t.Fatalf("generic working status height = %d, want 1", got)
+	if got := m.statusLineHeight(); got != 2 {
+		t.Fatalf("generic working status height = %d, want 2", got)
 	}
 	m.currentTool = &toolCallBlock{name: "read_file"}
 	if got := m.statusLineHeight(); got != 2 {

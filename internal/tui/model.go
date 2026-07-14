@@ -594,7 +594,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if summary, ok := m.resultSummary(msg.err, elapsed); ok {
 			m.appendBlock(summary)
 		}
-		m.hideTerminalWorkflow()
 		cmds = append(cmds, refreshBranch())
 
 	case spinner.TickMsg:
@@ -656,7 +655,7 @@ func (m *model) View() tea.View {
 
 	parts := []string{m.viewport.View()}
 	if workflow := m.workflowPanelView(); workflow != "" {
-		parts = append(parts, workflow, "")
+		parts = append(parts, "", workflow, "")
 	}
 	parts = append(parts,
 		status,
@@ -714,6 +713,7 @@ func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, 
 	m.busySince = time.Now()
 	m.turn = turnStats{}
 	m.setDotColor(colDotThinking)
+	m.layout()
 	return m.startSend(sent, images)
 }
 
@@ -829,6 +829,7 @@ func (m *model) handleBangCommand(line string) tea.Cmd {
 	m.busySince = time.Now()
 	m.turn = turnStats{direct: true}
 	m.setDotColor(colDotThinking)
+	m.layout()
 	return m.startTool("bash", map[string]any{"command": command})
 }
 
@@ -931,6 +932,10 @@ func (m *model) statusLine() string {
 	}
 	if detail != "" {
 		line += "\n" + truncate("   "+styDim.Render("└ "+detail), max(m.width, 1))
+	} else {
+		// Keep the busy area two rows tall so tool transitions do not resize the
+		// transcript viewport. A space makes the blank row explicit to lipgloss.
+		line += "\n "
 	}
 	return line
 }
@@ -985,21 +990,23 @@ func (m *model) syncInputHeight() {
 }
 
 func (m *model) layout() {
+	followOutput := m.viewport.AtBottom()
+	previousOffset := m.viewport.YOffset()
 	inputHeight := m.input.Height() + 2 // textarea body + top/bottom padding
-	pickerHeight := 0
-	if m.picker.visible && len(m.picker.matches) > 0 {
-		pickerHeight = len(m.picker.matches) + 1
-	} else if m.files.visible && len(m.files.matches) > 0 {
-		pickerHeight = len(m.files.matches) + 1
-	}
+	pickerHeight := m.pickerPanelHeight()
 	workflowHeight := m.workflowPanelHeight()
 	chrome := inputHeight + pickerHeight + workflowHeight + 3 + m.statusLineHeight()
 	vpH := m.height - chrome
-	if vpH < 3 {
-		vpH = 3
+	if vpH < 1 {
+		vpH = 1
 	}
 	m.viewport.SetWidth(m.width)
 	m.viewport.SetHeight(vpH)
+	if followOutput {
+		m.viewport.GotoBottom()
+	} else {
+		m.viewport.SetYOffset(previousOffset)
+	}
 	m.input.SetWidth(m.width - 2)
 	if m.md != nil {
 		// Re-create renderer at the new width so code blocks wrap nicely.
@@ -1013,8 +1020,18 @@ func (m *model) layout() {
 	}
 }
 
+func (m *model) pickerPanelHeight() int {
+	if m.picker.visible && len(m.picker.matches) > 0 {
+		return len(m.picker.matches) + 1
+	}
+	if m.files.visible && len(m.files.matches) > 0 {
+		return len(m.files.matches) + 1
+	}
+	return 0
+}
+
 func (m *model) statusLineHeight() int {
-	if m.busy && (m.currentTool != nil || m.approval != nil) {
+	if m.busy {
 		return 2
 	}
 	return 1
@@ -1043,7 +1060,30 @@ func (m *model) workflowPanelView() string {
 	if m.workflow == nil || !m.workflowVisible {
 		return ""
 	}
-	return m.workflow.render(m.width, nil)
+	panel := m.workflow.render(m.width, nil)
+	lineBudget := m.workflowPanelLineBudget()
+	if lineBudget <= 0 {
+		return ""
+	}
+	lines := strings.Split(panel, "\n")
+	if len(lines) <= lineBudget {
+		return panel
+	}
+	if lineBudget == 1 {
+		return lines[0]
+	}
+	hidden := len(lines) - lineBudget + 1
+	lines = lines[:lineBudget]
+	lines[lineBudget-1] = styMuted.Render(fmt.Sprintf("… %d more", hidden))
+	return strings.Join(lines, "\n")
+}
+
+func (m *model) workflowPanelLineBudget() int {
+	inputHeight := m.input.Height() + 2
+	baseChrome := inputHeight + m.pickerPanelHeight() + 3 + m.statusLineHeight()
+	const minTranscriptHeight = 1
+	const workflowGutters = 2
+	return max(m.height-baseChrome-minTranscriptHeight-workflowGutters, 0)
 }
 
 func (m *model) workflowPanelHeight() int {
@@ -1051,7 +1091,8 @@ func (m *model) workflowPanelHeight() int {
 	if panel == "" {
 		return 0
 	}
-	return strings.Count(panel, "\n") + 2 // panel lines plus one-line margin before status
+	// Rendered panel lines plus one-line gutters above and below the panel.
+	return strings.Count(panel, "\n") + 3
 }
 
 func (m *model) workflowTerminal() bool {
@@ -1067,14 +1108,6 @@ func (m *model) workflowTerminal() bool {
 		}
 	}
 	return true
-}
-
-func (m *model) hideTerminalWorkflow() {
-	if !m.workflowTerminal() {
-		return
-	}
-	m.workflowVisible = false
-	m.layout()
 }
 
 func (m *model) clearTerminalWorkflow() {
