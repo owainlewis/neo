@@ -185,12 +185,12 @@ func TestToolEventsAlwaysRenderFailures(t *testing.T) {
 	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "bash", Args: map[string]any{"command": "false"}})
 	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "bash", Text: "exit 1", IsError: true})
 
-	if len(m.blocks) != 2 {
-		t.Fatalf("blocks = %d, want call and failure: %#v", len(m.blocks), m.blocks)
+	if len(m.blocks) != 1 {
+		t.Fatalf("blocks = %d, want only failure without a success receipt: %#v", len(m.blocks), m.blocks)
 	}
-	result, ok := m.blocks[1].(toolResultBlock)
+	result, ok := m.blocks[0].(toolResultBlock)
 	if !ok || !result.isError || result.text != "exit 1" {
-		t.Fatalf("failure result = %#v", m.blocks[1])
+		t.Fatalf("failure result = %#v", m.blocks[0])
 	}
 }
 

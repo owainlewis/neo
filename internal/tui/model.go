@@ -281,7 +281,11 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	ta.Focus()
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
-	vp.MouseWheelEnabled = false
+	vp.MouseWheelEnabled = true
+	// Content is word-wrapped to the viewport width, so there is nothing to
+	// scroll to horizontally. A horizontal trackpad swipe emits a wheel-right
+	// (or shift+wheel) event that would otherwise slide the whole transcript.
+	vp.SetHorizontalStep(0)
 
 	sp := spinner.New()
 	sp.Spinner = statusSpinner
@@ -669,9 +673,9 @@ func (m *model) View() tea.View {
 }
 
 // makeView wraps a rendered string with the v2 View settings we want for
-// every frame: alt screen, no mouse capture, and a request for keyboard
-// enhancements. Mouse reporting prevents terminals from using a normal drag
-// to select visible output, so transcript scrolling uses page-up/page-down.
+// every frame: alt screen, cell-motion mouse reporting, and a request for
+// keyboard enhancements. Mouse reporting enables wheel and trackpad scrolling;
+// common terminals keep text selection available with shift+drag.
 // ReportAlternateKeys asks terminals that speak the Kitty
 // keyboard protocol (Kitty, Ghostty, WezTerm, recent iTerm2) to disambiguate
 // shift+enter from a bare enter, which is what lets shift+enter insert a
@@ -680,6 +684,7 @@ func (m *model) View() tea.View {
 func makeView(content string) tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	v.KeyboardEnhancements.ReportAlternateKeys = true
 	return v
 }
@@ -1086,6 +1091,8 @@ func (m *model) refreshViewport() {
 	if m.width == 0 {
 		return
 	}
+	followOutput := m.viewport.AtBottom()
+	previousOffset := m.viewport.YOffset()
 	var sb strings.Builder
 	for i, b := range m.blocks {
 		if i > 0 {
@@ -1095,7 +1102,11 @@ func (m *model) refreshViewport() {
 		sb.WriteString("\n")
 	}
 	m.viewport.SetContent(sb.String())
-	m.viewport.GotoBottom()
+	if followOutput {
+		m.viewport.GotoBottom()
+	} else {
+		m.viewport.SetYOffset(previousOffset)
+	}
 }
 
 func (m *model) handleEvent(e agent.Event) {
@@ -1157,7 +1168,7 @@ func (m *model) handleEvent(e agent.Event) {
 			}
 			break
 		}
-		if !m.verbose && completedTool != nil {
+		if !m.verbose && !e.IsError && completedTool != nil {
 			m.appendBlock(*completedTool)
 		}
 		// In concise mode, routine successful agent results add no scannable
