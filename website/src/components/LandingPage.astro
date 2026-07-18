@@ -4,204 +4,148 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
 
 <div class="neo-home">
   <section class="neo-hero" aria-labelledby="neo-title">
-    <div class="neo-hero-glow" aria-hidden="true"></div>
-    <div class="neo-hero-copy">
-      <p class="neo-kicker"><span></span> Open source. Built for the terminal.</p>
-      <h1 id="neo-title">The coding agent you can <em>trust with the repo.</em></h1>
-      <p class="neo-hero-lede">
-        Neo turns engineering work into a visible workflow. It plans the work, delegates bounded
-        subagents, asks before risky changes, and shows you the evidence.
-      </p>
-      <div class="neo-actions">
-        <a class="neo-button neo-button-primary" href="/docs/install/">
-          Install Neo
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4-4 4 4-4 4"></path></svg>
-        </a>
-        <a class="neo-button neo-button-secondary" href="https://github.com/owainlewis/neo">
-          View source
-        </a>
+    <p class="neo-eyebrow">Open source coding agent</p>
+    <h1 id="neo-title">A coding agent you can trust with the repo.</h1>
+    <p class="neo-hero-lede">
+      Neo turns long engineering tasks into a visible workflow. It keeps the plan, tool activity,
+      agents, and results in view while it works.
+    </p>
+    <div class="neo-actions">
+      <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
+      <a class="neo-text-link" href="https://github.com/owainlewis/neo">View on GitHub <span aria-hidden="true">↗</span></a>
+    </div>
+    <div class="neo-install" role="group" aria-label="Install command">
+      <code>{installCommand}</code>
+      <button type="button" data-copy-install data-command={installCommand} aria-label="Copy install command">
+        <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="6" width="10" height="10" rx="2"></rect><path d="M13 6V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h1"></path></svg>
+        <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"></path></svg>
+      </button>
+      <span class="neo-copy-status" data-copy-status aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section class="neo-product" aria-labelledby="workflow-title">
+    <div class="neo-product-heading">
+      <div>
+        <p class="neo-label">A task in Neo</p>
+        <h2 id="workflow-title">The work stays legible.</h2>
       </div>
-      <div class="neo-install" role="group" aria-label="Install command">
-        <span aria-hidden="true">$</span>
-        <code>{installCommand}</code>
-        <button type="button" data-copy-install data-command={installCommand} aria-label="Copy install command">
-          <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="6" width="10" height="10" rx="2"></rect><path d="M13 6V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h1"></path></svg>
-          <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"></path></svg>
-        </button>
-      </div>
-      <ul class="neo-proof-list" aria-label="Product facts">
-        <li><span>01</span> Single Go binary</li>
-        <li><span>02</span> Multi-provider</li>
-        <li><span>03</span> Local sessions</li>
-        <li><span>04</span> No telemetry</li>
-      </ul>
+      <p>A live checklist makes a long-running task easy to follow, question, and review.</p>
     </div>
 
-    <div class="neo-workflow-shell" role="group" aria-label="Example Neo workflow">
-      <div class="neo-window-bar">
-        <div class="neo-window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-        <span>neo · payments-api</span>
-        <span class="neo-window-secure"><i></i> trusted</span>
+    <div class="neo-workflow" role="group" aria-label="Example Neo workflow">
+      <div class="neo-workflow-top">
+        <span>payments-api</span>
+        <span class="neo-mode"><i></i> ask mode</span>
       </div>
-      <div class="neo-terminal">
-        <div class="neo-prompt-line"><b>›</b> Harden webhook verification and prove it works</div>
-        <div class="neo-plan-header">
-          <div>
-            <span class="neo-terminal-label">WORKFLOW</span>
-            <strong>Webhook hardening</strong>
-          </div>
-          <span class="neo-plan-count">3 / 4</span>
+      <div class="neo-request">
+        <span aria-hidden="true">›</span>
+        <p>Harden webhook verification and prove it works</p>
+      </div>
+      <div class="neo-plan">
+        <div class="neo-plan-meta">
+          <span>Plan</span>
+          <span>3 of 4 complete</span>
         </div>
-        <ol class="neo-task-list">
+        <ol>
           <li class="done">
-            <span class="neo-task-status">✓</span>
-            <div><strong>Trace the request path</strong><small>Read 8 files · 12s</small></div>
+            <span class="neo-check">✓</span>
+            <div><strong>Trace the request path</strong><small>Read 8 files</small></div>
           </li>
           <li class="done">
-            <span class="neo-task-status">✓</span>
-            <div><strong>Implement signature validation</strong><small>Edited 3 files · 48s</small></div>
+            <span class="neo-check">✓</span>
+            <div><strong>Implement signature validation</strong><small>Edited 3 files</small></div>
           </li>
           <li class="active">
-            <span class="neo-task-status"><i></i></span>
+            <span class="neo-check"><i></i></span>
             <div>
               <strong>Test failure modes</strong><small>Running go test ./internal/webhook/...</small>
-              <div class="neo-agent-row">
-                <span>└─</span><b>agent / review</b><span>checking replay protection</span><em>7s</em>
-              </div>
+              <div class="neo-agent"><span>review agent</span><span>checking replay protection</span></div>
             </div>
           </li>
           <li>
-            <span class="neo-task-status">○</span>
+            <span class="neo-check"></span>
             <div><strong>Review the final diff</strong><small>Waiting on tests</small></div>
           </li>
         </ol>
-        <div class="neo-command-result">
-          <span class="neo-result-mark">✓</span>
-          <code>ok github.com/acme/payments/internal/webhook</code>
-          <span>0.84s</span>
-        </div>
-        <div class="neo-terminal-footer">
-          <span><i></i> working</span>
-          <span>3 agents · 2m 14s</span>
-          <span>claude-opus-4-8</span>
-        </div>
       </div>
+      <div class="neo-proof"><span>✓</span><code>ok github.com/acme/payments/internal/webhook</code><small>0.84s</small></div>
     </div>
   </section>
 
-  <section class="neo-statement" aria-labelledby="statement-title">
-    <p class="neo-section-number">01 / THE DIFFERENCE</p>
-    <h2 id="statement-title">Most agents show you an answer.<br />Neo shows you <em>the work.</em></h2>
+  <section class="neo-intro" aria-labelledby="difference-title">
+    <p class="neo-label">Why Neo</p>
+    <h2 id="difference-title">Serious engineering is a sequence of decisions, not a magic prompt.</h2>
     <p>
-      Serious engineering is not a magic prompt. It is a sequence of decisions, changes, checks,
-      and review. Neo makes that sequence visible while it happens.
+      Most agents collapse that sequence into a stream of text. Neo gives it structure. Plans stay
+      visible, risky changes require the permission mode you choose, and results come back with evidence.
     </p>
   </section>
 
-  <section class="neo-pillars" aria-label="Neo principles">
+  <section class="neo-principles" aria-label="Neo principles">
     <article>
-      <div class="neo-pillar-top"><span>01</span><i class="signal-icon" aria-hidden="true"></i></div>
-      <h3>Workflow-native</h3>
-      <p>A live checklist keeps long tasks legible. Every step has a state, activity, and result.</p>
-      <div class="neo-mini-plan" aria-hidden="true">
-        <span class="complete">✓ Inspect</span><span class="running">● Implement</span><span>○ Verify</span>
-      </div>
+      <span>01</span>
+      <h3>Visible by default</h3>
+      <p>The checklist, tool activity, subagents, and results stay in view while Neo works.</p>
     </article>
     <article>
-      <div class="neo-pillar-top"><span>02</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8 7 10 4.2-2 7-5.4 7-10V6l-7-3Z"></path><path d="m9 12 2 2 4-5"></path></svg></div>
-      <h3>Trust is a feature</h3>
-      <p>Choose ask, trusted, or read-only mode. Ask mode previews file changes; built-in file tools stay inside the workspace.</p>
-      <div class="neo-permission" aria-hidden="true"><span>write_file</span><b>Preview change?</b><i>y / n</i></div>
+      <span>02</span>
+      <h3>Control stays yours</h3>
+      <p>Choose ask, trusted, or read-only mode. Ask mode previews file changes before they happen.</p>
     </article>
     <article>
-      <div class="neo-pillar-top"><span>03</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z"></path><path d="M3 12h4m10 0h4M12 3v4m0 10v4"></path></svg></div>
-      <h3>Model-independent</h3>
-      <p>Use Anthropic, OpenAI, OpenRouter, or Gemini. Your workflow should outlive any one model.</p>
-      <div class="neo-models" aria-hidden="true"><span>Anthropic</span><span>OpenAI</span><span>Gemini</span><span>OpenRouter</span></div>
+      <span>03</span>
+      <h3>Bring your model</h3>
+      <p>Use Anthropic, OpenAI, OpenRouter, or Gemini without changing the way you work.</p>
     </article>
   </section>
 
   <section class="neo-orchestration" aria-labelledby="orchestration-title">
     <div class="neo-orchestration-copy">
-      <p class="neo-section-number">02 / ORCHESTRATION</p>
-      <h2 id="orchestration-title">One clear plan.<br /><em>Focused agents.</em></h2>
+      <p class="neo-label">Orchestration</p>
+      <h2 id="orchestration-title">One plan. Focused agents.</h2>
       <p>
-        Neo can delegate bounded pieces of work to fresh subagents, watch their activity live,
-        and bring their results back into the main workflow. The coordinator stays accountable
-        for the outcome.
+        Neo can give bounded pieces of work to fresh subagents, follow their progress, and bring
+        their findings back to the main task. The coordinator remains responsible for the result.
       </p>
-      <ul>
-        <li><span>✓</span> Separate context for every worker</li>
-        <li><span>✓</span> Bounded depth, fan-out, and runtime</li>
-        <li><span>✓</span> Live tree of agent activity</li>
-        <li><span>✓</span> Results return to the coordinator</li>
-      </ul>
+      <a class="neo-text-link" href="/docs/reference/guides/agent-loop/">How the agent loop works <span aria-hidden="true">→</span></a>
     </div>
-    <div class="neo-orbit" role="img" aria-label="Neo coordinator delegating to three subagents">
-      <div class="neo-orbit-grid" aria-hidden="true"></div>
-      <div class="neo-connector connector-a" aria-hidden="true"></div>
-      <div class="neo-connector connector-b" aria-hidden="true"></div>
-      <div class="neo-connector connector-c" aria-hidden="true"></div>
-      <div class="neo-coordinator"><span>NEO</span><b>coordinator</b><i></i></div>
-      <div class="neo-worker worker-a"><span>01</span><b>research</b><small>done · 14s</small></div>
-      <div class="neo-worker worker-b"><span>02</span><b>implement</b><small>working · 38s</small></div>
-      <div class="neo-worker worker-c"><span>03</span><b>review</b><small>queued</small></div>
-    </div>
-  </section>
-
-  <section class="neo-comparison" aria-labelledby="comparison-title">
-    <div class="neo-comparison-heading">
-      <p class="neo-section-number">03 / BUILT FOR ENGINEERS</p>
-      <h2 id="comparison-title">Less theatre.<br /><em>More evidence.</em></h2>
-    </div>
-    <div class="neo-comparison-grid">
-      <div class="neo-not-this">
-        <span class="neo-comparison-label">The black box</span>
-        <ul>
-          <li><span>×</span> Hidden execution state</li>
-          <li><span>×</span> One model, one vendor</li>
-          <li><span>×</span> Unclear permission boundaries</li>
-          <li><span>×</span> “Done” without proof</li>
-        </ul>
-      </div>
-      <div class="neo-this">
-        <span class="neo-comparison-label">The Neo harness</span>
-        <ul>
-          <li><span>✓</span> Live workflow and tool activity</li>
-          <li><span>✓</span> Multiple providers, one workflow</li>
-          <li><span>✓</span> Explicit permissions and previews</li>
-          <li><span>✓</span> Tests, diffs, and visible results</li>
-        </ul>
-      </div>
+    <div class="neo-agents" aria-label="Example delegated work">
+      <div class="neo-coordinator-row"><span>Neo</span><strong>Harden webhook verification</strong><small>coordinator</small></div>
+      <div class="neo-agent-row"><span>01</span><strong>Trace request path</strong><small class="complete">complete</small></div>
+      <div class="neo-agent-row"><span>02</span><strong>Implement validation</strong><small class="working">working</small></div>
+      <div class="neo-agent-row"><span>03</span><strong>Review failure modes</strong><small>queued</small></div>
+      <p>Bounded depth, fan-out, runtime, and agent count.</p>
     </div>
   </section>
 
   <section class="neo-foundation" aria-labelledby="foundation-title">
-    <p class="neo-section-number">04 / THE FOUNDATION</p>
-    <h2 id="foundation-title">Small core.<br /><em>Serious capability.</em></h2>
-    <div class="neo-foundation-grid">
-      <div><strong>01</strong><h3>One binary</h3><p>No runtime to assemble. Install it and work.</p></div>
-      <div><strong>02</strong><h3>Local-first</h3><p>Sessions stay local. Project context goes to the model provider you choose.</p></div>
-      <div><strong>03</strong><h3>Open source</h3><p>Inspect the harness you are trusting with your code.</p></div>
-      <div><strong>04</strong><h3>Policy-free core</h3><p>A small agent loop with capabilities layered around it.</p></div>
+    <div>
+      <p class="neo-label">The foundation</p>
+      <h2 id="foundation-title">Small core.<br />Serious capability.</h2>
     </div>
+    <dl>
+      <div><dt>One binary</dt><dd>No runtime to assemble. Install it and work.</dd></div>
+      <div><dt>Local sessions</dt><dd>Session files are stored locally. Context goes to your chosen model provider.</dd></div>
+      <div><dt>Open source</dt><dd>Inspect the harness you trust with your code.</dd></div>
+      <div><dt>No telemetry</dt><dd>Neo does not phone home with product analytics.</dd></div>
+    </dl>
   </section>
 
-  <section class="neo-final-cta" aria-labelledby="cta-title">
-    <div class="neo-cta-grid" aria-hidden="true"></div>
-    <p class="neo-kicker"><span></span> Your repo. Your models. Your workflow.</p>
-    <h2 id="cta-title">Put the work<br /><em>in the open.</em></h2>
-    <p>Install Neo and give your next coding task a workflow you can actually follow.</p>
+  <section class="neo-final" aria-labelledby="final-title">
+    <p class="neo-label">Neo Harness</p>
+    <h2 id="final-title">Put the work in the open.</h2>
+    <p>Start with one binary and the model provider you already use.</p>
     <div class="neo-actions">
       <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
-      <a class="neo-button neo-button-secondary" href="/docs/quick-start/">Read the docs</a>
+      <a class="neo-text-link" href="/docs/quick-start/">Read the quick start <span aria-hidden="true">→</span></a>
     </div>
-    <code class="neo-final-command">$ {installCommand}</code>
   </section>
 </div>
 
 <script>
   const button = document.querySelector('[data-copy-install]');
+  const copyStatus = document.querySelector('[data-copy-status]');
 
   const copyText = async (text: string) => {
     try {
@@ -226,12 +170,15 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
     if (await copyText(command)) {
       button.classList.add('copied');
       button.setAttribute('aria-label', 'Install command copied');
+      if (copyStatus) copyStatus.textContent = 'Install command copied.';
       window.setTimeout(() => {
         button.classList.remove('copied');
         button.setAttribute('aria-label', 'Copy install command');
+        if (copyStatus) copyStatus.textContent = '';
       }, 1800);
     } else {
       button.setAttribute('aria-label', 'Copy failed. Select the command manually.');
+      if (copyStatus) copyStatus.textContent = 'Copy failed. Select the command manually.';
     }
   });
 </script>
