@@ -155,6 +155,20 @@ func TestExpand_InjectsBodyAndReportsUse(t *testing.T) {
 	}
 }
 
+func TestExpand_PreservesWorkflowInstructions(t *testing.T) {
+	const body = "Follow this workflow:\n1. Inspect the issue\n2. Make the change\n3. Review the diff"
+	sk := []Skill{{Name: "implement", Body: body}}
+
+	got, used := Expand("use $implement for issue 183", sk)
+
+	if len(used) != 1 || used[0] != "implement" {
+		t.Fatalf("expected used=[implement], got %v", used)
+	}
+	if !strings.Contains(got, body) {
+		t.Fatalf("skill workflow was not preserved:\n%s", got)
+	}
+}
+
 func TestExpand_EachSkillOnceInOrder(t *testing.T) {
 	sk := []Skill{{Name: "a", Body: "AA"}, {Name: "b", Body: "BB"}}
 	got, used := Expand("$b then $a then $b again", sk)

@@ -106,3 +106,43 @@ func TestWorkflowPanel_ClearsCompletedWorkflowBeforeNextTurn(t *testing.T) {
 		t.Fatal("cleared workflow should not remain visible")
 	}
 }
+
+func TestUserWorkflowWaitsForWorkflowTool(t *testing.T) {
+	m := makeTestModel()
+	input := "Follow this workflow:\n1. Inspect the issue\n2. Implement the change"
+
+	m.submitUserTurn(input, input, nil)
+
+	if m.workflow != nil {
+		t.Fatalf("user text should not bypass the workflow tool, got %+v", m.workflow)
+	}
+}
+
+func TestWorkflowToolPreservesStepsAndAttachesActivity(t *testing.T) {
+	m := makeTestModel()
+	m.handleWorkflowEvent(workflow.Event{
+		Action: "create",
+		State: workflow.State{
+			Title: "Code change",
+			Items: []workflow.Item{
+				{ID: "1", Text: "Inspect the issue", Status: workflow.Pending},
+				{ID: "2", Text: "Implement the change", Status: workflow.Pending},
+			},
+		},
+	})
+	m.handleWorkflowEvent(workflow.Event{Action: "start", ID: "1"})
+	m.noteWorkflowActivity("read_file AGENTS.md")
+
+	if m.workflow == nil || len(m.workflow.items) != 2 {
+		t.Fatalf("workflow = %+v, want two items", m.workflow)
+	}
+	if got := m.workflow.items[0].Text; got != "Inspect the issue" {
+		t.Fatalf("first step = %q, want preserved text", got)
+	}
+	if got := m.workflow.items[1].Text; got != "Implement the change" {
+		t.Fatalf("second step = %q, want preserved text", got)
+	}
+	if got := m.workflow.items[0].Detail; got != "read_file AGENTS.md" {
+		t.Fatalf("active step detail = %q, want attached activity", got)
+	}
+}
