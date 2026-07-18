@@ -35,8 +35,10 @@ type Options struct {
 	PermissionMode  string
 	SessionStore    *session.Store
 	CurrentSession  *session.Session
-	OnSessionResume func(*session.Session)
+	OnSessionResume func(*session.Session) error
 	ModelChoices    []ModelChoice
+	Provider        string
+	ModelSwitcher   func(ModelChoice) error
 	ProjectRoot     string
 	MemoryEnabled   bool
 	StepEvents      <-chan factory.Event
@@ -54,7 +56,7 @@ func WithPermissionMode(mode string) Option {
 	return func(opts *Options) { opts.PermissionMode = mode }
 }
 
-func WithSessions(store *session.Store, current *session.Session, onResume func(*session.Session)) Option {
+func WithSessions(store *session.Store, current *session.Session, onResume func(*session.Session) error) Option {
 	return func(opts *Options) {
 		opts.SessionStore = store
 		opts.CurrentSession = current
@@ -64,6 +66,17 @@ func WithSessions(store *session.Store, current *session.Session, onResume func(
 
 func WithModelChoices(choices []ModelChoice) Option {
 	return func(opts *Options) { opts.ModelChoices = choices }
+}
+
+// WithModelSwitcher enables provider-aware model selection. The callback must
+// finish the backend switch before returning; the TUI updates its labels only
+// after it succeeds.
+func WithModelSwitcher(provider string, choices []ModelChoice, fn func(ModelChoice) error) Option {
+	return func(opts *Options) {
+		opts.Provider = provider
+		opts.ModelChoices = choices
+		opts.ModelSwitcher = fn
+	}
 }
 
 func WithProjectMemory(root string, enabled bool) Option {
@@ -174,9 +187,10 @@ type queuedTurn struct {
 }
 
 type model struct {
-	ctx      context.Context
-	ag       *agent.Agent
-	modelTag string
+	ctx         context.Context
+	ag          *agent.Agent
+	modelTag    string
+	providerTag string
 
 	cwd    string
 	branch string
@@ -235,8 +249,9 @@ type model struct {
 	sessionStore      *session.Store
 	currentSessionID  string
 	currentSessionCWD string
-	onSessionResume   func(*session.Session)
+	onSessionResume   func(*session.Session) error
 	modelChoices      []ModelChoice
+	modelSwitcher     func(ModelChoice) error
 	projectRoot       string
 	memoryEnabled     bool
 	verbose           bool
@@ -319,10 +334,12 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		}
 	}
 
+	providerTag := strings.TrimSpace(opts.Provider)
 	m := &model{
 		ctx:               ctx,
 		ag:                ag,
 		modelTag:          modelTag,
+		providerTag:       providerTag,
 		mdStyleName:       styleName,
 		cwd:               cwd,
 		branch:            branch,
@@ -338,7 +355,8 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		currentSessionID:  currentSessionID,
 		currentSessionCWD: currentSessionCWD,
 		onSessionResume:   opts.OnSessionResume,
-		modelChoices:      normalizeModelChoices(modelTag, opts.ModelChoices),
+		modelChoices:      normalizeModelChoices(providerTag, modelTag, opts.ModelChoices),
+		modelSwitcher:     opts.ModelSwitcher,
 		projectRoot:       opts.ProjectRoot,
 		memoryEnabled:     opts.MemoryEnabled,
 		verbose:           opts.Verbose,
@@ -347,7 +365,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
 		version: version,
-		model:   modelTag,
+		model:   backendLabel(providerTag, modelTag),
 		cwd:     cwd,
 		branch:  branch,
 		tagline: randomTagline(),
@@ -1057,7 +1075,7 @@ func formatElapsed(d time.Duration) string {
 
 func (m *model) footerLine() string {
 	left := fmt.Sprintf("%s (%s)", m.cwd, m.branch)
-	right := m.modelTag
+	right := backendLabel(m.providerTag, m.modelTag)
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1

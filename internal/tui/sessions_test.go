@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -39,6 +40,28 @@ func TestSlashCommand_SessionsOpensSearchableBrowser(t *testing.T) {
 	}
 }
 
+func TestSessionBrowser_BackendResumeFailureLeavesCurrentSessionIntact(t *testing.T) {
+	cwd := t.TempDir()
+	store := session.NewStore(t.TempDir())
+	saveTestSession(t, store, session.Metadata{ID: "sess_other", CWD: cwd, Source: "tui", Provider: "openai", Model: "gpt-5.2"}, "other")
+
+	m := makeTestModel()
+	m.sessionStore = store
+	m.currentSessionCWD = cwd
+	m.currentSessionID = "sess_current"
+	m.onSessionResume = func(*session.Session) error { return errors.New("credential expired") }
+
+	m.handleSlashCommand("/sessions")
+	m.handleSessionBrowserKey(keyPress(tea.KeyEnter))
+
+	if !m.sessions.visible || m.sessions.err == nil {
+		t.Fatal("failed backend restore should keep the browser open with an error")
+	}
+	if m.currentSessionID != "sess_current" || len(m.ag.Transcript()) != 0 {
+		t.Fatalf("failed resume changed current session: id=%q transcript=%#v", m.currentSessionID, m.ag.Transcript())
+	}
+}
+
 func TestSessionBrowser_EnterResumesSelectedSession(t *testing.T) {
 	cwd := t.TempDir()
 	store := session.NewStore(t.TempDir())
@@ -52,7 +75,7 @@ func TestSessionBrowser_EnterResumesSelectedSession(t *testing.T) {
 	m.sessionStore = store
 	m.currentSessionCWD = cwd
 	var resumed *session.Session
-	m.onSessionResume = func(s *session.Session) { resumed = s }
+	m.onSessionResume = func(s *session.Session) error { resumed = s; return nil }
 
 	m.handleSlashCommand("/sessions")
 	m.handleSessionBrowserKey(keyPress(tea.KeyEnter))

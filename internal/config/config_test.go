@@ -214,7 +214,7 @@ func TestLoad_RejectsInvalidOpenAIAuthMode(t *testing.T) {
 	})
 }
 
-func TestLoad_ValidOpenAIAuthIgnoredForAnthropicProvider(t *testing.T) {
+func TestLoad_OpenAIAuthDoesNotChangeAnthropicStartupDefault(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
 		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: anthropic\nopenai_auth: subscription\n")
@@ -226,7 +226,7 @@ func TestLoad_ValidOpenAIAuthIgnoredForAnthropicProvider(t *testing.T) {
 			t.Fatalf("provider: got %q want anthropic", cfg.Provider)
 		}
 		if cfg.SubscriptionAuth() {
-			t.Fatal("openai_auth must be ignored for non-openai providers")
+			t.Fatal("anthropic startup must not use OpenAI subscription auth")
 		}
 		if cfg.Model != defaultModel {
 			t.Fatalf("model: got %q want %q", cfg.Model, defaultModel)

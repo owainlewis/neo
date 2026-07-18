@@ -185,7 +185,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 ## Chat Startup Flow
 
 1. ` + "`cmd/neo`" + ` loads config.
-2. ` + "`mustProvider`" + ` selects Anthropic, OpenAI, OpenRouter, or Google Gemini. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
+2. Provider construction selects Anthropic, OpenAI, OpenRouter, or Google Gemini. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
 3. The CLI creates or loads a session from ` + "`internal/session`" + `.
 4. Skills, AGENTS.md, project memory, and lightweight git context are discovered when enabled.
 5. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
@@ -270,6 +270,8 @@ First hit wins. Config files are not merged.
 
 Subscription credentials are created with ` + "`neo login`" + ` and removed with ` + "`neo logout`" + `. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 
+The top-level ` + "`provider`" + ` and ` + "`model`" + ` remain the startup defaults. In the TUI, ` + "`/model`" + ` also lists models for other supported providers whose local credential source is present. Selecting one switches provider, model, and compactor for the current session without rewriting configuration. OpenAI uses the configured ` + "`openai_auth`" + ` mode wherever it appears in the picker.
+
 ## Feature Flags
 
 Each feature flag is tri-state in Go: absent means use the built-in default, while explicit ` + "`false`" + ` disables that capability.
@@ -323,6 +325,8 @@ Session files are written atomically with a sibling temp file and rename.
 - ` + "`neo resume <id>`" + ` resumes a session from the shell and restores its saved cwd before tools are created.
 - ` + "`/sessions`" + ` opens an in-TUI session browser with search and cwd/all filtering. The in-TUI browser only resumes sessions from the current cwd, because tools and permissions are already bound to that workspace.
 
+Resume restores the session's saved provider and model when that provider's credential is still available. Otherwise Neo warns and continues with the configured default backend. Provider adapters ignore opaque history blocks they cannot safely replay, so the transcript remains usable after a backend switch.
+
 ## Metadata
 
 | Field | Meaning |
@@ -333,6 +337,7 @@ Session files are written atomically with a sibling temp file and rename.
 | ` + "`external`" + ` | Optional external transport key. |
 | ` + "`cwd`" + ` | Working directory captured for resume. |
 | ` + "`model`" + ` | Model used by the session. |
+| ` + "`provider`" + ` | Provider used by the session. |
 | ` + "`created_at`" + ` | UTC creation timestamp. |
 | ` + "`updated_at`" + ` | UTC update timestamp. |
 

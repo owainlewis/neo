@@ -20,6 +20,8 @@ Session files are written atomically with a sibling temp file and rename.
 - `neo resume <id>` resumes a session from the shell and restores its saved cwd before tools are created.
 - `/sessions` opens an in-TUI session browser with search and cwd/all filtering. The in-TUI browser only resumes sessions from the current cwd, because tools and permissions are already bound to that workspace.
 
+Resume restores the session's saved provider and model when that provider's credential is still available. Otherwise Neo warns and continues with the configured default backend. Provider adapters ignore opaque history blocks they cannot safely replay, so the transcript remains usable after a backend switch.
+
 ## Metadata
 
 | Field | Meaning |
@@ -30,6 +32,7 @@ Session files are written atomically with a sibling temp file and rename.
 | `external` | Optional external transport key. |
 | `cwd` | Working directory captured for resume. |
 | `model` | Model used by the session. |
+| `provider` | Provider used by the session. |
 | `created_at` | UTC creation timestamp. |
 | `updated_at` | UTC update timestamp. |
 

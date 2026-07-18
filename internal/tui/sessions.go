@@ -119,16 +119,20 @@ func (m *model) resumeSelectedSession() {
 		m.sessions.err = err
 		return
 	}
+	if m.onSessionResume != nil {
+		if err := m.onSessionResume(sess); err != nil {
+			m.sessions.err = err
+			return
+		}
+	}
 	m.ag.ReplaceTranscript(sess.Messages)
 	m.ag.SetUsage(sess.Usage)
+	m.providerTag, m.modelTag = m.ag.Backend()
+	m.modelChoices = normalizeModelChoices(m.providerTag, m.modelTag, m.modelChoices)
 	m.currentSessionID = sess.Metadata.ID
 	if sess.Metadata.CWD != "" {
 		m.currentSessionCWD = sess.Metadata.CWD
 	}
-	if m.onSessionResume != nil {
-		m.onSessionResume(sess)
-	}
-
 	var next []block
 	if len(m.blocks) > 0 {
 		if splash, ok := m.blocks[0].(splashBlock); ok {

@@ -17,10 +17,10 @@ import (
 // chat agent is caller node 0, so every subagent it spawns becomes a root of
 // the supervisor's tree. Events tee to .neo/events.jsonl and to the returned
 // channel for the TUI's live subagent tree.
-func chatAgentTool(prov llm.Provider, cfg *config.Config, cwd, root string) (factory.AgentTool, <-chan factory.Event) {
+func chatAgentTool(prov llm.Provider, model string, cfg *config.Config, cwd, root string) (factory.AgentTool, <-chan factory.Event, *factory.AgentRunner) {
 	runner := &factory.AgentRunner{
 		Provider:     prov,
-		DefaultModel: cfg.Model,
+		DefaultModel: model,
 		Root:         root,
 		BashTimeout:  5 * time.Minute,
 		// A readonly session must not gain write access by delegating;
@@ -32,7 +32,7 @@ func chatAgentTool(prov llm.Provider, cfg *config.Config, cwd, root string) (fac
 	runner.Sup = sup
 	ui := make(chan factory.Event, 256)
 	go teeEvents(sup.Events, filepath.Join(root, ".neo", "events.jsonl"), ui)
-	return factory.AgentTool{Sup: sup, CallerNode: 0, Dir: cwd}, ui
+	return factory.AgentTool{Sup: sup, CallerNode: 0, Dir: cwd}, ui, runner
 }
 
 // teeEvents drains an event stream to a jsonl file and, when forward is

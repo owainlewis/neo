@@ -42,7 +42,8 @@ type Config struct {
 	Provider string `yaml:"provider"`
 	// OpenAIAuth selects how the "openai" provider authenticates: "api_key"
 	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex
-	// device-code credentials via `neo login`). Ignored for other providers.
+	// device-code credentials via `neo login`). This also applies when OpenAI
+	// is selected through /model while another provider is the startup default.
 	OpenAIAuth  string      `yaml:"openai_auth"`
 	Model       string      `yaml:"model"`
 	Features    Features    `yaml:"features"`

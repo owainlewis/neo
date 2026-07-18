@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/owainlewis/neo/internal/compact"
@@ -22,6 +23,66 @@ func newTestAgent(t *testing.T, prov llm.Provider, ts ...tools.Tool) *Agent {
 		Provider: prov,
 		Tools:    tools.NewRegistry(ts...),
 	})
+}
+
+func TestAgent_SetBackendPublishesAtomicProviderModelPair(t *testing.T) {
+	ag := New(Config{Provider: namedProvider("a"), Model: "a-model"})
+	const iterations = 2_000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if err := ag.SetBackend(namedProvider("a"), "a-model", compact.NoCompaction{}); err != nil {
+				t.Errorf("SetBackend a: %v", err)
+				return
+			}
+			if err := ag.SetBackend(namedProvider("b"), "b-model", compact.NoCompaction{}); err != nil {
+				t.Errorf("SetBackend b: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations*2; i++ {
+			provider, model := ag.Backend()
+			if model != provider+"-model" {
+				t.Errorf("observed mixed backend %s/%s", provider, model)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+}
+
+func TestAgent_SetBackendUsesNewProviderModelAndCompactor(t *testing.T) {
+	oldProvider := &llmtest.FakeProvider{}
+	newProvider := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("switched")}}
+	compactor := &countingCompactor{}
+	ag := New(Config{Provider: oldProvider, Model: "old-model"})
+	if err := ag.SetBackend(newProvider, "new-model", compactor); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := ag.Send(context.Background(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "switched" || len(oldProvider.Calls) != 0 || len(newProvider.Calls) != 1 {
+		t.Fatalf("switch result=%q old calls=%d new calls=%d", out, len(oldProvider.Calls), len(newProvider.Calls))
+	}
+	if newProvider.Calls[0].Model != "new-model" || compactor.calls != 1 {
+		t.Fatalf("request model=%q compactor calls=%d", newProvider.Calls[0].Model, compactor.calls)
+	}
+}
+
+type namedProvider string
+
+func (p namedProvider) Name() string { return string(p) }
+
+func (p namedProvider) Complete(context.Context, llm.Request) (*llm.Response, error) {
+	return nil, fmt.Errorf("not used")
 }
 
 func TestAgent_DefaultMaxTurnsIsHighSafetyFuse(t *testing.T) {

@@ -24,7 +24,7 @@ First hit wins. Config files are not merged.
 # google     → uses Gemini via GOOGLE_API_KEY
 provider: anthropic
 
-# How the "openai" provider authenticates (ignored for other providers):
+# How OpenAI authenticates, including when selected through /model:
 #   api_key      → uses OPENAI_API_KEY (default)
 #   subscription → uses a ChatGPT/Codex subscription via device-code auth; run `neo login`
 # openai_auth: api_key
@@ -124,6 +124,8 @@ output:
 | `provider: google` | `GOOGLE_API_KEY` | `internal/llm/google` |
 
 Subscription credentials are created with `neo login` and removed with `neo logout`. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
+
+The top-level `provider` and `model` remain the startup defaults. In the TUI, `/model` also lists models for other supported providers whose local credential source is present. Selecting one switches provider, model, and compactor for the current session without rewriting configuration. OpenAI uses the configured `openai_auth` mode wherever it appears in the picker.
 
 ## Feature Flags
 
