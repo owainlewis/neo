@@ -248,6 +248,67 @@ func TestLoad_ExplicitModelOverridesProviderDefault(t *testing.T) {
 	})
 }
 
+func TestLoad_SubagentsBackendDefaultsToCoordinator(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: openai\nmodel: gpt-main\nsubagents:\n  model: gpt-worker\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if !cfg.SubagentsConfigured() {
+			t.Fatal("subagents backend should be configured")
+		}
+		if cfg.Subagents.Provider != "openai" || cfg.Subagents.Model != "gpt-worker" {
+			t.Fatalf("subagents backend = %#v", cfg.Subagents)
+		}
+	})
+}
+
+func TestLoad_SubagentsProviderGetsProviderDefaultModel(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "subagents:\n  provider: google\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Subagents.Provider != "google" || cfg.Subagents.Model != defaultGoogleModel {
+			t.Fatalf("subagents backend = %#v", cfg.Subagents)
+		}
+	})
+}
+
+func TestLoad_SubagentsBackendAbsentFollowsCoordinator(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: main-model\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.SubagentsConfigured() {
+			t.Fatalf("subagents backend unexpectedly configured: %#v", cfg.Subagents)
+		}
+	})
+}
+
+func TestLoad_RejectsUnknownSubagentsProvider(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "subagents:\n  provider: mystery\n  model: worker\n")
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected unknown subagents provider to fail")
+		}
+		for _, want := range []string{"neo.yaml", "subagents.provider", "mystery"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error %q does not contain %q", err.Error(), want)
+			}
+		}
+	})
+}
+
 func TestLoad_CompactionContextWindowOverride(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)

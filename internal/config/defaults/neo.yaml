@@ -16,6 +16,12 @@ provider: anthropic
 
 model: claude-opus-4-8
 
+# Optional backend for chat-spawned subagents. When omitted, subagents follow
+# the coordinator's active provider and model, including changes from /model.
+# subagents:
+#   provider: anthropic
+#   model: <claude-model-id>
+
 # Tool permission mode:
 #   trusted  → allow built-in tools, ask before high-risk bash commands (default)
 #   ask      → allow read/search, ask before bash and file mutations

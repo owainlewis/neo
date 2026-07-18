@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
@@ -50,8 +49,8 @@ type Supervisor struct {
 
 	mu     sync.Mutex
 	nodes  map[int]*Node
-	nextID atomic.Int64
-	agents atomic.Int64 // agent steps spawned, tree-wide
+	nextID int
+	agents int // agent steps admitted, tree-wide
 }
 
 func NewSupervisor(agent StepAgent, b Budget, resolver Resolver) *Supervisor {
@@ -92,11 +91,10 @@ func (s *Supervisor) RunStep(ctx context.Context, caller int, dir, name, input s
 	if err != nil {
 		return fail(err.Error(), "missing")
 	}
-	if err := s.admit(caller, step.Kind); err != nil {
+	id, err := s.admitAndRegister(caller, name, step.Kind, input)
+	if err != nil {
 		return fail(err.Error(), step.Kind)
 	}
-
-	id := s.register(caller, name, step.Kind, input)
 	s.attribute(id, AgentEvent{Kind: "start"})
 	var out string
 	var ok bool
@@ -128,10 +126,10 @@ func (s *Supervisor) RunAgentPrompt(ctx context.Context, caller int, dir, prompt
 		Prompt: dynamicAgentSystemPrompt,
 		Tools:  dynamicAgentTools,
 	}
-	if err := s.admit(caller, step.Kind); err != nil {
+	id, err := s.admitAndRegister(caller, step.Name, step.Kind, prompt)
+	if err != nil {
 		return fail(err.Error())
 	}
-	id := s.register(caller, step.Name, step.Kind, prompt)
 	s.attribute(id, AgentEvent{Kind: "start"})
 	out, ok := s.runAgent(ctx, id, step, dir, prompt)
 	s.finish(id, out, ok)
@@ -148,49 +146,44 @@ You have no memory of the parent conversation except the prompt you receive. Fol
 // unless a future explicit role opts into that power.
 var dynamicAgentTools = []string{"bash", "read_file", "write_file", "edit_file", "grep", "glob"}
 
-// admit is the cage: depth and fanout for every step; agent-count only for
-// agent steps (scripts are cheap; their cost is wall time, capped by
-// ScriptTimeout).
-func (s *Supervisor) admit(caller int, kind string) error {
+// admitAndRegister is the cage: it checks and reserves depth, fanout, and the
+// tree-wide agent count as one operation, so parallel delegation cannot pass a
+// limit before another worker is registered.
+func (s *Supervisor) admitAndRegister(parent int, step, kind, input string) (int, error) {
 	s.mu.Lock()
-	p := s.nodes[caller]
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+
+	p := s.nodes[parent]
 	depth, kids := 0, 0
 	if p != nil {
-		depth = p.Depth + 1
 		p.mu.Lock()
+		defer p.mu.Unlock()
+		depth = p.Depth + 1
 		kids = len(p.children)
-		p.mu.Unlock()
 	}
 	switch {
 	case depth > s.budget.MaxDepth:
-		return ErrDepth
+		return 0, ErrDepth
 	case kids >= s.budget.MaxChildren:
-		return ErrChildren
-	case kind == "agent" && int(s.agents.Load()) >= s.budget.MaxAgents:
-		return ErrAgents
+		return 0, ErrChildren
+	case kind == "agent" && s.agents >= s.budget.MaxAgents:
+		return 0, ErrAgents
 	}
-	return nil
-}
 
-func (s *Supervisor) register(parent int, step, kind, input string) int {
-	id := int(s.nextID.Add(1))
-	depth := 0
-	s.mu.Lock()
-	if p := s.nodes[parent]; p != nil {
-		depth = p.Depth + 1
-		p.mu.Lock()
+	s.nextID++
+	id := s.nextID
+	if p != nil {
 		p.children = append(p.children, id)
-		p.mu.Unlock()
 	}
 	s.nodes[id] = &Node{ID: id, Parent: parent, Step: step, Kind: kind,
 		Task: clip(input, 60), Depth: depth, Started: time.Now()}
-	s.mu.Unlock()
-	return id
+	if kind == "agent" {
+		s.agents++
+	}
+	return id, nil
 }
 
 func (s *Supervisor) runAgent(ctx context.Context, id int, step Step, dir, input string) (string, bool) {
-	s.agents.Add(1)
 	cctx, cancel := context.WithTimeout(ctx, s.budget.MaxWall)
 	defer cancel()
 
@@ -211,6 +204,9 @@ func (s *Supervisor) runAgent(ctx context.Context, id int, step Step, dir, input
 			return out + "\n[agent step hit its wall-clock limit]", false
 		}
 		return "agent step error: " + err.Error() + "\n" + out, false
+	}
+	if strings.TrimSpace(out) == "" {
+		return "agent step error: subagent returned an empty result", false
 	}
 	return out, true
 }

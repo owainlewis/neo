@@ -387,13 +387,16 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	var extra []tools.Tool
 	var stepEvents <-chan factory.Event
 	var agentRunner *factory.AgentRunner
+	var agentRunnerFollowsCoordinator bool
 	var workflowEvents <-chan workflow.Event
 	wf := make(chan workflow.Event, 128)
 	workflowEvents = wf
 	extra = append(extra, workflow.Tool{Events: wf})
 	if cwd != "" {
 		var at factory.AgentTool
-		at, stepEvents, agentRunner = chatAgentTool(prov, model, cfg, cwd, root)
+		workerProvider, workerModel, followsCoordinator := subagentBackend(ctx, cfg, prov, model)
+		agentRunnerFollowsCoordinator = followsCoordinator
+		at, stepEvents, agentRunner = chatAgentTool(workerProvider, workerModel, cfg, cwd, root)
 		extra = append(extra, at)
 	}
 	reg := newRegistry(cwd, root, extra...)
@@ -444,7 +447,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		if err != nil {
 			return fmt.Errorf("switch to %s: %w", choice.Provider, err)
 		}
-		if agentRunner != nil {
+		if agentRunner != nil && agentRunnerFollowsCoordinator {
 			if err := agentRunner.SetBackend(next, choice.ID); err != nil {
 				return err
 			}

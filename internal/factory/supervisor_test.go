@@ -2,6 +2,8 @@ package factory
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,6 +162,63 @@ func TestAgentCap(t *testing.T) {
 	}
 }
 
+func TestAgentCapBoundsParallelDelegation(t *testing.T) {
+	b := testBudget()
+	b.MaxAgents = 1
+	started := make(chan struct{})
+	release := make(chan struct{})
+	agent := scriptedAgent{run: func(context.Context, Step, string, string, int, chan<- AgentEvent) (string, error) {
+		close(started)
+		<-release
+		return "done", nil
+	}}
+	sup, dir := newTestSupervisor(t, agent, b, nil)
+
+	first := make(chan StepResult, 1)
+	go func() { first <- sup.RunAgentPrompt(context.Background(), 0, dir, "review") }()
+	<-started
+	second := sup.RunAgentPrompt(context.Background(), 0, dir, "research")
+	close(release)
+
+	if res := <-first; !res.Ok {
+		t.Fatalf("first result = %+v", res)
+	}
+	if second.Ok || !strings.Contains(second.Output, "agent cap") {
+		t.Fatalf("parallel second result = %+v", second)
+	}
+}
+
+func TestChildrenCapBoundsParallelDelegation(t *testing.T) {
+	b := testBudget()
+	b.MaxChildren = 1
+	started := make(chan struct{})
+	release := make(chan struct{})
+	first := make(chan StepResult, 1)
+	var sup *Supervisor
+	agent := scriptedAgent{run: func(ctx context.Context, _ Step, dir, input string, nodeID int, _ chan<- AgentEvent) (string, error) {
+		if input == "root" {
+			go func() { first <- sup.RunAgentPrompt(ctx, nodeID, dir, "review") }()
+			<-started
+			second := sup.RunAgentPrompt(ctx, nodeID, dir, "research")
+			close(release)
+			if child := <-first; !child.Ok {
+				return "", errors.New("first child was denied")
+			}
+			if second.Ok || !strings.Contains(second.Output, "max children") {
+				return "", fmt.Errorf("parallel second result = %+v", second)
+			}
+			return "done", nil
+		}
+		close(started)
+		<-release
+		return "done", nil
+	}}
+	sup, dir := newTestSupervisor(t, agent, b, map[string]string{"root.md": "Coordinate."})
+	if res := sup.RunStep(context.Background(), 0, dir, "root", "root"); !res.Ok {
+		t.Fatalf("root result = %+v", res)
+	}
+}
+
 func TestSnapshotAttribution(t *testing.T) {
 	var sup *Supervisor
 	agent := scriptedAgent{run: func(ctx context.Context, step Step, dir, input string, nodeID int, events chan<- AgentEvent) (string, error) {
@@ -263,5 +322,50 @@ func TestAgentToolEnvelope(t *testing.T) {
 	}
 	if _, err := tool.Run(context.Background(), map[string]any{}); err == nil {
 		t.Fatal("missing prompt should error")
+	}
+}
+
+func TestRunAgentPromptRejectsEmptyResult(t *testing.T) {
+	sup, dir := newTestSupervisor(t, scriptedAgent{run: func(context.Context, Step, string, string, int, chan<- AgentEvent) (string, error) {
+		return "", nil
+	}}, testBudget(), nil)
+	res := sup.RunAgentPrompt(context.Background(), 0, dir, "inspect the diff")
+	if res.Ok || !strings.Contains(res.Output, "empty result") {
+		t.Fatalf("empty result = %+v", res)
+	}
+}
+
+func TestRunAgentPromptTimeoutPreservesPartialOutput(t *testing.T) {
+	b := testBudget()
+	b.MaxWall = 20 * time.Millisecond
+	sup, dir := newTestSupervisor(t, scriptedAgent{run: func(ctx context.Context, _ Step, _ string, _ string, _ int, _ chan<- AgentEvent) (string, error) {
+		<-ctx.Done()
+		return "partial findings", ctx.Err()
+	}}, b, nil)
+	res := sup.RunAgentPrompt(context.Background(), 0, dir, "review")
+	if res.Ok || !strings.Contains(res.Output, "partial findings") || !strings.Contains(res.Output, "wall-clock limit") {
+		t.Fatalf("timeout result = %+v", res)
+	}
+}
+
+func TestRunAgentPromptCancellationLeavesCoordinatorResult(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sup, dir := newTestSupervisor(t, scriptedAgent{run: func(ctx context.Context, _ Step, _ string, _ string, _ int, _ chan<- AgentEvent) (string, error) {
+		return "partial findings", ctx.Err()
+	}}, testBudget(), nil)
+	res := sup.RunAgentPrompt(ctx, 0, dir, "review")
+	if res.Ok || !strings.Contains(res.Output, "context canceled") || !strings.Contains(res.Output, "partial findings") {
+		t.Fatalf("cancellation result = %+v", res)
+	}
+}
+
+func TestRunAgentPromptFailurePreservesPartialOutput(t *testing.T) {
+	sup, dir := newTestSupervisor(t, scriptedAgent{run: func(context.Context, Step, string, string, int, chan<- AgentEvent) (string, error) {
+		return "partial findings", errors.New("provider response was malformed")
+	}}, testBudget(), nil)
+	res := sup.RunAgentPrompt(context.Background(), 0, dir, "review")
+	if res.Ok || !strings.Contains(res.Output, "provider response was malformed") || !strings.Contains(res.Output, "partial findings") {
+		t.Fatalf("partial failure = %+v", res)
 	}
 }

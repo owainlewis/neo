@@ -46,6 +46,7 @@ type Config struct {
 	// is selected through /model while another provider is the startup default.
 	OpenAIAuth  string      `yaml:"openai_auth"`
 	Model       string      `yaml:"model"`
+	Subagents   Backend     `yaml:"subagents"`
 	Features    Features    `yaml:"features"`
 	Compaction  Compaction  `yaml:"compaction"`
 	Permissions Permissions `yaml:"permissions"`
@@ -54,6 +55,19 @@ type Config struct {
 	// source records where this config was loaded from (a file path or
 	// "embedded"); surfaced in diagnostics via Source().
 	source string
+}
+
+// Backend optionally pins chat-spawned subagents to a provider and model.
+// A zero value means subagents follow the coordinator's active backend.
+type Backend struct {
+	Provider string `yaml:"provider"`
+	Model    string `yaml:"model"`
+}
+
+// SubagentsConfigured reports whether subagents use a backend independent of
+// the coordinator. parseConfig fills either missing half when one is supplied.
+func (c *Config) SubagentsConfigured() bool {
+	return c.Subagents.Provider != "" || c.Subagents.Model != ""
 }
 
 // Permissions configures how Neo gates tool calls before they run.
@@ -173,6 +187,18 @@ func parseConfig(b []byte, source string) (*Config, error) {
 	if c.Model == "" {
 		c.Model = defaultModelFor(c.Provider, c.OpenAIAuth)
 	}
+	if c.SubagentsConfigured() {
+		if c.Subagents.Provider == "" {
+			c.Subagents.Provider = c.Provider
+		}
+		if !knownProvider(c.Subagents.Provider) {
+			return nil, fmt.Errorf("%s: subagents.provider must be one of %q, %q, %q, %q (got %q)",
+				source, "anthropic", "openai", "openrouter", "google", c.Subagents.Provider)
+		}
+		if c.Subagents.Model == "" {
+			c.Subagents.Model = defaultModelFor(c.Subagents.Provider, c.OpenAIAuth)
+		}
+	}
 	if c.Permissions.Mode == "" {
 		c.Permissions.Mode = PermissionModeTrusted
 	}
@@ -182,6 +208,15 @@ func parseConfig(b []byte, source string) (*Config, error) {
 		return nil, fmt.Errorf("%s: permissions.mode must be one of %q, %q, %q", source, PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly)
 	}
 	return &c, nil
+}
+
+func knownProvider(provider string) bool {
+	switch provider {
+	case "anthropic", "openai", "openrouter", "google":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateOpenAIAuth(mode, source string) error {
