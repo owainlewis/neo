@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
@@ -20,6 +21,7 @@ const (
 	EventAssistantCommentary EventKind = "assistant_commentary"
 	EventToolCall            EventKind = "tool_call"
 	EventToolResult          EventKind = "tool_result"
+	EventSteeringApplied     EventKind = "steering_applied"
 	EventDone                EventKind = "done"
 	EventError               EventKind = "error"
 	EventMaxTurnsReached     EventKind = "max_turns_reached"
@@ -71,6 +73,10 @@ type Agent struct {
 	cfg      Config
 	messages []llm.Message
 	usage    llm.Usage
+
+	steerMu      sync.Mutex
+	steerActive  bool
+	steerPending []string
 }
 
 // DefaultMaxTurns is a high safety fuse for runaway tool loops, not a normal
@@ -199,6 +205,8 @@ func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []stri
 	if len(content) == 0 {
 		return "", nil
 	}
+	a.beginSteering()
+	defer a.endSteering()
 	logx.Debug("agent turn queued",
 		"model", a.cfg.Model,
 		"messages_before", len(a.messages),
@@ -207,6 +215,55 @@ func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []stri
 	)
 	a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: content})
 	return a.run(ctx)
+}
+
+// Steer adds a user instruction to the active turn. The loop consumes it only
+// after the current provider response and any requested tools have completed,
+// preserving tool_use/tool_result pairing in the transcript.
+func (a *Agent) Steer(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if !a.steerActive {
+		return false
+	}
+	a.steerPending = append(a.steerPending, text)
+	return true
+}
+
+func (a *Agent) beginSteering() {
+	a.steerMu.Lock()
+	a.steerActive = true
+	a.steerPending = nil
+	a.steerMu.Unlock()
+}
+
+func (a *Agent) endSteering() {
+	a.steerMu.Lock()
+	a.steerActive = false
+	a.steerPending = nil
+	a.steerMu.Unlock()
+}
+
+// takeSteering drains pending instructions. When closeIfEmpty is true, an
+// empty inbox is atomically closed so a late instruction cannot be accepted
+// after the loop has decided to finish the turn.
+func (a *Agent) takeSteering(closeIfEmpty bool) (pending []string, closed bool) {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if len(a.steerPending) == 0 {
+		if closeIfEmpty {
+			a.steerActive = false
+			return nil, true
+		}
+		return nil, false
+	}
+	pending = append([]string(nil), a.steerPending...)
+	a.steerPending = nil
+	return pending, false
 }
 
 func (a *Agent) run(ctx context.Context) (string, error) {
@@ -252,8 +309,10 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 		// if a tool panics or an early return is added later.
 		assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: resp.Content}
 		var toolResults []llm.ContentBlock
+		var steering []string
 		hasTools := hasToolUse(resp.Content)
-		for _, block := range resp.Content {
+	toolLoop:
+		for i, block := range resp.Content {
 			switch block.Type {
 			case "text":
 				if block.Text != "" {
@@ -276,21 +335,44 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 					Content:   out,
 					IsError:   isErr,
 				})
+				if ctx.Err() == nil {
+					if pending, _ := a.takeSteering(false); len(pending) > 0 {
+						steering = pending
+						toolResults = append(toolResults, skippedToolResults(resp.Content[i+1:])...)
+						break toolLoop
+					}
+				}
 			}
 		}
 
 		a.messages = append(a.messages, assistantMsg)
 		if len(toolResults) > 0 {
-			a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: toolResults})
 			if err := ctx.Err(); err != nil {
+				a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: toolResults})
 				logx.Debug("agent turn canceled after tool results", "turn", turn+1, "error", err.Error())
 				a.emit(Event{Kind: EventError, Err: err})
 				return strings.TrimSpace(finalText.String()), err
 			}
+			if len(steering) == 0 {
+				steering, _ = a.takeSteering(false)
+			}
+			toolResults = a.appendSteering(toolResults, steering)
+			a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: toolResults})
 			continue
 		}
 
 		if resp.StopReason == "end_turn" || resp.StopReason == "stop_sequence" || resp.StopReason == "" {
+			if err := ctx.Err(); err != nil {
+				logx.Debug("agent turn canceled after provider response", "turn", turn+1, "error", err.Error())
+				a.emit(Event{Kind: EventError, Err: err})
+				return strings.TrimSpace(finalText.String()), err
+			}
+			steering, closed := a.takeSteering(true)
+			if !closed {
+				content := a.appendSteering(nil, steering)
+				a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: content})
+				continue
+			}
 			logx.Debug("agent turn complete", "turn", turn+1, "stop_reason", resp.StopReason)
 			a.emit(Event{Kind: EventDone})
 			return strings.TrimSpace(finalText.String()), nil
@@ -304,6 +386,30 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 	logx.Debug("agent max turns reached", "max_turns", a.cfg.MaxTurns)
 	a.emit(Event{Kind: EventMaxTurnsReached, MaxTurns: a.cfg.MaxTurns, Err: ErrMaxTurns})
 	return strings.TrimSpace(finalText.String()), ErrMaxTurns
+}
+
+func skippedToolResults(content []llm.ContentBlock) []llm.ContentBlock {
+	var results []llm.ContentBlock
+	for _, block := range content {
+		if block.Type != "tool_use" {
+			continue
+		}
+		results = append(results, llm.ContentBlock{
+			Type:      "tool_result",
+			ToolUseID: block.ID,
+			Content:   "skipped because the user steered the active turn",
+			IsError:   true,
+		})
+	}
+	return results
+}
+
+func (a *Agent) appendSteering(content []llm.ContentBlock, steering []string) []llm.ContentBlock {
+	for _, text := range steering {
+		content = append(content, llm.ContentBlock{Type: "text", Text: text})
+		a.emit(Event{Kind: EventSteeringApplied, Text: text})
+	}
+	return content
 }
 
 func hasToolUse(content []llm.ContentBlock) bool {

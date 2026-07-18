@@ -71,6 +71,64 @@ func (t namedTool) Spec() llm.ToolSpec {
 }
 func (t namedTool) Run(context.Context, map[string]any) (string, error) { return "ok", nil }
 
+type steeringBlockingTool struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (steeringBlockingTool) Name() string { return "block" }
+func (steeringBlockingTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: "block", Description: "block", InputSchema: map[string]any{"type": "object"}}
+}
+func (t steeringBlockingTool) Run(ctx context.Context, _ map[string]any) (string, error) {
+	close(t.started)
+	select {
+	case <-t.release:
+		return "done", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+type blockingFirstProvider struct {
+	started   chan struct{}
+	release   chan struct{}
+	responses []llm.Response
+	calls     []llm.Request
+}
+
+type recordingTool struct {
+	name   string
+	called *bool
+}
+
+func (t recordingTool) Name() string { return t.name }
+func (t recordingTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: t.name, Description: t.name, InputSchema: map[string]any{"type": "object"}}
+}
+func (t recordingTool) Run(context.Context, map[string]any) (string, error) {
+	*t.called = true
+	return "mutated", nil
+}
+
+func (p *blockingFirstProvider) Name() string { return "blocking-first" }
+func (p *blockingFirstProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	p.calls = append(p.calls, req)
+	if len(p.calls) == 1 {
+		close(p.started)
+		select {
+		case <-p.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if len(p.calls) > len(p.responses) {
+		return nil, fmt.Errorf("no response for call %d", len(p.calls))
+	}
+	resp := p.responses[len(p.calls)-1]
+	return &resp, nil
+}
+
 func TestAgent_ToolUseFollowedByText(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
 		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "pong"}),
@@ -89,6 +147,134 @@ func TestAgent_ToolUseFollowedByText(t *testing.T) {
 	// Transcript invariant: every assistant tool_use must be followed by a
 	// user tool_result with a matching ToolUseID.
 	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_SteeringIsAppliedAfterToolBoundary(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "block", nil),
+		llmtest.Text("redirected"),
+	}}
+	ag := newTestAgent(t, prov, steeringBlockingTool{started: started, release: release})
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(context.Background(), "start")
+		done <- err
+	}()
+
+	<-started
+	if !ag.Steer("inspect the fallback instead") {
+		t.Fatal("active turn rejected steering")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if got := len(prov.Calls); got != 2 {
+		t.Fatalf("provider calls = %d, want 2", got)
+	}
+	content := prov.Calls[1].Messages[2].Content
+	if len(content) != 2 {
+		t.Fatalf("continuation content = %#v, want tool result and steering text", content)
+	}
+	if content[0].Type != "tool_result" || content[0].ToolUseID != "call_1" {
+		t.Fatalf("first continuation block = %#v, want paired tool result", content[0])
+	}
+	if content[1].Type != "text" || content[1].Text != "inspect the fallback instead" {
+		t.Fatalf("second continuation block = %#v, want steering text", content[1])
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+	if ag.Steer("too late") {
+		t.Fatal("completed turn accepted steering")
+	}
+}
+
+func TestAgent_SteeringSkipsStaleSiblingTools(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	mutated := false
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content: []llm.ContentBlock{
+				{Type: "tool_use", ID: "call_1", Name: "block"},
+				{Type: "tool_use", ID: "call_2", Name: "mutate"},
+			},
+			StopReason: "tool_use",
+		},
+		llmtest.Text("redirected"),
+	}}
+	ag := newTestAgent(t, prov,
+		steeringBlockingTool{started: started, release: release},
+		recordingTool{name: "mutate", called: &mutated},
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(context.Background(), "start")
+		done <- err
+	}()
+
+	<-started
+	if !ag.Steer("stop before mutating") {
+		t.Fatal("active turn rejected steering")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if mutated {
+		t.Fatal("stale sibling tool ran after steering")
+	}
+
+	content := prov.Calls[1].Messages[2].Content
+	if len(content) != 3 {
+		t.Fatalf("continuation content = %#v, want two results and steering text", content)
+	}
+	if content[1].Type != "tool_result" || content[1].ToolUseID != "call_2" || !content[1].IsError || !strings.Contains(content[1].Content, "steered") {
+		t.Fatalf("skipped sibling result = %#v", content[1])
+	}
+	if content[2].Type != "text" || content[2].Text != "stop before mutating" {
+		t.Fatalf("steering block = %#v", content[2])
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_SteeringContinuesTextOnlyResponse(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	prov := &blockingFirstProvider{
+		started: started,
+		release: release,
+		responses: []llm.Response{
+			llmtest.Text("initial answer"),
+			llmtest.Text("revised answer"),
+		},
+	}
+	ag := newTestAgent(t, prov)
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(context.Background(), "start")
+		done <- err
+	}()
+
+	<-started
+	if !ag.Steer("change direction") {
+		t.Fatal("active turn rejected steering")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if got := len(prov.calls); got != 2 {
+		t.Fatalf("provider calls = %d, want 2", got)
+	}
+	messages := prov.calls[1].Messages
+	last := messages[len(messages)-1]
+	if last.Role != llm.RoleUser || len(last.Content) != 1 || last.Content[0].Text != "change direction" {
+		t.Fatalf("last continuation message = %#v, want steering user message", last)
+	}
 }
 
 func TestAgent_StoresBoundedBashToolResultBeforeTranscript(t *testing.T) {
@@ -650,6 +836,51 @@ func TestAgent_CancelledToolCommitsRecoverableToolResult(t *testing.T) {
 	}
 	if prov.calls != 1 {
 		t.Fatalf("provider calls = %d, want no follow-up provider call after canceled tool result", prov.calls)
+	}
+}
+
+func TestAgent_CancellationDoesNotPersistUnappliedSteering(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "block", nil),
+	}}
+	applied := false
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(steeringBlockingTool{started: started, release: release}),
+		OnEvent: func(e Event) {
+			if e.Kind == EventSteeringApplied {
+				applied = true
+			}
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(ctx, "start")
+		done <- err
+	}()
+
+	<-started
+	if !ag.Steer("unapplied") {
+		t.Fatal("active turn rejected steering")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("send error = %v, want context canceled", err)
+	}
+	if applied {
+		t.Fatal("canceled steering emitted an applied event")
+	}
+	transcript := ag.Transcript()
+	assertToolUseResultsPaired(t, transcript)
+	if got := len(transcript[2].Content); got != 1 {
+		t.Fatalf("canceled continuation has %d blocks, want only tool result: %#v", got, transcript[2].Content)
+	}
+	if transcript[2].Content[0].Type != "tool_result" {
+		t.Fatalf("canceled continuation = %#v", transcript[2].Content)
 	}
 }
 
