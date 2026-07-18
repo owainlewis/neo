@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -195,16 +194,15 @@ type model struct {
 	blocks []block
 	md     *glamour.TermRenderer
 
-	busy                bool
-	busySince           time.Time
-	currentTool         *toolCallBlock
-	workflow            *workflowBlock
-	workflowVisible     bool
-	autoWorkflowPending bool
-	turn                turnStats
-	activeTree          *treeBlock         // block receiving new top-level subagent trees
-	treeIndex           map[int]*treeBlock // supervisor node id -> the block holding it
-	approval            *approvalState
+	busy            bool
+	busySince       time.Time
+	currentTool     *toolCallBlock
+	workflow        *workflowBlock
+	workflowVisible bool
+	turn            turnStats
+	activeTree      *treeBlock         // block receiving new top-level subagent trees
+	treeIndex       map[int]*treeBlock // supervisor node id -> the block holding it
+	approval        *approvalState
 	// allow holds the rules the user granted via "always allow" during this
 	// session. It is consulted before prompting, so a granted tool/command
 	// stops asking. It is intentionally not persisted.
@@ -698,7 +696,6 @@ func (m *model) submitUserTurn(displayText, agentText string, images []string) t
 func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, images []string, expandSkillRefs bool) tea.Cmd {
 	m.clearTerminalWorkflow()
 	m.appendBlock(userBlock{text: displayText})
-	m.maybeStartWorkflowFromUserText(agentText)
 	if len(images) > 0 {
 		m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
 	}
@@ -1083,7 +1080,6 @@ func (m *model) clearTerminalWorkflow() {
 	}
 	m.workflow = nil
 	m.workflowVisible = false
-	m.autoWorkflowPending = false
 	m.layout()
 }
 
@@ -1192,44 +1188,6 @@ func (m *model) handleEvent(e agent.Event) {
 	}
 }
 
-var (
-	numberedWorkflowLine = regexp.MustCompile(`^\s*(?:[-*]\s*)?(\d+)[.)]\s+(.+?)\s*$`)
-	bulletWorkflowLine   = regexp.MustCompile(`^\s*[-*]\s+(.+?)\s*$`)
-)
-
-func (m *model) maybeStartWorkflowFromUserText(text string) {
-	lower := strings.ToLower(text)
-	if !strings.Contains(lower, "workflow") {
-		return
-	}
-	var items []workflow.Item
-	for _, line := range strings.Split(text, "\n") {
-		match := numberedWorkflowLine.FindStringSubmatch(line)
-		if len(match) == 3 {
-			itemText := strings.TrimSpace(match[2])
-			if itemText != "" {
-				items = append(items, workflow.Item{ID: match[1], Text: itemText, Status: workflow.Pending})
-			}
-			continue
-		}
-		match = bulletWorkflowLine.FindStringSubmatch(line)
-		if len(match) == 2 {
-			itemText := strings.TrimSpace(match[1])
-			if itemText != "" {
-				items = append(items, workflow.Item{ID: fmt.Sprint(len(items) + 1), Text: itemText, Status: workflow.Pending})
-			}
-		}
-	}
-	if len(items) < 2 {
-		return
-	}
-	m.workflow = &workflowBlock{title: "Workflow", items: items}
-	m.workflowVisible = true
-	m.autoWorkflowPending = true
-	m.layout()
-	m.refreshViewport()
-}
-
 func (m *model) handleWorkflowEvent(ev workflow.Event) {
 	if ev.Action == "clear" {
 		m.workflow = nil
@@ -1240,16 +1198,6 @@ func (m *model) handleWorkflowEvent(ev workflow.Event) {
 	}
 	m.turn.workflow = true
 	if ev.Action == "create" {
-		if m.autoWorkflowPending && m.workflow != nil {
-			m.workflow.title = ev.State.Title
-			m.workflow.items = ev.State.Items
-			m.workflow.active = ""
-			m.autoWorkflowPending = false
-			m.layout()
-			m.refreshViewport()
-			return
-		}
-		m.autoWorkflowPending = false
 		wb := &workflowBlock{title: ev.State.Title, items: ev.State.Items}
 		m.workflow = wb
 		m.workflowVisible = true
