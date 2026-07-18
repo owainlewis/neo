@@ -8,13 +8,15 @@ Follow this once and you should reach your first chat.
 
 ## 1. Choose a backend
 
-Neo defaults to Anthropic. Use OpenAI only when you set `provider: openai`.
+Neo defaults to Anthropic. Set `provider` when you want OpenAI, OpenRouter, or Google Gemini.
 
 | Backend | What you need | Config | Extra step |
 |------|------|------|------|
 | Anthropic | `ANTHROPIC_API_KEY` | No config required | None |
 | OpenAI API key | `OPENAI_API_KEY` | `provider: openai` | None |
 | OpenAI subscription | ChatGPT/Codex subscription | `provider: openai` and `openai_auth: subscription` | Run `neo login` once |
+| OpenRouter | `OPENROUTER_API_KEY` | `provider: openrouter` | None |
+| Google Gemini | `GOOGLE_API_KEY` | `provider: google` | None |
 
 If you are using OpenAI with an API key, you do not need `neo login`. `neo login` is only for the
 device-code subscription flow.
@@ -42,7 +44,19 @@ neo login
 `neo login` prints a device-code URL and one-time code, then stores the subscription credentials
 in `~/.neo/auth.json`.
 
-## 3. Create `neo.yaml` only if you need OpenAI
+OpenRouter:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-..."
+```
+
+Google Gemini:
+
+```bash
+export GOOGLE_API_KEY="..."
+```
+
+## 3. Create `neo.yaml` only if you need a non-default provider
 
 Anthropic users can skip this step because `provider: anthropic` is the default.
 
@@ -50,6 +64,9 @@ Anthropic users can skip this step because `provider: anthropic` is the default.
 provider: openai
 openai_auth: api_key
 ```
+
+For an OpenAI subscription, use `openai_auth: subscription`. For OpenRouter or Gemini, set
+`provider: openrouter` or `provider: google` respectively.
 
 Neo reads the first config file it finds in this order:
 

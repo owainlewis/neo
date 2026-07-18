@@ -1,58 +1,10 @@
 ---
-title: Neo
-description: A workflow-first coding agent for your terminal, written in Go.
+title: Neo Harness
+description: A workflow-native coding agent you can trust with the repo.
 template: splash
 editUrl: false
-hero:
-  title: Neo
-  tagline: A workflow-first coding agent for your terminal. Encode a checklist once — Neo runs the agent through it step by step, with live progress instead of a black box.
-  image:
-    html: |
-      <div class="term-frame">
-        <div class="term-frame-bar">
-          <span></span><span></span><span></span>
-        </div>
-        <img src="/images/neo-splash.png" alt="Neo's terminal splash screen" />
-      </div>
-  actions:
-    - text: Get started
-      link: /docs/install/
-      icon: right-arrow
-      variant: primary
-    - text: View on GitHub
-      link: https://github.com/owainlewis/neo
-      icon: external
-      variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import LandingPage from '../../components/LandingPage.astro';
 
-## One line. Any provider you already pay for.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash
-```
-
-Also available via `brew install --cask owainlewis/tap/neo` and `go install github.com/owainlewis/neo/cmd/neo@latest`.
-No account, no telemetry, nothing running you can't see. Full options in the [install guide](/docs/install/).
-
-## Why Neo
-
-<CardGrid>
-	<Card title="Workflow-first">
-		Encode a checklist once — in a prompt, a skill, or an `AGENTS.md` — and Neo runs the agent
-		through it step by step, with a live checklist instead of a black box.
-	</Card>
-	<Card title="Sensible defaults">
-		Permission modes, `AGENTS.md` support, and visible workflows all work the moment you install
-		Neo. Nothing to assemble before it's useful.
-	</Card>
-	<Card title="Multi-provider">
-		Anthropic, OpenAI API key, or OpenAI subscription. Switch providers with one config line, not
-		a rewrite.
-	</Card>
-	<Card title="Minimalist">
-		A single Go binary, six built-in tools, no runtime dependency. The core agent loop stays
-		small and policy-free on purpose.
-	</Card>
-</CardGrid>
+<LandingPage />

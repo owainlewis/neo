@@ -1,177 +1,1046 @@
-/* Minimalist theme: sans-serif type, muted slate neutrals + one desaturated
-   accent, golden-ratio type scale. Monospace is reserved for actual code
-   (Starlight's --sl-font-mono), not headings or UI chrome. */
-
-/*
- * Starlight's color scale runs gray-1 (closest to the --white/text token)
- * through gray-6/7 (closest to the --black/bg token) — the same six
- * variable names mean opposite ends of the ramp in light vs dark, since
- * "white" and "black" always refer to text and bg respectively, not to
- * literal light/dark. Both theme blocks below follow that direction; mixing
- * it up produces low-contrast text (this broke once already — see custom
- * CSS in website/README.md if it happens again).
- */
 :root,
 :root[data-theme='light'] {
-  /* No --sl-font override: headings and body fall back to --sl-font-system
-     (Starlight's own system-sans stack), not a display/mono face. */
-  --sl-font-system: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
-
-  /* Golden-ratio-derived scale (~1.25 per step, converging on phi across a
-     couple of steps) instead of Starlight's default jumps — used mainly for
-     headings; 2xs/xs/sm/base are left at Starlight's defaults since those
-     are UI chrome sizes, not content typography. */
-  --sl-text-lg: 1.25rem;
-  --sl-text-xl: 1.5rem;
-  --sl-text-2xl: 1.75rem;
-  --sl-text-3xl: 2rem;
-  --sl-text-4xl: 2.5rem;
-  --sl-text-5xl: 3.25rem;
-  --sl-text-6xl: 4.25rem;
-
-  /* Accent: a single muted, desaturated slate — not a saturated brand color. */
-  --sl-color-accent-low: #e7ebee;
-  --sl-color-accent: #4c5f70;
-  --sl-color-accent-high: #2c3946;
-
-  --sl-color-white: #1c1f23; /* text */
-  --sl-color-gray-1: #33383e;
-  --sl-color-gray-2: #565c64;
-  --sl-color-gray-3: #767d86;
-  --sl-color-gray-4: #9aa1a8;
-  --sl-color-gray-5: #d8dbde;
-  --sl-color-gray-6: #eef0f2;
-  --sl-color-gray-7: #f6f7f8;
-  --sl-color-black: #fbfcfc; /* bg */
-
-  --sl-radius-medium: 0.375rem;
-  --sl-radius-large: 0.5rem;
-
-  /* Aside colors default to fully saturated hues (vivid blue/green/orange/red)
-     — mute the "note" aside to match the rest of the palette instead of
-     standing out as a random bright blue box. */
-  --sl-color-blue-low: #e7ebee;
-  --sl-color-blue: #4c5f70;
-  --sl-color-blue-high: #2c3946;
+  --sl-font-system: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --sl-font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --sl-color-accent-low: #e8eeeb;
+  --sl-color-accent: #49665b;
+  --sl-color-accent-high: #2f463e;
+  --sl-color-white: #1f201e;
+  --sl-color-gray-1: #383a36;
+  --sl-color-gray-2: #62645f;
+  --sl-color-gray-3: #858780;
+  --sl-color-gray-4: #b8b9b4;
+  --sl-color-gray-5: #deded9;
+  --sl-color-gray-6: #efefeb;
+  --sl-color-gray-7: #f7f7f4;
+  --sl-color-black: #fbfbf8;
+  --sl-color-blue-low: #e8eeeb;
+  --sl-color-blue: #49665b;
+  --sl-color-blue-high: #2f463e;
+  --sl-radius-medium: 0.35rem;
+  --sl-radius-large: 0.55rem;
 }
 
 :root[data-theme='dark'] {
-  --sl-color-accent-low: #263139;
-  --sl-color-accent: #8fa2b0;
-  --sl-color-accent-high: #c3d0d8;
-
-  --sl-color-blue-low: #263139;
-  --sl-color-blue: #8fa2b0;
-  --sl-color-blue-high: #c3d0d8;
-
-  --sl-color-white: #eef0f2; /* text */
-  --sl-color-gray-1: #c7ccd1;
-  --sl-color-gray-2: #9aa1a8;
-  --sl-color-gray-3: #767d86;
-  --sl-color-gray-4: #565c64;
-  --sl-color-gray-5: #33383e;
-  --sl-color-gray-6: #212427;
-  --sl-color-black: #16181a; /* bg */
+  --sl-color-accent-low: #26362f;
+  --sl-color-accent: #a9c0b5;
+  --sl-color-accent-high: #e2ece7;
+  --sl-color-blue-low: #26362f;
+  --sl-color-blue: #a9c0b5;
+  --sl-color-blue-high: #e2ece7;
+  --sl-color-white: #f0f0eb;
+  --sl-color-gray-1: #d3d3cd;
+  --sl-color-gray-2: #a6a69f;
+  --sl-color-gray-3: #7a7b75;
+  --sl-color-gray-4: #51534f;
+  --sl-color-gray-5: #343633;
+  --sl-color-gray-6: #222421;
+  --sl-color-black: #171815;
 }
 
-/* Tighter, quieter chrome. */
+/* Documentation */
+.site-title {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.site-title::after {
+  content: '/';
+  color: var(--sl-color-accent);
+  margin-inline-start: 0.28rem;
+}
+
+.header {
+  border-bottom-color: var(--sl-color-gray-5);
+  backdrop-filter: blur(16px);
+}
+
+.sidebar-pane {
+  border-inline-end-color: var(--sl-color-gray-5);
+}
+
+.sidebar-content a[aria-current='page'] {
+  font-weight: 650;
+}
+
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  letter-spacing: -0.025em;
+}
+
 .sl-markdown-content h1,
 .sl-markdown-content h2 {
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: 700;
 }
 
-.hero h1 {
-  font-weight: 600;
-  letter-spacing: -0.02em;
+.sl-markdown-content :not(h1, h2, h3, h4, h5, h6) + :is(h2, h3) {
+  margin-block-start: 2.5em;
 }
 
-.hero .tagline {
-  color: var(--sl-color-gray-2);
+.expressive-code {
+  --ec-brdRad: 0.45rem;
 }
 
-/* Fake terminal window around the hero screenshot: title bar + traffic
-   lights, so a plain PNG reads as "a real terminal", not a floating image. */
-.term-frame {
-  border: 1px solid var(--sl-color-gray-5);
-  border-radius: 0.75rem;
-  overflow: hidden;
-  background: #111315;
-  box-shadow: 0 1.5rem 3rem -1.5rem rgba(0, 0, 0, 0.35);
-}
-
-.term-frame-bar {
-  display: flex;
-  gap: 0.4rem;
-  padding: 0.65rem 0.75rem;
-  background: #17191b;
-  border-bottom: 1px solid #262a2d;
-}
-
-.term-frame-bar span {
-  width: 0.65rem;
-  height: 0.65rem;
-  border-radius: 50%;
-  background: #34383c;
-}
-
-.term-frame img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-/* Splash-page prose: center section headings like a landing page, not a
-   docs article. .sl-markdown-content is a sibling of .sl-container (which
-   wraps .hero), not of .hero itself, so scope through their shared parent.
-   Starlight renders headings as inline elements inside a `.sl-heading-wrapper`
-   div (so the anchor-link icon can hug the last word) — the wrapper, not the
-   heading, is what needs centering, since the inline h2 shrinks to fit its
-   own text and text-align on it alone has nothing to distribute. */
-.content-panel:has(.hero) .sl-markdown-content .sl-heading-wrapper.level-h2 {
-  text-align: center;
-  margin-block: 3rem 1.25rem;
-}
-
-.content-panel:has(.hero) .sl-markdown-content h2 {
-  font-size: var(--sl-text-2xl);
-}
-
-.content-panel:has(.hero) .sl-markdown-content > p {
-  text-align: center;
-  color: var(--sl-color-gray-2);
-}
-
-/* Center the whole Expressive Code frame (title bar + pre + copy button)
-   as one unit. Narrowing just `pre` leaves its wrapping `.expressive-code`
-   / `figure.frame` — which owns the terminal title bar — at full width,
-   producing a title bar wider than the code box sitting inside it. */
-.content-panel:has(.hero) .sl-markdown-content .expressive-code {
-  max-width: 42rem;
-  margin-inline: auto;
-}
-
-/* Cards: subtle tinted surface instead of a plain outline, quiet hover lift. */
 .card {
-  box-shadow: none !important;
-  border-radius: 0.625rem !important;
   border-color: var(--sl-color-gray-5) !important;
-  background-color: var(--sl-color-gray-6);
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  border-radius: 0.55rem !important;
+  box-shadow: none !important;
 }
 
-.card:hover {
-  border-color: var(--sl-color-gray-4) !important;
+/* The landing page owns the content panel. */
+body:has(.neo-home) .content-panel:not(:has(.neo-home)) {
+  display: none;
+}
+
+.content-panel:has(.neo-home) {
+  padding: 0;
+  overflow: hidden;
+  background: #f7f6f2;
+}
+
+.content-panel:has(.neo-home) .sl-container,
+.content-panel:has(.neo-home) .sl-markdown-content {
+  max-width: none;
+  padding: 0;
+  margin: 0;
+}
+
+.content-panel:has(.neo-home) footer {
+  display: none;
+}
+
+body:has(.neo-home) .header {
+  color: #262723;
+  background: rgba(247, 246, 242, 0.9);
+  border-bottom-color: #dfded8;
+}
+
+body:has(.neo-home) .header a,
+body:has(.neo-home) .header button {
+  color: inherit;
+}
+
+body:has(.neo-home) .header button[aria-label='Search'],
+body:has(.neo-home) .header select,
+body:has(.neo-home) .header starlight-theme-select {
+  display: none;
+}
+
+body:has(.neo-home) .site-title::after {
+  color: #49665b;
+}
+
+.neo-home {
+  --neo-paper: #f7f6f2;
+  --neo-white: #fdfdfb;
+  --neo-ink: #20211e;
+  --neo-muted: #676961;
+  --neo-faint: #6e7069;
+  --neo-line: #dcdcd5;
+  --neo-line-dark: #c9cac2;
+  --neo-moss: #49665b;
+  --neo-moss-soft: #e7ece8;
+  --neo-space-1: 0.5rem;
+  --neo-space-2: 1rem;
+  --neo-space-3: 1.5rem;
+  --neo-space-4: 2.5rem;
+  --neo-space-5: 4rem;
+  --neo-space-6: 6.5rem;
+  color: var(--neo-ink);
+  background: var(--neo-paper);
+  font-family: var(--sl-font-system);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.neo-home *,
+.neo-home *::before,
+.neo-home *::after {
+  box-sizing: border-box;
+}
+
+.neo-home :is(h1, h2, h3, p, ul, ol, dl, dd) {
+  margin: 0;
+}
+
+.neo-home :is(h1, h2) {
+  color: var(--neo-ink);
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.045em;
+}
+
+.neo-home h3 {
+  color: var(--neo-ink);
+  font-family: var(--sl-font-system);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.neo-eyebrow,
+.neo-label {
+  color: var(--neo-moss);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.neo-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(31rem, 5fr);
+  gap: var(--neo-space-5);
+  align-items: start;
+  width: min(100% - 3rem, 70rem);
+  margin: 0 auto;
+  padding: var(--neo-space-3) 0 var(--neo-space-4);
+  text-align: left;
+}
+
+.neo-hero h1 {
+  max-width: 35rem;
+  margin: 0 0 1.15rem;
+  font-size: clamp(3.35rem, 5vw, 4.6rem);
+  line-height: 1;
+}
+
+.neo-hero-copy {
+  min-width: 0;
+}
+
+.neo-hero-lede {
+  max-width: 34rem;
+  color: var(--neo-muted);
+  font-size: clamp(1rem, 1.35vw, 1.12rem);
+  line-height: 1.5;
+}
+
+.neo-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1.45rem;
+  margin-top: 2rem;
+}
+
+.neo-button,
+.neo-text-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.neo-button {
+  min-height: 2.9rem;
+  padding: 0.75rem 1.15rem;
+  border: 1px solid var(--neo-ink);
+  border-radius: 0.38rem;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.neo-button-primary {
+  color: #f9f9f6;
+  background: var(--neo-ink);
+}
+
+.neo-button-primary:hover {
+  color: #fff;
+  background: #393a35;
   transform: translateY(-1px);
 }
 
-.card .title {
-  font-size: var(--sl-text-lg);
+.neo-text-link {
+  gap: 0.4rem;
+  color: var(--neo-ink);
+  border-bottom: 1px solid var(--neo-line-dark);
+}
+
+.neo-text-link:hover {
+  color: var(--neo-moss);
+  border-bottom-color: var(--neo-moss);
+}
+
+.neo-install {
+  display: flex;
+  align-items: center;
+  width: min(100%, 39rem);
+  max-width: 100%;
+  min-height: 3.25rem;
+  margin: 2rem 0 0;
+  padding-left: 1rem;
+  overflow: hidden;
+  color: #50524d;
+  text-align: left;
+  background: rgba(255, 255, 253, 0.72);
+  border: 1px solid var(--neo-line);
+  border-radius: 0.45rem;
+}
+
+.neo-install code {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--sl-font-mono);
+  font-size: 0.73rem;
+  color: #50524d;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.neo-install button {
+  display: grid;
+  flex: 0 0 3.25rem;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin-left: auto;
+  padding: 0;
+  place-items: center;
+  color: var(--neo-muted);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--neo-line);
+  cursor: pointer;
+}
+
+.neo-install button:hover {
+  color: var(--neo-ink);
+  background: var(--neo-white);
+}
+
+.neo-install button svg {
+  grid-area: 1 / 1;
+  width: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.neo-install .check-icon,
+.neo-install button.copied .copy-icon {
+  display: none;
+}
+
+.neo-install button.copied .check-icon {
+  display: block;
+  color: var(--neo-moss);
+}
+
+.neo-copy-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
+}
+
+.neo-hero-preview {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--neo-white);
+  border: 1px solid var(--neo-line-dark);
+  border-radius: 0.65rem;
+  box-shadow: 0 1.5rem 4rem rgba(41, 42, 37, 0.07);
+}
+
+.neo-preview-bar,
+.neo-preview-title,
+.neo-preview-agent,
+.neo-preview-footer {
+  display: flex;
+  align-items: center;
+}
+
+.neo-preview-bar,
+.neo-preview-footer {
+  justify-content: space-between;
+  color: var(--neo-muted);
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+}
+
+.neo-preview-bar {
+  min-height: 2.25rem;
+  padding: 0 1.15rem;
+  border-bottom: 1px solid var(--neo-line);
+}
+
+.neo-preview-bar span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.neo-preview-bar i,
+.neo-preview-list .active > span i {
+  display: block;
+  width: 0.4rem;
+  height: 0.4rem;
+  background: var(--neo-moss);
+  border-radius: 50%;
+}
+
+.neo-preview-body {
+  padding: 0.8rem 1.5rem 0.75rem;
+}
+
+.neo-preview-title {
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.neo-preview-title div > span,
+.neo-preview-title div > strong {
+  display: block;
+}
+
+.neo-preview-title div > span {
+  margin-bottom: 0.25rem;
+  color: var(--neo-moss);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.neo-preview-title strong {
+  color: var(--neo-ink);
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.neo-preview-title > small {
+  color: var(--neo-faint);
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+}
+
+.neo-preview-list {
+  padding: 0.55rem 0 0;
+  list-style: none;
+}
+
+.neo-preview-list li {
+  display: grid;
+  grid-template-columns: 1.15rem 1fr;
+  gap: 0.65rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #e8e8e2;
+}
+
+.neo-preview-list li > span {
+  display: grid;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.12rem;
+  place-items: center;
+  color: var(--neo-moss);
+  font-size: 0.65rem;
+  border: 1px solid var(--neo-line-dark);
+  border-radius: 50%;
+}
+
+.neo-preview-list .complete > span {
+  color: #fff;
+  background: var(--neo-moss);
+  border-color: var(--neo-moss);
+}
+
+.neo-preview-list strong,
+.neo-preview-list small {
+  display: block;
+}
+
+.neo-preview-list strong {
+  color: var(--neo-ink);
+  font-size: 0.78rem;
   font-weight: 600;
 }
 
-/* Code blocks: quieter border, no glow. Monospace stays here on purpose. */
-.expressive-code {
-  --ec-brdRad: 0.375rem;
+.neo-preview-list small {
+  margin-top: 0.05rem;
+  color: var(--neo-faint);
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+}
+
+.neo-preview-agent {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.8rem;
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  background: #f2f2ed;
+  border-left: 2px solid var(--neo-moss);
+}
+
+.neo-preview-agent span,
+.neo-preview-agent small {
+  color: var(--neo-faint);
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+}
+
+.neo-preview-agent strong {
+  color: var(--neo-muted);
+  font-size: 0.75rem;
+  font-weight: 550;
+}
+
+.neo-preview-footer {
+  min-height: 2rem;
+  padding: 0 1.15rem;
+  background: #f2f2ed;
+  border-top: 1px solid var(--neo-line);
+}
+
+.neo-product {
+  padding: var(--neo-space-6) max(1.5rem, calc((100vw - 70rem) / 2));
+  background: #eeede8;
+  border-block: 1px solid var(--neo-line);
+}
+
+.neo-product-heading {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: var(--neo-space-4);
+  align-items: end;
+  margin-bottom: var(--neo-space-4);
+}
+
+.neo-product-heading h2 {
+  margin-top: 0.45rem;
+  font-size: clamp(2.4rem, 5vw, 4.4rem);
+  line-height: 1;
+}
+
+.neo-product-heading > p {
+  max-width: 27rem;
+  color: var(--neo-muted);
+}
+
+.neo-workflow {
+  max-width: 61rem;
+  margin-inline: auto;
+  overflow: hidden;
+  background: var(--neo-white);
+  border: 1px solid var(--neo-line-dark);
+  border-radius: 0.65rem;
+  box-shadow: 0 1.5rem 4rem rgba(41, 42, 37, 0.07);
+}
+
+.neo-workflow-top,
+.neo-plan-meta,
+.neo-proof,
+.neo-agent {
+  display: flex;
+  align-items: center;
+}
+
+.neo-workflow-top {
+  justify-content: space-between;
+  min-height: 3.15rem;
+  padding: 0 1.25rem;
+  color: var(--neo-muted);
+  font-size: 0.72rem;
+  border-bottom: 1px solid var(--neo-line);
+}
+
+.neo-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.neo-mode i {
+  width: 0.4rem;
+  height: 0.4rem;
+  background: var(--neo-moss);
+  border-radius: 50%;
+}
+
+.neo-request {
+  display: flex;
+  gap: 0.7rem;
+  padding: 1.5rem 1.75rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.88rem;
+  border-bottom: 1px solid var(--neo-line);
+}
+
+.neo-request > span {
+  color: var(--neo-moss);
+  font-weight: 800;
+}
+
+.neo-plan {
+  padding: 1.7rem 1.75rem 1.3rem;
+}
+
+.neo-plan-meta {
+  justify-content: space-between;
+  color: var(--neo-faint);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.neo-plan ol {
+  padding: 0;
+  list-style: none;
+}
+
+.neo-plan li {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr;
+  gap: 0.65rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #e8e8e2;
+}
+
+.neo-plan li:last-child {
+  border-bottom: 0;
+}
+
+.neo-check {
+  display: grid;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 0.12rem;
+  place-items: center;
+  color: var(--neo-moss);
+  font-size: 0.7rem;
+  border: 1px solid var(--neo-line-dark);
+  border-radius: 50%;
+}
+
+.neo-plan .done .neo-check {
+  color: #fff;
+  background: var(--neo-moss);
+  border-color: var(--neo-moss);
+}
+
+.neo-plan .active .neo-check i {
+  width: 0.38rem;
+  height: 0.38rem;
+  background: var(--neo-moss);
+  border-radius: 50%;
+}
+
+.neo-plan strong,
+.neo-plan small {
+  display: block;
+}
+
+.neo-plan strong {
+  color: #2c2d29;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.neo-plan small {
+  margin-top: 0.15rem;
+  color: var(--neo-faint);
+  font-family: var(--sl-font-mono);
+  font-size: 0.68rem;
+}
+
+.neo-agent {
+  justify-content: space-between;
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.8rem;
+  color: var(--neo-muted);
+  font-family: var(--sl-font-mono);
+  font-size: 0.65rem;
+  background: #f5f5f1;
+  border-left: 2px solid var(--neo-moss);
+}
+
+.neo-proof {
+  gap: 0.7rem;
+  padding: 0.9rem 1.75rem;
+  color: var(--neo-muted);
+  background: #f5f5f1;
+  border-top: 1px solid var(--neo-line);
+}
+
+.neo-proof > span {
+  color: var(--neo-moss);
+}
+
+.neo-proof code {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--sl-font-mono);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.neo-proof small {
+  margin-left: auto;
+  color: var(--neo-faint);
+}
+
+.neo-intro {
+  width: min(100% - 3rem, 57rem);
+  margin-inline: auto;
+  padding: var(--neo-space-6) 0;
+  text-align: center;
+}
+
+.neo-intro h2 {
+  margin: var(--neo-space-2) 0 var(--neo-space-3);
+  font-size: clamp(2.7rem, 5.5vw, 5rem);
+  line-height: 1;
+}
+
+.neo-intro > p:last-child {
+  max-width: 43rem;
+  margin-inline: auto;
+  color: var(--neo-muted);
+  font-size: 1.05rem;
+}
+
+.neo-principles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: min(100% - 3rem, 70rem);
+  margin: 0 auto var(--neo-space-6);
+  border-block: 1px solid var(--neo-line);
+}
+
+.neo-principles article {
+  padding: var(--neo-space-4) var(--neo-space-4) var(--neo-space-4) 0;
+}
+
+.neo-principles article + article {
+  padding-left: var(--neo-space-4);
+  border-left: 1px solid var(--neo-line);
+}
+
+.neo-principles article > span {
+  color: var(--neo-faint);
+  font-family: var(--sl-font-mono);
+  font-size: 0.68rem;
+}
+
+.neo-principles h3 {
+  margin: var(--neo-space-4) 0 var(--neo-space-1);
+  font-size: 1.05rem;
+}
+
+.neo-principles p {
+  color: var(--neo-muted);
+  font-size: 0.9rem;
+}
+
+.neo-orchestration {
+  display: grid;
+  grid-template-columns: 0.85fr 1.15fr;
+  gap: var(--neo-space-6);
+  align-items: center;
+  padding: var(--neo-space-6) max(1.5rem, calc((100vw - 70rem) / 2));
+  background: #292c28;
+}
+
+.neo-orchestration :is(h2, h3) {
+  color: #f5f4ef;
+}
+
+.neo-orchestration .neo-label {
+  color: #b7c9bf;
+}
+
+.neo-orchestration h2 {
+  margin: var(--neo-space-2) 0 var(--neo-space-3);
+  font-size: clamp(2.8rem, 5vw, 4.7rem);
+  line-height: 1;
+}
+
+.neo-orchestration-copy > p:not(.neo-label) {
+  margin-bottom: var(--neo-space-3);
+  color: #c2c3bd;
+}
+
+.neo-orchestration .neo-text-link {
+  color: #f3f2ed;
+  border-bottom-color: #676a64;
+}
+
+.neo-agents {
+  padding: 0.8rem 1.5rem 0;
+  background: #f5f4ef;
+  border-radius: 0.55rem;
+}
+
+.neo-coordinator-row,
+.neo-agent-row {
+  display: grid;
+  grid-template-columns: 3.25rem 1fr auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 1.15rem 0;
+  border-bottom: 1px solid #d8d8d1;
+}
+
+.neo-coordinator-row span,
+.neo-agent-row span {
+  color: var(--neo-faint);
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+}
+
+.neo-coordinator-row strong,
+.neo-agent-row strong {
+  color: #30312d;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.neo-coordinator-row small,
+.neo-agent-row small {
+  color: var(--neo-faint);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.neo-agent-row {
+  margin-left: 1.5rem;
+}
+
+.neo-agent-row small.complete {
+  color: var(--neo-moss);
+}
+
+.neo-agent-row small.working::before {
+  content: '';
+  display: inline-block;
+  width: 0.38rem;
+  height: 0.38rem;
+  margin-right: 0.4rem;
+  background: var(--neo-moss);
+  border-radius: 50%;
+}
+
+.neo-agents > p {
+  padding: 1rem 0;
+  color: var(--neo-faint);
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.neo-foundation {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: var(--neo-space-6);
+  width: min(100% - 3rem, 70rem);
+  margin-inline: auto;
+  padding: var(--neo-space-6) 0;
+}
+
+.neo-foundation h2 {
+  margin-top: 0.8rem;
+  font-size: clamp(2.7rem, 5vw, 4.6rem);
+  line-height: 1;
+}
+
+.neo-foundation dl {
+  border-top: 1px solid var(--neo-line-dark);
+}
+
+.neo-foundation dl > div {
+  display: grid;
+  grid-template-columns: 0.7fr 1.3fr;
+  gap: 2rem;
+  padding: 1.35rem 0;
+  border-bottom: 1px solid var(--neo-line);
+}
+
+.neo-foundation dt {
+  color: var(--neo-ink);
+  font-weight: 650;
+}
+
+.neo-foundation dd {
+  color: var(--neo-muted);
+}
+
+.neo-final {
+  padding: var(--neo-space-6) 1.5rem;
+  text-align: center;
+  background: #eeede8;
+  border-top: 1px solid var(--neo-line);
+}
+
+.neo-final h2 {
+  margin: 0.8rem 0 1rem;
+  font-size: clamp(3rem, 6.5vw, 5.7rem);
+  line-height: 1;
+}
+
+.neo-final > p:not(.neo-label) {
+  color: var(--neo-muted);
+}
+
+@media (max-width: 64rem) {
+  .neo-hero,
+  .neo-product-heading,
+  .neo-orchestration,
+  .neo-foundation {
+    grid-template-columns: 1fr;
+  }
+
+  .neo-hero {
+    max-width: 44rem;
+    gap: var(--neo-space-4);
+  }
+
+  .neo-hero h1,
+  .neo-hero-lede {
+    max-width: 39rem;
+  }
+
+  .neo-product-heading {
+    gap: 1rem;
+  }
+
+  .neo-orchestration-copy {
+    max-width: 36rem;
+  }
+
+  .neo-agents {
+    max-width: 42rem;
+    width: 100%;
+  }
+}
+
+@media (max-width: 50rem) {
+  .neo-home {
+    --neo-space-6: 4rem;
+  }
+
+  .neo-principles {
+    grid-template-columns: 1fr;
+  }
+
+  .neo-principles article,
+  .neo-principles article + article {
+    padding: 2rem 0;
+    border-left: 0;
+  }
+
+  .neo-principles article + article {
+    border-top: 1px solid var(--neo-line);
+  }
+
+  .neo-principles h3 {
+    margin-top: 1.5rem;
+  }
+}
+
+@media (max-width: 38rem) {
+  .neo-hero,
+  .neo-intro,
+  .neo-principles,
+  .neo-foundation {
+    width: min(100% - 2rem, 70rem);
+  }
+
+  .neo-hero {
+    gap: var(--neo-space-4);
+    padding-top: 2rem;
+  }
+
+  .neo-hero h1 {
+    font-size: clamp(2.9rem, 14vw, 4rem);
+  }
+
+  .neo-actions {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .neo-actions .neo-button {
+    width: 100%;
+  }
+
+  .neo-preview-body {
+    padding-inline: 1rem;
+  }
+
+  .neo-preview-agent {
+    grid-template-columns: 1fr auto;
+  }
+
+  .neo-preview-agent strong {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .neo-product,
+  .neo-orchestration {
+    padding-inline: 1rem;
+  }
+
+  .neo-request,
+  .neo-plan,
+  .neo-proof {
+    padding-inline: 1rem;
+  }
+
+  .neo-agent {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .neo-coordinator-row,
+  .neo-agent-row {
+    grid-template-columns: 2rem 1fr;
+  }
+
+  .neo-coordinator-row small,
+  .neo-agent-row small {
+    grid-column: 2;
+  }
+
+  .neo-agent-row {
+    margin-left: 0.75rem;
+  }
+
+  .neo-foundation dl > div {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .sl-markdown-content table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neo-home *,
+  .neo-home *::before,
+  .neo-home *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
