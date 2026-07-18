@@ -122,6 +122,10 @@ Neo defaults to Anthropic. Set `provider: openai`, `provider: openrouter`, or
 If you are using OpenAI with an API key, you do not need `neo login`.
 `neo login` is only for the device-code subscription flow.
 
+Neo also detects credentials for the other supported providers. Use `/model`
+to switch the current session to any locally credentialed provider and model
+without restarting. The switch does not rewrite `neo.yaml`.
+
 ### 2. Set credentials
 
 Anthropic:
@@ -276,7 +280,9 @@ neo resume <id>     # reopen a saved session
 Inside the TUI, use `/sessions` to open the session browser. The in-TUI browser
 can resume sessions for the current working directory; use `neo resume <id>`
 from the shell when you want Neo to restore a different saved cwd before tools
-are created.
+are created. Sessions remember both provider and model. Resume restores that
+backend when its credential is still available, or warns and uses the configured
+default when it is not.
 
 ## TUI Shortcuts
 
@@ -288,7 +294,7 @@ Slash commands keep common actions out of the chat transcript:
 | `/tools` | List available tools |
 | `/permissions` | Change the current permission mode |
 | `/tokens` | Show token usage for the session |
-| `/model` | Pick the active model for this session |
+| `/model` | Pick a provider and model for this session |
 | `/sessions` | Browse saved sessions |
 | `/memory <text>` | Append a project memory entry |
 | `/clear` | Clear the current transcript |
@@ -424,7 +430,7 @@ provider: google
 # google     -> uses Gemini via GOOGLE_API_KEY
 provider: anthropic
 
-# How the "openai" provider authenticates (ignored for other providers):
+# How OpenAI authenticates, including when selected through /model:
 #   api_key      -> uses OPENAI_API_KEY (default)
 #   subscription -> uses a ChatGPT/Codex subscription via device-code auth; run `neo login`
 openai_auth: api_key

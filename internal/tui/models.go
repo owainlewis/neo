@@ -10,6 +10,7 @@ import (
 )
 
 type ModelChoice struct {
+	Provider    string
 	ID          string
 	Name        string
 	Description string
@@ -22,29 +23,45 @@ type modelBrowser struct {
 	err      error
 }
 
-func normalizeModelChoices(current string, choices []ModelChoice) []ModelChoice {
+func normalizeModelChoices(currentProvider, currentModel string, choices []ModelChoice) []ModelChoice {
 	var out []ModelChoice
 	seen := map[string]bool{}
 	for _, choice := range choices {
+		choice.Provider = strings.TrimSpace(choice.Provider)
 		choice.ID = strings.TrimSpace(choice.ID)
-		if choice.ID == "" || seen[choice.ID] {
+		key := modelChoiceKey(choice.Provider, choice.ID)
+		if choice.ID == "" || seen[key] {
 			continue
 		}
 		if strings.TrimSpace(choice.Name) == "" {
 			choice.Name = choice.ID
 		}
 		out = append(out, choice)
-		seen[choice.ID] = true
+		seen[key] = true
 	}
-	current = strings.TrimSpace(current)
-	if current != "" && !seen[current] {
+	currentProvider = strings.TrimSpace(currentProvider)
+	currentModel = strings.TrimSpace(currentModel)
+	currentKey := modelChoiceKey(currentProvider, currentModel)
+	if currentModel != "" && !seen[currentKey] {
 		out = append([]ModelChoice{{
-			ID:          current,
-			Name:        current,
+			Provider:    currentProvider,
+			ID:          currentModel,
+			Name:        currentModel,
 			Description: "Current configured model",
 		}}, out...)
 	}
 	return out
+}
+
+func modelChoiceKey(provider, model string) string {
+	return strings.TrimSpace(provider) + "\x00" + strings.TrimSpace(model)
+}
+
+func backendLabel(provider, model string) string {
+	if strings.TrimSpace(provider) == "" {
+		return model
+	}
+	return provider + "/" + model
 }
 
 func (m *model) openModelBrowser() {
@@ -121,7 +138,15 @@ func (m *model) selectCurrentModel() {
 		return
 	}
 	choice := items[m.models.selected]
-	m.ag.SetModel(choice.ID)
+	if m.modelSwitcher != nil {
+		if err := m.modelSwitcher(choice); err != nil {
+			m.models.err = err
+			return
+		}
+	} else {
+		m.ag.SetModel(choice.ID)
+	}
+	m.providerTag = choice.Provider
 	m.modelTag = choice.ID
 	if m.afterSend != nil {
 		if err := m.afterSend(); err != nil {
@@ -129,7 +154,7 @@ func (m *model) selectCurrentModel() {
 			return
 		}
 	}
-	m.blocks = append(m.blocks, noticeBlock{text: "model: " + choice.ID})
+	m.blocks = append(m.blocks, noticeBlock{text: "model: " + backendLabel(choice.Provider, choice.ID)})
 	m.closeModelBrowser()
 }
 
@@ -146,6 +171,7 @@ func (m *model) filteredModels() []ModelChoice {
 
 func modelChoiceMatches(choice ModelChoice, query string) bool {
 	haystack := strings.ToLower(strings.Join([]string{
+		choice.Provider,
 		choice.ID,
 		choice.Name,
 		choice.Description,
@@ -184,14 +210,15 @@ func (m *model) modelBrowserView() string {
 			style = lipgloss.NewStyle().Background(colCardBg)
 		}
 		name := choice.Name
-		if choice.ID == m.modelTag {
+		if choice.Provider == m.providerTag && choice.ID == m.modelTag {
 			name += " " + styMuted.Render("(current)")
 		}
 		desc := choice.Description
 		if desc == "" {
 			desc = choice.ID
 		}
-		line := prefix + styTool.Render(padRight(choice.ID, 22)) + "  " + name
+		id := backendLabel(choice.Provider, choice.ID)
+		line := prefix + styTool.Render(padRight(id, 30)) + "  " + name
 		if desc != "" && desc != choice.ID {
 			line += "  " + styMuted.Render(desc)
 		}

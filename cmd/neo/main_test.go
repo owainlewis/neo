@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/owainlewis/neo/internal/auth"
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm/google"
@@ -19,10 +20,11 @@ import (
 )
 
 func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.T) {
+	clearAdditionalProviderCredentials(t)
 	choices := modelChoices(context.Background(), &config.Config{
 		Provider:   "openai",
 		OpenAIAuth: config.OpenAIAuthSubscription,
-	})
+	}, "openai")
 
 	if len(choices) != 1 {
 		t.Fatalf("subscription choices = %d, want 1: %#v", len(choices), choices)
@@ -33,10 +35,11 @@ func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.
 }
 
 func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
+	clearAdditionalProviderCredentials(t)
 	choices := modelChoices(context.Background(), &config.Config{
 		Provider:   "openai",
 		OpenAIAuth: config.OpenAIAuthAPIKey,
-	})
+	}, "openai")
 
 	for _, choice := range choices {
 		if strings.Contains(choice.ID, "codex") {
@@ -46,7 +49,8 @@ func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
 }
 
 func TestModelChoices_GoogleListsGeminiModels(t *testing.T) {
-	choices := modelChoices(context.Background(), &config.Config{Provider: "google"})
+	clearAdditionalProviderCredentials(t)
+	choices := modelChoices(context.Background(), &config.Config{Provider: "google"}, "google")
 	if len(choices) == 0 {
 		t.Fatal("expected google model choices")
 	}
@@ -73,13 +77,14 @@ func TestUsageDocumentsGoogleProvider(t *testing.T) {
 }
 
 func TestModelChoices_OpenRouterFallsBackWhenCatalogueUnavailable(t *testing.T) {
+	clearAdditionalProviderCredentials(t)
 	// Point the picker at an unroutable network so the live fetch fails fast;
 	// the picker must still return the provider default rather than nothing.
 	t.Setenv("OPENROUTER_API_KEY", "")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already-cancelled context forces the fetch to fail immediately
 
-	choices := modelChoices(ctx, &config.Config{Provider: "openrouter"})
+	choices := modelChoices(ctx, &config.Config{Provider: "openrouter"}, "openrouter")
 	if len(choices) == 0 {
 		t.Fatal("expected a fallback openrouter model choice")
 	}
@@ -93,6 +98,49 @@ func TestModelChoices_OpenRouterFallsBackWhenCatalogueUnavailable(t *testing.T) 
 	if !found {
 		t.Fatalf("fallback choices missing default %q: %#v", openrouter.DefaultModel, choices)
 	}
+}
+
+func TestModelChoices_ListsModelsAcrossCredentialedProviders(t *testing.T) {
+	clearAdditionalProviderCredentials(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	choices := modelChoices(context.Background(), &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}, "anthropic")
+	providers := map[string]bool{}
+	for _, choice := range choices {
+		providers[choice.Provider] = true
+	}
+	if !providers["anthropic"] || !providers["openai"] {
+		t.Fatalf("providers = %v, want anthropic and openai", providers)
+	}
+	if providers["google"] || providers["openrouter"] {
+		t.Fatalf("picker exposed providers without credentials: %v", providers)
+	}
+}
+
+func TestChatSessionProvider_RejectsExpiredSubscriptionCredentialOnResume(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	store := auth.NewStore(filepath.Join(home, ".neo", "auth.json"))
+	if err := store.Set(auth.ProviderOpenAICodex, auth.Credentials{
+		AccessToken: "expired",
+		ExpiresAt:   time.Now().Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := chatSessionProvider(context.Background(), &config.Config{OpenAIAuth: config.OpenAIAuthSubscription}, &session.Session{}, "openai")
+	if err == nil || !strings.Contains(err.Error(), "session expired") {
+		t.Fatalf("checkedProvider error = %v, want expired credential error", err)
+	}
+}
+
+func clearAdditionalProviderCredentials(t *testing.T) {
+	t.Helper()
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("HOME", t.TempDir())
 }
 
 func TestDoctorCredentialCheckFailsWhenEnvCredentialMissing(t *testing.T) {
@@ -233,29 +281,43 @@ func TestChatSystem_SkipsGitContextOutsideRepo(t *testing.T) {
 	}
 }
 
-func TestSessionModel_HonorsSavedModelForSameProvider(t *testing.T) {
+func TestSessionBackend_HonorsSavedModelForSameProvider(t *testing.T) {
 	cfg := &config.Config{Provider: "openai", Model: "gpt-5.2"}
 	meta := session.Metadata{Provider: "openai", Model: "gpt-5-mini"}
-	if got := sessionModel(cfg, meta); got != "gpt-5-mini" {
-		t.Fatalf("sessionModel = %q, want saved model gpt-5-mini", got)
+	provider, model := sessionBackend(cfg, meta)
+	if provider != "openai" || model != "gpt-5-mini" {
+		t.Fatalf("session backend = %s/%s, want openai/gpt-5-mini", provider, model)
 	}
 }
 
-func TestSessionModel_FallsBackOnProviderMismatch(t *testing.T) {
+func TestSessionBackend_FallsBackWhenSavedProviderCredentialsAreMissing(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
 	cfg := &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}
 	meta := session.Metadata{Provider: "openai", Model: "gpt-5-codex"}
-	if got := sessionModel(cfg, meta); got != "claude-opus-4-8" {
-		t.Fatalf("sessionModel = %q, want config model on provider switch", got)
+	provider, model := sessionBackend(cfg, meta)
+	if provider != "anthropic" || model != "claude-opus-4-8" {
+		t.Fatalf("session backend = %s/%s, want anthropic/claude-opus-4-8", provider, model)
 	}
 }
 
-func TestSessionModel_FallsBackForLegacySessionsWithoutProvider(t *testing.T) {
+func TestSessionBackend_RestoresSavedProviderWhenCredentialIsConfigured(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	cfg := &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}
+	meta := session.Metadata{Provider: "openai", Model: "gpt-5.2"}
+	provider, model := sessionBackend(cfg, meta)
+	if provider != "openai" || model != "gpt-5.2" {
+		t.Fatalf("session backend = %s/%s, want openai/gpt-5.2", provider, model)
+	}
+}
+
+func TestSessionBackend_FallsBackForLegacySessionsWithoutProvider(t *testing.T) {
 	// Sessions written before the provider field existed must not pin a model
 	// that may belong to a different backend.
 	cfg := &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}
 	meta := session.Metadata{Model: "gpt-4o"}
-	if got := sessionModel(cfg, meta); got != "claude-opus-4-8" {
-		t.Fatalf("sessionModel = %q, want config model for legacy session", got)
+	provider, model := sessionBackend(cfg, meta)
+	if provider != "anthropic" || model != "claude-opus-4-8" {
+		t.Fatalf("session backend = %s/%s, want anthropic/claude-opus-4-8", provider, model)
 	}
 }
 

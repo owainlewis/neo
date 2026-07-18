@@ -86,6 +86,27 @@ func TestRunAgentStepReportsUsage(t *testing.T) {
 	}
 }
 
+func TestAgentRunner_SetBackendAppliesToFutureWorkers(t *testing.T) {
+	oldProvider := &llmtest.FakeProvider{}
+	newProvider := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("new backend")}}
+	r := &AgentRunner{Provider: oldProvider, DefaultModel: "old-model", Root: t.TempDir()}
+	if err := r.SetBackend(newProvider, "new-model"); err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan AgentEvent, 16)
+	out, err := r.RunAgentStep(context.Background(), Step{Name: "worker", Kind: "agent", Prompt: "Work."}, t.TempDir(), "task", 1, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "new backend" || len(oldProvider.Calls) != 0 || len(newProvider.Calls) != 1 {
+		t.Fatalf("result=%q old calls=%d new calls=%d", out, len(oldProvider.Calls), len(newProvider.Calls))
+	}
+	if newProvider.Calls[0].Model != "new-model" {
+		t.Fatalf("worker model = %q, want new-model", newProvider.Calls[0].Model)
+	}
+}
+
 // TestReadonlyModePropagatesToSteps guards the permission boundary: a
 // readonly session delegating a step must not gain write access through
 // the child agent.

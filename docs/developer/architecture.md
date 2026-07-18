@@ -32,7 +32,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 ## Chat Startup Flow
 
 1. `cmd/neo` loads config.
-2. `mustProvider` selects Anthropic, OpenAI, OpenRouter, or Google Gemini. OpenAI defaults to API-key auth; `openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials.
+2. Provider construction selects Anthropic, OpenAI, OpenRouter, or Google Gemini. OpenAI defaults to API-key auth; `openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials.
 3. The CLI creates or loads a session from `internal/session`.
 4. Skills, AGENTS.md, project memory, and lightweight git context are discovered when enabled.
 5. `chatSystem` builds both flattened and segmented system prompts.

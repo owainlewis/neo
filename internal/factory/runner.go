@@ -3,6 +3,8 @@ package factory
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/owainlewis/neo/internal/agent"
@@ -23,6 +25,7 @@ const defaultStepMaxTurns = agent.DefaultMaxTurns
 // fresh agent (amnesiac by design) with a registry filtered to the step's
 // frontmatter tool list — role enforcement by construction, not prose.
 type AgentRunner struct {
+	backendMu    sync.RWMutex
 	Provider     llm.Provider
 	DefaultModel string
 	Root         string // workspace root; bounds file tools via permission policy
@@ -41,10 +44,34 @@ type AgentRunner struct {
 	Sup *Supervisor
 }
 
+// SetBackend updates the default provider and model used by future workers.
+// Existing workers keep the backend snapshot they started with.
+func (r *AgentRunner) SetBackend(provider llm.Provider, model string) error {
+	model = strings.TrimSpace(model)
+	if provider == nil {
+		return fmt.Errorf("provider is required")
+	}
+	if model == "" {
+		return fmt.Errorf("model is required")
+	}
+	r.backendMu.Lock()
+	r.Provider = provider
+	r.DefaultModel = model
+	r.backendMu.Unlock()
+	return nil
+}
+
+func (r *AgentRunner) backend() (llm.Provider, string) {
+	r.backendMu.RLock()
+	defer r.backendMu.RUnlock()
+	return r.Provider, r.DefaultModel
+}
+
 func (r *AgentRunner) RunAgentStep(ctx context.Context, step Step, dir, input string, nodeID int, events chan<- AgentEvent) (string, error) {
+	provider, defaultModel := r.backend()
 	model := step.Model
 	if model == "" {
-		model = r.DefaultModel
+		model = defaultModel
 	}
 	maxTurns := step.MaxTurns
 	if maxTurns <= 0 {
@@ -58,10 +85,10 @@ func (r *AgentRunner) RunAgentStep(ctx context.Context, step Step, dir, input st
 	ag := agent.New(agent.Config{
 		Model:     model,
 		System:    step.Prompt,
-		Provider:  r.Provider,
+		Provider:  provider,
 		Tools:     r.registry(step, dir, nodeID),
 		Policy:    permission.New(string(mode), r.Root),
-		Compactor: compact.NewSummarizer(r.Provider, model),
+		Compactor: compact.NewSummarizer(provider, model),
 		MaxTurns:  maxTurns,
 		OnEvent: func(e agent.Event) {
 			if ev, ok := translate(e); ok {

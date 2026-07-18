@@ -9,7 +9,7 @@
 # google     → uses Gemini via GOOGLE_API_KEY
 provider: anthropic
 
-# How the "openai" provider authenticates (ignored for other providers):
+# How OpenAI authenticates, including when selected through /model:
 #   api_key      → uses OPENAI_API_KEY (default)
 #   subscription → uses a ChatGPT/Codex subscription via device-code auth; run `neo login`
 # openai_auth: api_key

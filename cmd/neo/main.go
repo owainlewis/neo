@@ -214,32 +214,50 @@ func mustConfig() *config.Config {
 }
 
 func mustProvider(cfg *config.Config) llm.Provider {
-	var (
-		prov llm.Provider
-		err  error
-	)
-	switch cfg.Provider {
-	case "openai":
-		if cfg.SubscriptionAuth() {
-			prov, err = newCodexProvider()
-		} else {
-			prov, err = openai.New()
-		}
-	case "openrouter":
-		prov, err = openrouter.New()
-	case "google":
-		prov, err = google.New()
-	case "anthropic", "":
-		prov, err = anthropic.New()
-	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q (expected \"anthropic\", \"openai\", \"openrouter\", or \"google\")\n", cfg.Provider)
-		os.Exit(1)
-	}
+	prov, err := newProvider(cfg, cfg.Provider)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	return prov
+}
+
+func newProvider(cfg *config.Config, name string) (llm.Provider, error) {
+	switch name {
+	case "openai":
+		if cfg.OpenAIAuth == config.OpenAIAuthSubscription {
+			return newCodexProvider()
+		}
+		return openai.New()
+	case "openrouter":
+		return openrouter.New()
+	case "google":
+		return google.New()
+	case "anthropic", "":
+		return anthropic.New()
+	default:
+		return nil, fmt.Errorf("unknown provider %q (expected \"anthropic\", \"openai\", \"openrouter\", or \"google\")", name)
+	}
+}
+
+func checkedProvider(ctx context.Context, cfg *config.Config, name string) (llm.Provider, error) {
+	if name == "openai" && cfg.OpenAIAuth == config.OpenAIAuthSubscription {
+		store, err := auth.DefaultStore()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := auth.NewTokenSource(store, auth.ProviderOpenAICodex).Token(ctx); err != nil {
+			return nil, fmt.Errorf("OpenAI subscription credentials: %w", err)
+		}
+	}
+	return newProvider(cfg, name)
+}
+
+func chatSessionProvider(ctx context.Context, cfg *config.Config, sess *session.Session, name string) (llm.Provider, error) {
+	if sess != nil {
+		return checkedProvider(ctx, cfg, name)
+	}
+	return newProvider(cfg, name)
 }
 
 // newCodexProvider builds the ChatGPT/Codex subscription client from stored
@@ -349,7 +367,16 @@ func restoreSessionCWD(cwd string) {
 
 func runChatSession(ctx context.Context, store *session.Store, sess *session.Session) {
 	cfg := mustConfig()
-	prov := mustProvider(cfg)
+	providerName, model := sessionBackend(cfg, sessionMetadata(sess))
+	prov, err := chatSessionProvider(ctx, cfg, sess, providerName)
+	if err != nil && providerName != cfg.Provider {
+		fmt.Fprintf(os.Stderr, "warning: cannot resume with %s (%v); continuing with %s model %s\n", providerName, err, cfg.Provider, cfg.Model)
+		providerName, model = cfg.Provider, cfg.Model
+		prov = mustProvider(cfg)
+	} else if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
 	root := workspace.Root(cwd)
@@ -359,13 +386,14 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// judgment, not a stored workflow artifact.
 	var extra []tools.Tool
 	var stepEvents <-chan factory.Event
+	var agentRunner *factory.AgentRunner
 	var workflowEvents <-chan workflow.Event
 	wf := make(chan workflow.Event, 128)
 	workflowEvents = wf
 	extra = append(extra, workflow.Tool{Events: wf})
 	if cwd != "" {
 		var at factory.AgentTool
-		at, stepEvents = chatAgentTool(prov, cfg, cwd, root)
+		at, stepEvents, agentRunner = chatAgentTool(prov, model, cfg, cwd, root)
 		extra = append(extra, at)
 	}
 	reg := newRegistry(cwd, root, extra...)
@@ -375,16 +403,14 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		sess, err = store.Create(ctx, session.Metadata{
 			Source:   session.DefaultSource,
 			CWD:      cwd,
-			Model:    cfg.Model,
-			Provider: cfg.Provider,
+			Model:    model,
+			Provider: providerName,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "create session: %v\n", err)
 			os.Exit(1)
 		}
 	}
-	model := sessionModel(cfg, sess.Metadata)
-
 	// Skills are loaded once: the catalog is advertised in the system prompt
 	// (via chatSystem), and the same slice drives $name and /name expansion in
 	// the TUI.
@@ -404,22 +430,44 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	})
 
 	saveSession := func() error {
+		activeProvider, activeModel := ag.Backend()
 		sess.Messages = ag.Transcript()
 		sess.Usage = ag.Usage()
 		sess.Metadata.CWD = cwd
-		sess.Metadata.Model = ag.Model()
-		sess.Metadata.Provider = cfg.Provider
+		sess.Metadata.Model = activeModel
+		sess.Metadata.Provider = activeProvider
 		return store.Save(ctx, sess)
+	}
+
+	switchBackend := func(choice tui.ModelChoice) error {
+		next, err := checkedProvider(ctx, cfg, choice.Provider)
+		if err != nil {
+			return fmt.Errorf("switch to %s: %w", choice.Provider, err)
+		}
+		if agentRunner != nil {
+			if err := agentRunner.SetBackend(next, choice.ID); err != nil {
+				return err
+			}
+		}
+		return ag.SetBackend(next, choice.ID, chatCompactor(next, choice.ID, cfg))
 	}
 
 	if err := tui.Run(ctx, ag, model, Version, sk,
 		tui.WithAfterSend(saveSession),
 		tui.WithPermissionMode(cfg.Permissions.Mode),
 		tui.WithProjectMemory(root, cfg.MemoryEnabled()),
-		tui.WithSessions(store, sess, func(resumed *session.Session) {
+		tui.WithSessions(store, sess, func(resumed *session.Session) error {
+			resumedProvider, resumedModel := sessionBackend(cfg, resumed.Metadata)
+			activeProvider, activeModel := ag.Backend()
+			if resumedProvider != activeProvider || resumedModel != activeModel {
+				if err := switchBackend(tui.ModelChoice{Provider: resumedProvider, ID: resumedModel}); err != nil {
+					return err
+				}
+			}
 			sess = resumed
+			return nil
 		}),
-		tui.WithModelChoices(modelChoices(ctx, cfg)),
+		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName), switchBackend),
 		tui.WithStepEvents(stepEvents),
 		tui.WithWorkflowEvents(workflowEvents),
 		tui.WithVerbose(cfg.VerboseEnabled()),
@@ -437,25 +485,91 @@ func chatCompactor(prov llm.Provider, model string, cfg *config.Config) compact.
 	return s
 }
 
-// sessionModel picks the model for a (possibly resumed) session: the session's
-// saved model when it was recorded under the current provider, otherwise the
-// configured default. A saved model from a different provider is never reused —
-// its ids don't transfer — and the switch is surfaced as a warning.
-func sessionModel(cfg *config.Config, meta session.Metadata) string {
-	if meta.Model != "" && meta.Provider == cfg.Provider {
-		return meta.Model
+func sessionMetadata(sess *session.Session) session.Metadata {
+	if sess == nil {
+		return session.Metadata{}
 	}
-	if meta.Provider != "" && meta.Provider != cfg.Provider {
-		fmt.Fprintf(os.Stderr, "warning: session was created with provider %s; continuing with %s model %s\n",
-			meta.Provider, cfg.Provider, cfg.Model)
-	}
-	return cfg.Model
+	return sess.Metadata
 }
 
-func modelChoices(ctx context.Context, cfg *config.Config) []tui.ModelChoice {
-	switch cfg.Provider {
+// sessionBackend restores a saved backend when its local credential source is
+// still configured. Otherwise resume is explicit about falling back to the
+// current config rather than applying a model id to the wrong provider.
+func sessionBackend(cfg *config.Config, meta session.Metadata) (string, string) {
+	if meta.Provider == "" || meta.Model == "" {
+		return cfg.Provider, cfg.Model
+	}
+	if meta.Provider == cfg.Provider || providerCredentialPresent(cfg, meta.Provider) {
+		return meta.Provider, meta.Model
+	}
+	fmt.Fprintf(os.Stderr, "warning: session provider %s is not configured; continuing with %s model %s\n",
+		meta.Provider, cfg.Provider, cfg.Model)
+	return cfg.Provider, cfg.Model
+}
+
+func modelChoices(ctx context.Context, cfg *config.Config, activeProvider string) []tui.ModelChoice {
+	var choices []tui.ModelChoice
+	for _, provider := range configuredProviders(cfg, activeProvider) {
+		providerChoices := providerModelChoices(ctx, cfg, provider, provider == activeProvider)
+		for i := range providerChoices {
+			providerChoices[i].Provider = provider
+		}
+		choices = append(choices, providerChoices...)
+	}
+	return choices
+}
+
+// configuredProviders treats an available local credential source as provider
+// configuration. The active provider is always first because chat startup has
+// already validated it; additional providers require their credential to be
+// present before they enter the picker.
+func configuredProviders(cfg *config.Config, active string) []string {
+	if active == "" {
+		active = cfg.Provider
+		if active == "" {
+			active = "anthropic"
+		}
+	}
+	ordered := []string{active, "anthropic", "openai", "openrouter", "google"}
+	seen := map[string]bool{}
+	var providers []string
+	for _, provider := range ordered {
+		if seen[provider] || (provider != active && !providerCredentialPresent(cfg, provider)) {
+			continue
+		}
+		seen[provider] = true
+		providers = append(providers, provider)
+	}
+	return providers
+}
+
+func providerCredentialPresent(cfg *config.Config, provider string) bool {
+	switch provider {
+	case "anthropic":
+		return strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != ""
 	case "openai":
-		if cfg.SubscriptionAuth() {
+		if cfg.OpenAIAuth == config.OpenAIAuthSubscription {
+			store, err := auth.DefaultStore()
+			if err != nil {
+				return false
+			}
+			_, ok, err := store.Get(auth.ProviderOpenAICodex)
+			return err == nil && ok
+		}
+		return strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
+	case "openrouter":
+		return strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) != ""
+	case "google":
+		return strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")) != ""
+	default:
+		return false
+	}
+}
+
+func providerModelChoices(ctx context.Context, cfg *config.Config, provider string, active bool) []tui.ModelChoice {
+	switch provider {
+	case "openai":
+		if cfg.OpenAIAuth == config.OpenAIAuthSubscription {
 			return []tui.ModelChoice{
 				{ID: "gpt-5-codex", Name: "GPT-5 Codex", Description: "Supported ChatGPT/Codex subscription model"},
 			}
@@ -471,6 +585,11 @@ func modelChoices(ctx context.Context, cfg *config.Config) []tui.ModelChoice {
 			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},
 		}
 	case "openrouter":
+		if !active {
+			return []tui.ModelChoice{
+				{ID: openrouter.DefaultModel, Name: openrouter.DefaultModel, Description: "Default OpenRouter model"},
+			}
+		}
 		return openRouterModelChoices(ctx)
 	case "google":
 		return []tui.ModelChoice{

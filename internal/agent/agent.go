@@ -74,6 +74,8 @@ type Agent struct {
 	messages []llm.Message
 	usage    llm.Usage
 
+	backendMu sync.RWMutex
+
 	steerMu      sync.Mutex
 	steerActive  bool
 	steerPending []string
@@ -115,13 +117,56 @@ func (a *Agent) SetApprover(fn func(context.Context, ApprovalRequest) (bool, err
 
 func (a *Agent) Transcript() []llm.Message { return cloneMessages(a.messages) }
 
-func (a *Agent) Model() string { return a.cfg.Model }
+func (a *Agent) Model() string {
+	a.backendMu.RLock()
+	defer a.backendMu.RUnlock()
+	return a.cfg.Model
+}
+
+// Backend returns a consistent provider/model pair for display and session
+// persistence.
+func (a *Agent) Backend() (string, string) {
+	a.backendMu.RLock()
+	defer a.backendMu.RUnlock()
+	return a.cfg.Provider.Name(), a.cfg.Model
+}
 
 func (a *Agent) SetModel(model string) {
-	if strings.TrimSpace(model) == "" {
+	model = strings.TrimSpace(model)
+	if model == "" {
 		return
 	}
-	a.cfg.Model = strings.TrimSpace(model)
+	a.backendMu.Lock()
+	a.cfg.Model = model
+	a.backendMu.Unlock()
+}
+
+// SetBackend changes the provider, model, and compactor as one unit. Callers
+// switch only between turns, but the lock also keeps diagnostic readers and
+// race-enabled tests from observing a half-switched backend.
+func (a *Agent) SetBackend(provider llm.Provider, model string, compactor compact.Compactor) error {
+	model = strings.TrimSpace(model)
+	if provider == nil {
+		return fmt.Errorf("provider is required")
+	}
+	if model == "" {
+		return fmt.Errorf("model is required")
+	}
+	if compactor == nil {
+		compactor = compact.NoCompaction{}
+	}
+	a.backendMu.Lock()
+	a.cfg.Provider = provider
+	a.cfg.Model = model
+	a.cfg.Compactor = compactor
+	a.backendMu.Unlock()
+	return nil
+}
+
+func (a *Agent) backend() (llm.Provider, string, compact.Compactor) {
+	a.backendMu.RLock()
+	defer a.backendMu.RUnlock()
+	return a.cfg.Provider, a.cfg.Model, a.cfg.Compactor
 }
 
 func (a *Agent) SetPermissionMode(mode string) error {
@@ -207,8 +252,9 @@ func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []stri
 	}
 	a.beginSteering()
 	defer a.endSteering()
+	_, model, _ := a.backend()
 	logx.Debug("agent turn queued",
-		"model", a.cfg.Model,
+		"model", model,
 		"messages_before", len(a.messages),
 		"images", len(imagePaths),
 		"text", logx.SafeString(text, 240),
@@ -269,22 +315,23 @@ func (a *Agent) takeSteering(closeIfEmpty bool) (pending []string, closed bool) 
 func (a *Agent) run(ctx context.Context) (string, error) {
 	var finalText strings.Builder
 	for turn := 0; turn < a.cfg.MaxTurns; turn++ {
+		provider, model, compactor := a.backend()
 		logx.Debug("agent turn start",
 			"turn", turn+1,
 			"max_turns", a.cfg.MaxTurns,
 			"messages", len(a.messages),
-			"provider", a.cfg.Provider.Name(),
-			"model", a.cfg.Model,
+			"provider", provider.Name(),
+			"model", model,
 		)
-		compacted, err := a.cfg.Compactor.Compact(ctx, a.messages)
+		compacted, err := compactor.Compact(ctx, a.messages)
 		if err != nil {
 			logx.Debug("agent compaction error", "turn", turn+1, "error", err.Error())
 			a.emit(Event{Kind: EventError, Err: err})
 			return "", err
 		}
 		a.messages = compacted
-		resp, err := a.cfg.Provider.Complete(ctx, llm.Request{
-			Model:        a.cfg.Model,
+		resp, err := provider.Complete(ctx, llm.Request{
+			Model:        model,
 			System:       a.cfg.System,
 			SystemBlocks: a.cfg.SystemBlocks,
 			Messages:     a.messages,
