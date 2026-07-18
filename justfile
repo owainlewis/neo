@@ -25,6 +25,10 @@ test:
 test-verbose:
     go test -v ./...
 
+# Build the release-shaped binary and run stable local microbenchmarks
+performance:
+    ./scripts/performance.sh
+
 # Install neo into a runnable bin directory (stamps Version)
 install:
     #!/usr/bin/env bash
