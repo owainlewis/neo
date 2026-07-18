@@ -388,6 +388,19 @@ Constraints:
 - Treat this as an assessment only.
 ```
 
+Subagents use the coordinator's active provider and model by default. To keep
+workers on a deliberate backend while the coordinator switches models, add:
+
+```yaml
+subagents:
+  provider: anthropic
+  model: <claude-model-id>
+```
+
+Either field may be omitted. An omitted provider uses the configured startup
+provider; an omitted model uses that provider's default. Worker prompts remain
+fresh and self-contained, and the existing supervisor limits still apply.
+
 ## Configuration
 
 Neo defaults to Anthropic. Set `provider: openai`, `provider: openrouter`, or
@@ -442,6 +455,12 @@ openai_auth: api_key
 #   openrouter               -> see OpenRouter's model catalogue
 #   google                   -> gemini-3.5-flash
 model: claude-opus-4-8
+
+# Optional backend for chat-spawned subagents. When omitted, workers follow the
+# coordinator's active provider and model, including changes from /model.
+# subagents:
+#   provider: anthropic
+#   model: <claude-model-id>
 
 # Tool permission mode:
 #   trusted  -> allow built-in tools; ask before high-risk bash commands; paths stay inside repo
