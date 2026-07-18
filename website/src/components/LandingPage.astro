@@ -4,23 +4,50 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
 
 <div class="neo-home">
   <section class="neo-hero" aria-labelledby="neo-title">
-    <p class="neo-eyebrow">Open source coding agent</p>
-    <h1 id="neo-title">A coding agent you can trust with the repo.</h1>
-    <p class="neo-hero-lede">
-      Neo turns long engineering tasks into a visible workflow. It keeps the plan, tool activity,
-      agents, and results in view while it works.
-    </p>
-    <div class="neo-actions">
-      <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
-      <a class="neo-text-link" href="https://github.com/owainlewis/neo">View on GitHub <span aria-hidden="true">↗</span></a>
+    <div class="neo-hero-copy">
+      <p class="neo-eyebrow">Open source coding agent</p>
+      <h1 id="neo-title">A coding agent you can trust.</h1>
+      <p class="neo-hero-lede">
+        Neo turns long engineering tasks into a visible workflow. It keeps the plan, tool activity,
+        agents, and results in view while it works.
+      </p>
+      <div class="neo-actions">
+        <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
+        <a class="neo-text-link" href="https://github.com/owainlewis/neo">View on GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="neo-install" role="group" aria-label="Install command">
+        <code>{installCommand}</code>
+        <button type="button" data-copy-install data-command={installCommand} aria-label="Copy install command">
+          <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="6" width="10" height="10" rx="2"></rect><path d="M13 6V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h1"></path></svg>
+          <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"></path></svg>
+        </button>
+        <span class="neo-copy-status" data-copy-status aria-live="polite"></span>
+      </div>
     </div>
-    <div class="neo-install" role="group" aria-label="Install command">
-      <code>{installCommand}</code>
-      <button type="button" data-copy-install data-command={installCommand} aria-label="Copy install command">
-        <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="6" width="10" height="10" rx="2"></rect><path d="M13 6V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h1"></path></svg>
-        <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"></path></svg>
-      </button>
-      <span class="neo-copy-status" data-copy-status aria-live="polite"></span>
+
+    <div class="neo-hero-preview" role="group" aria-label="Neo working through an example task">
+      <div class="neo-preview-bar">
+        <span>neo / billing-api</span>
+        <span><i></i> working</span>
+      </div>
+      <div class="neo-preview-body">
+        <div class="neo-preview-title">
+          <div><span>Active workflow</span><strong>Fix duplicate invoice retries</strong></div>
+          <small>3 / 4</small>
+        </div>
+        <ol class="neo-preview-list">
+          <li class="complete"><span>✓</span><div><strong>Trace retry path</strong><small>9 files read</small></div></li>
+          <li class="complete"><span>✓</span><div><strong>Add idempotency guard</strong><small>2 files changed</small></div></li>
+          <li class="active"><span><i></i></span><div><strong>Test concurrent delivery</strong><small>go test ./internal/billing/...</small></div></li>
+          <li><span></span><div><strong>Review the diff</strong><small>waiting</small></div></li>
+        </ol>
+        <div class="neo-preview-agent">
+          <span>review agent</span>
+          <strong>Checking race conditions</strong>
+          <small>12s</small>
+        </div>
+      </div>
+      <div class="neo-preview-footer"><span>2 agents</span><span>claude-opus-4-8</span></div>
     </div>
   </section>
 
