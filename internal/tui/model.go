@@ -167,6 +167,12 @@ type turnStats struct {
 	direct   bool
 }
 
+type queuedTurn struct {
+	displayText string
+	agentText   string
+	images      []string
+}
+
 type model struct {
 	ctx      context.Context
 	ag       *agent.Agent
@@ -210,7 +216,10 @@ type model struct {
 	quitting bool
 
 	// cancel for the currently in-flight Send, if any.
-	sendCancel context.CancelFunc
+	sendCancel      context.CancelFunc
+	steer           func(string) bool
+	pendingSteering []string
+	queued          *queuedTurn
 
 	// mdStyleName is the glamour style chosen at startup. We re-use it when
 	// recreating the renderer on resize so we never re-probe the terminal
@@ -333,6 +342,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		projectRoot:       opts.ProjectRoot,
 		memoryEnabled:     opts.MemoryEnabled,
 		verbose:           opts.Verbose,
+		steer:             ag.Steer,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -419,6 +429,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				logx.Debug("tui send canceled", "mode", "soft_interrupt")
 				m.sendCancel()
 			}
+		case "ctrl+enter":
+			if !m.busy {
+				break
+			}
+			text := strings.TrimSpace(m.input.Value())
+			if text == "" {
+				break
+			}
+			m.queueFollowUp(text)
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
@@ -456,8 +475,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.handleBangCommand(text))
 				break
 			}
-			// Chat text is suppressed while a turn is in flight.
+			// Plain Enter steers an active agent turn. The agent applies the
+			// instruction after the current provider/tool boundary.
 			if m.busy {
+				m.steerActiveTurn(rawInput, text)
 				break
 			}
 			m.input.Reset()
@@ -582,7 +603,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendCancel()
 			m.sendCancel = nil
 		}
-		if errors.Is(msg.err, context.Canceled) {
+		canceled := errors.Is(msg.err, context.Canceled)
+		if canceled {
 			m.appendBlock(noticeBlock{text: "turn canceled"})
 		} else if errors.Is(msg.err, agent.ErrMaxTurns) {
 			// EventMaxTurnsReached already appended a maxTurnsBlock
@@ -594,6 +616,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.hideTerminalWorkflow()
 		cmds = append(cmds, refreshBranch())
+		if msg.err != nil {
+			var recovered []string
+			if len(m.pendingSteering) > 0 {
+				recovered = append(recovered, m.pendingSteering...)
+				m.appendBlock(noticeBlock{text: "unapplied steering returned to the composer"})
+			}
+			if m.queued != nil {
+				recovered = append(recovered, m.queued.displayText)
+				m.queued = nil
+				m.appendBlock(noticeBlock{text: "queued follow-up returned to the composer"})
+			}
+			m.restoreInput(recovered...)
+		}
+		m.pendingSteering = nil
+		if m.queued != nil { // a successful turn starts its single follow-up
+			queued := m.queued
+			m.queued = nil
+			m.appendBlock(noticeBlock{text: "starting queued follow-up"})
+			cmds = append(cmds, m.submitUserTurn(queued.displayText, queued.agentText, queued.images))
+		}
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -691,6 +733,57 @@ const defaultPlaceholder = "Ask neo anything…   ↩ send"
 
 func (m *model) submitUserTurn(displayText, agentText string, images []string) tea.Cmd {
 	return m.submitUserTurnWithSkillExpansion(displayText, agentText, images, true)
+}
+
+func (m *model) steerActiveTurn(displayText, agentText string) {
+	sent, used := skills.Expand(agentText, m.skills)
+	if m.steer == nil || !m.steer(sent) {
+		m.appendBlock(errorBlock{err: fmt.Errorf("this operation cannot be steered; use ctrl+enter to queue a follow-up")})
+		return
+	}
+	m.input.Reset()
+	m.hideSlashPicker()
+	m.hideFilePicker()
+	m.syncInputHeight()
+	m.layout()
+	m.appendBlock(userBlock{text: displayText})
+	m.pendingSteering = append(m.pendingSteering, displayText)
+	if len(used) > 0 {
+		m.appendBlock(noticeBlock{text: "applied skill: " + strings.Join(used, ", ")})
+	}
+	m.appendBlock(noticeBlock{text: "steering current turn"})
+}
+
+func (m *model) queueFollowUp(displayText string) {
+	if m.queued != nil {
+		m.appendBlock(errorBlock{err: fmt.Errorf("a follow-up is already queued")})
+		return
+	}
+	if strings.HasPrefix(displayText, "/") || strings.HasPrefix(displayText, "!") {
+		m.appendBlock(errorBlock{err: fmt.Errorf("commands cannot be queued; wait for the turn to finish or use $skill in a chat message")})
+		return
+	}
+	agentText, images := extractImagePaths(displayText)
+	m.queued = &queuedTurn{displayText: displayText, agentText: agentText, images: images}
+	m.input.Reset()
+	m.hideSlashPicker()
+	m.hideFilePicker()
+	m.syncInputHeight()
+	m.layout()
+	m.appendBlock(noticeBlock{text: "queued next: " + oneLine(displayText)})
+}
+
+func (m *model) restoreInput(texts ...string) {
+	current := strings.TrimSpace(m.input.Value())
+	if current != "" {
+		texts = append(texts, current)
+	}
+	if len(texts) == 0 {
+		return
+	}
+	m.input.SetValue(strings.Join(texts, "\n"))
+	m.syncInputHeight()
+	m.layout()
 }
 
 func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, images []string, expandSkillRefs bool) tea.Cmd {
@@ -913,9 +1006,15 @@ func (m *model) statusLine() string {
 
 	elapsed := time.Since(m.busySince)
 
-	hint := "esc to interrupt"
+	hint := "↩ steer · ctrl+↩ queue · esc interrupt"
 	if m.approval != nil {
 		hint = "esc to deny"
+	} else if m.queued != nil && m.turn.direct {
+		hint = "next queued · esc interrupt"
+	} else if m.queued != nil {
+		hint = "next queued · ↩ steer · esc interrupt"
+	} else if m.turn.direct {
+		hint = "ctrl+↩ queue · esc interrupt"
 	}
 	header := fmt.Sprintf("Working (%s · %s)", formatElapsedCompact(elapsed), hint)
 	line := truncate(" "+m.spin.View()+" "+styMuted.Render(header), max(m.width, 1))
@@ -1116,6 +1215,10 @@ func (m *model) handleEvent(e agent.Event) {
 		m.activeTree = nil
 		if strings.TrimSpace(e.Text) != "" {
 			m.appendBlock(thinkingBlock{text: e.Text})
+		}
+	case agent.EventSteeringApplied:
+		if len(m.pendingSteering) > 0 {
+			m.pendingSteering = m.pendingSteering[1:]
 		}
 	case agent.EventToolCall:
 		if e.Name == "workflow" {

@@ -355,7 +355,7 @@ func TestStatusLineShowsWorkingStateAndRealActivity(t *testing.T) {
 	m.currentTool = &toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"Working (4s · esc to interrupt)", "└ Reading internal/tui/model.go"} {
+	for _, want := range []string{"Working (4s · ↩ steer · ctrl+↩ queue · esc interrupt)", "└ Reading internal/tui/model.go"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status line missing %q: %q", want, out)
 		}

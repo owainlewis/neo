@@ -293,6 +293,13 @@ Slash commands keep common actions out of the chat transcript:
 | `/memory <text>` | Append a project memory entry |
 | `/clear` | Clear the current transcript |
 
+While Neo is working, submit with Enter to steer the active turn after its
+current tool boundary. Submit with Ctrl+Enter to queue one follow-up for after
+the turn finishes successfully. Escape or a failed turn returns unapplied input
+to the composer instead of running it automatically. Queued follow-ups are chat
+messages, so use `$name` for a skill; `/commands` and `!commands` cannot be
+queued while a turn is active.
+
 Skills also appear in `/help` and the slash picker as `/name`. Built-in
 commands keep priority over skills with the same name.
 

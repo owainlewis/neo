@@ -34,6 +34,8 @@ var keyBindings = []struct {
 	desc string
 }{
 	{"↩", "send"},
+	{"↩ (working)", "steer after the current tool boundary"},
+	{"ctrl+↩", "queue one follow-up after the current turn"},
 	{"⌥↩", "newline"},
 	{"!cmd", "run shell command"},
 	{"wheel/pgup/pgdn", "scroll transcript"},
