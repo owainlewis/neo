@@ -15,7 +15,6 @@ These guides explain Neo's core features in plain language. The reference docs s
 | [Providers](providers.md) | How Anthropic, OpenAI, OpenRouter, and Google Gemini plug in. |
 | [Sessions](sessions.md) | How Neo saves and resumes conversations. |
 | [Compaction](compaction.md) | Why long chats need context management and what Neo has today. |
-| [Memory](memory.md) | What memory means for a coding agent and what should stay out of scope. |
 
 ## How To Read These
 

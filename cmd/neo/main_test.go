@@ -176,59 +176,23 @@ func TestDoctorProviderCheckRejectsUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestChatSystem_IncludesProjectMemoryAsDistinctDynamicBlock(t *testing.T) {
+func TestChatSystem_IgnoresProjectMemoryFile(t *testing.T) {
 	root := t.TempDir()
 	cwd := filepath.Join(root, "pkg")
-	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(cwd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "memory.md"), []byte("# Project memory\n\n- prefers small diffs\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "memory.md"), []byte("must not enter the prompt\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	system, blocks := chatSystem(&config.Config{}, cwd, nil)
 
-	if len(blocks) != 2 {
-		t.Fatalf("system blocks = %d, want 2", len(blocks))
-	}
-	if blocks[0].Cache != true {
-		t.Fatal("expected base block to stay cacheable by default")
-	}
-	if blocks[1].Cache {
-		t.Fatal("expected memory block to stay dynamic")
-	}
-	if !strings.Contains(blocks[1].Text, "# Project memory") || !strings.Contains(blocks[1].Text, "prefers small diffs") {
-		t.Fatalf("unexpected memory block: %q", blocks[1].Text)
-	}
-	if !strings.Contains(system, blocks[1].Text) {
-		t.Fatal("flattened system prompt missing memory block")
-	}
-}
-
-func TestChatSystem_SkipsProjectMemoryWhenDisabled(t *testing.T) {
-	root := t.TempDir()
-	cwd := filepath.Join(root, "pkg")
-	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(cwd, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "memory.md"), []byte("- hidden memory\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	disabled := false
-
-	system, blocks := chatSystem(&config.Config{Features: config.Features{Memory: &disabled}}, cwd, nil)
-
 	if len(blocks) != 1 {
 		t.Fatalf("system blocks = %d, want 1", len(blocks))
 	}
-	if strings.Contains(system, "hidden memory") {
-		t.Fatal("disabled memory should not enter the prompt")
+	if strings.Contains(system, "must not enter the prompt") {
+		t.Fatal("memory.md should not enter the system prompt")
 	}
 }
 

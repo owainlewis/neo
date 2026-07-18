@@ -2,8 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -37,7 +35,6 @@ func firstLine(s string) string {
 // tests without going through newModel (which probes the terminal). Only the
 // fields exercised by tests are populated.
 func makeTestModel() *model {
-	root, _ := os.MkdirTemp("", "neo-tui-memory-*")
 	ta := textarea.New()
 	ta.Focus()
 	ta.SetWidth(78)
@@ -54,8 +51,6 @@ func makeTestModel() *model {
 		cwd:            "~",
 		branch:         "main",
 		permissionMode: "ask",
-		projectRoot:    filepath.Clean(root),
-		memoryEnabled:  true,
 	}
 }
 
