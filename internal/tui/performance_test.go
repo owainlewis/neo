@@ -3,6 +3,9 @@ package tui
 import (
 	"fmt"
 	"testing"
+	"time"
+
+	"charm.land/bubbles/v2/viewport"
 
 	"github.com/owainlewis/neo/internal/workflow"
 )
@@ -27,6 +30,45 @@ func BenchmarkWorkflowRender(b *testing.B) {
 	for b.Loop() {
 		if rendered := block.render(100, nil); len(rendered) == 0 {
 			b.Fatal("empty workflow render")
+		}
+	}
+}
+
+func BenchmarkLargeTranscriptRefresh(b *testing.B) {
+	blocks := make([]block, 400)
+	for i := range blocks {
+		blocks[i] = textBlock{text: fmt.Sprintf("Completed repository task %d with focused checks and review.", i)}
+	}
+	m := model{
+		width:    100,
+		blocks:   blocks,
+		viewport: viewport.New(viewport.WithWidth(100), viewport.WithHeight(40)),
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		m.refreshViewport()
+	}
+}
+
+func BenchmarkActiveSubagentTreeRender(b *testing.B) {
+	tree := newTreeBlock()
+	now := time.Now()
+	for root := 1; root <= 8; root++ {
+		tree.roots = append(tree.roots, root)
+		tree.nodes[root] = &treeNode{id: root, step: "worker", task: fmt.Sprintf("task %d", root), startAt: now}
+		for child := 1; child <= 7; child++ {
+			id := root*100 + child
+			tree.nodes[id] = &treeNode{id: id, parent: root, step: "check", task: fmt.Sprintf("subtask %d", child), startAt: now, lastLine: "running focused verification"}
+			tree.children[root] = append(tree.children[root], id)
+		}
+	}
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if rendered := tree.render(100, nil); len(rendered) == 0 {
+			b.Fatal("empty subagent tree render")
 		}
 	}
 }
