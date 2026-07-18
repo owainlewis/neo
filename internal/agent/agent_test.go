@@ -91,9 +91,9 @@ func TestAgent_ToolUseFollowedByText(t *testing.T) {
 	assertToolUseResultsPaired(t, ag.Transcript())
 }
 
-func TestAgent_CapsLargeBashToolResultBeforeTranscript(t *testing.T) {
+func TestAgent_StoresBoundedBashToolResultBeforeTranscript(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
-		llmtest.ToolUse("call_1", "bash", map[string]any{"command": "printf '%300000s' ''"}),
+		llmtest.ToolUse("call_1", "bash", map[string]any{"command": "printf HEAD; printf '%300000s' ''; printf TAIL"}),
 		llmtest.Text("done"),
 	}}
 	var events []Event
@@ -114,7 +114,11 @@ func TestAgent_CapsLargeBashToolResultBeforeTranscript(t *testing.T) {
 	if len(result) > maxToolResultContentBytes {
 		t.Fatalf("tool result stored %d bytes, want at most %d", len(result), maxToolResultContentBytes)
 	}
-	assertTruncationMarker(t, result, 300000, 1)
+	for _, want := range []string{"HEAD", "[bash output truncated:", "TAIL"} {
+		if !strings.Contains(result, want) {
+			t.Fatalf("bounded bash result missing %q", want)
+		}
+	}
 	if !sawToolResultEventWithText(events, result) {
 		t.Fatal("tool result event did not receive capped output")
 	}

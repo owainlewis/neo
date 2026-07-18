@@ -48,11 +48,43 @@ func TestBash_StderrIsCaptured(t *testing.T) {
 	}
 }
 
+func TestBash_LargeOutputRetainsHeadAndTail(t *testing.T) {
+	out, err := Bash{}.Run(context.Background(), map[string]any{
+		"command": "printf HEAD; yes x | head -c 400000; printf TAIL",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) > MaxBashOutputBytes {
+		t.Fatalf("output length = %d, want at most %d", len(out), MaxBashOutputBytes)
+	}
+	for _, want := range []string{"HEAD", "[bash output truncated:", "TAIL"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("bounded output missing %q", want)
+		}
+	}
+}
+
+func TestBash_FailedLargeOutputRetainsErrorTail(t *testing.T) {
+	out, err := Bash{}.Run(context.Background(), map[string]any{
+		"command": "yes x | head -c 400000; printf 'fatal: useful error' >&2; exit 9",
+	})
+	if err == nil {
+		t.Fatal("expected command failure")
+	}
+	if !strings.Contains(out, "fatal: useful error") {
+		t.Fatalf("output did not retain useful error tail: %q", out[len(out)-min(len(out), 200):])
+	}
+}
+
 func TestBash_TimeoutFires(t *testing.T) {
 	b := Bash{Timeout: 100 * time.Millisecond}
 	out, err := b.Run(context.Background(), map[string]any{"command": "sleep 2"})
 	if err == nil {
 		t.Fatalf("expected timeout error, got nil (out=%q)", out)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "exceeded timeout") {
+		t.Fatalf("expected actionable deadline error, got %v", err)
 	}
 }
 

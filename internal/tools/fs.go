@@ -236,21 +236,24 @@ func (EditFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if oldStr == "" {
+		return "", fmt.Errorf("edit_file: old_string must not be empty; provide exact unique text to replace")
+	}
 	newStr, err := mustString(input, "new_string")
 	if err != nil {
 		return "", err
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("edit_file: read %s: %w", path, err)
 	}
 	s := string(b)
 	n := strings.Count(s, oldStr)
 	if n == 0 {
-		return "", fmt.Errorf("old_string not found in %s", path)
+		return "", fmt.Errorf("edit_file: old_string not found in %s; read the file and retry with exact text", path)
 	}
 	if n > 1 {
-		return "", fmt.Errorf("old_string found %d times in %s; needs to be unique", n, path)
+		return "", fmt.Errorf("edit_file: old_string found %d times in %s; include more surrounding text so it is unique", n, path)
 	}
 	out := strings.Replace(s, oldStr, newStr, 1)
 	if err := atomicWrite(path, []byte(out)); err != nil {

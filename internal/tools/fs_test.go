@@ -287,6 +287,34 @@ func TestEditFile_MissingMatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when old_string is absent")
 	}
+	if !strings.Contains(err.Error(), "read the file and retry with exact text") {
+		t.Fatalf("error is not actionable: %v", err)
+	}
+}
+
+func TestEditFile_EmptyMatchFailsAndDoesNotMutate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	original := "leave me alone"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := EditFile{}.Run(context.Background(), map[string]any{
+		"path":       path,
+		"old_string": "",
+		"new_string": "surprise",
+	})
+	if err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Fatalf("expected actionable empty match error, got %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != original {
+		t.Fatalf("file mutated on failed edit: %q", b)
+	}
 }
 
 func writeFileWithMode(t *testing.T, path string, content []byte, mode os.FileMode) {
