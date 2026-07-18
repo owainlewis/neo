@@ -183,6 +183,18 @@ func TestCommandsCannotBeQueued(t *testing.T) {
 	}
 }
 
+func TestEmptyQueueShortcutIsIgnored(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	m.input.SetValue("   ")
+
+	m.Update(ctrlEnter())
+
+	if m.queued != nil {
+		t.Fatalf("empty input queued a follow-up: %#v", m.queued)
+	}
+}
+
 func ctrlEnter() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 }

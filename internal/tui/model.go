@@ -399,197 +399,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSessionBrowserKey(msg)
 		}
 		if m.approval != nil {
-			switch msg.String() {
-			case "ctrl+c", "ctrl+d":
-				logx.Debug("tui quit during approval", "tool", m.approval.req.ToolName)
-				m.finishApproval(false)
-				if m.sendCancel != nil {
-					m.sendCancel()
-				}
-				m.quitting = true
-				return m, tea.Quit
-			case "y", "Y":
-				m.finishApproval(true)
-			case "a", "A":
-				req := permission.Request{ToolName: m.approval.req.ToolName, Args: m.approval.req.Args}
-				rule := permission.RuleFor(req)
-				m.allow.Add(rule)
-				m.finishApproval(true)
-				m.appendBlock(noticeBlock{text: "won't ask again for " + rule.Label() + " this session"})
-			case "ctrl+o":
-				m.toggleApprovalPreview()
-			case "n", "N", "esc":
-				m.finishApproval(false)
-			}
-			break
+			return m, m.handleApprovalKey(msg)
 		}
-		switch msg.String() {
-		case "ctrl+c", "ctrl+d":
-			logx.Debug("tui quit requested", "busy", m.busy)
-			if m.sendCancel != nil {
-				m.sendCancel()
-			}
-			m.quitting = true
-			return m, tea.Quit
-		case "esc":
-			if m.files.visible {
-				m.dismissFilePicker()
-				m.layout()
-				break
-			}
-			if m.picker.visible {
-				m.dismissSlashPicker()
-				m.layout()
-				break
-			}
-			// Soft interrupt: cancel the in-flight turn without quitting.
-			if m.busy && m.sendCancel != nil {
-				logx.Debug("tui send canceled", "mode", "soft_interrupt")
-				m.sendCancel()
-			}
-		case "ctrl+enter":
-			if !m.busy {
-				break
-			}
-			text := strings.TrimSpace(m.input.Value())
-			if text == "" {
-				break
-			}
-			m.queueFollowUp(text)
-		case "enter":
-			text := strings.TrimSpace(m.input.Value())
-			if text == "" {
-				break
-			}
-			if m.picker.visible && m.acceptSlashPicker(false) {
-				m.syncInputHeight()
-				m.layout()
-				break
-			}
-			if m.files.visible && m.acceptFilePicker() {
-				m.syncInputHeight()
-				m.layout()
-				break
-			}
-			rawInput := text
-			// Slash commands are parsed before the busy gate.
-			if strings.HasPrefix(text, "/") {
-				m.input.Reset()
-				m.hideSlashPicker()
-				m.hideFilePicker()
-				m.layout()
-				m.syncInputHeight()
-				cmds = append(cmds, m.handleSlashCommand(text))
-				break
-			}
-			// A leading ! is a direct shell command alias. It runs through the
-			// agent's normal bash tool policy and rendering events, not as chat.
-			if strings.HasPrefix(text, "!") {
-				m.input.Reset()
-				m.hideSlashPicker()
-				m.hideFilePicker()
-				m.layout()
-				m.syncInputHeight()
-				cmds = append(cmds, m.handleBangCommand(text))
-				break
-			}
-			// Plain Enter steers an active agent turn. The agent applies the
-			// instruction after the current provider/tool boundary.
-			if m.busy {
-				m.steerActiveTurn(rawInput, text)
-				break
-			}
-			m.input.Reset()
-			m.hideSlashPicker()
-			m.hideFilePicker()
-			m.layout()
-			m.syncInputHeight()
-			// Pull any dragged/pasted image paths out of the input; they become
-			// attachments on the message, the rest stays as text.
-			text, images := extractImagePaths(text)
-			cmds = append(cmds, m.submitUserTurn(rawInput, text, images))
-		case "shift+enter", "alt+enter", "ctrl+j":
-			// Insert a newline. Most terminals don't distinguish shift+enter
-			// from enter without enhanced-key reporting; alt+enter and
-			// ctrl+j are the portable fallbacks.
-			m.input.InsertString("\n")
-			m.updateInlinePickers()
-			m.syncInputHeight()
-		case "up":
-			if m.files.visible {
-				m.moveFilePickerSelection(-1)
-				break
-			}
-			if m.picker.visible {
-				m.moveSlashPickerSelection(-1)
-				break
-			}
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			cmds = append(cmds, cmd)
-			m.updateInlinePickers()
-			m.syncInputHeight()
-		case "down":
-			if m.files.visible {
-				m.moveFilePickerSelection(1)
-				break
-			}
-			if m.picker.visible {
-				m.moveSlashPickerSelection(1)
-				break
-			}
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			cmds = append(cmds, cmd)
-			m.updateInlinePickers()
-			m.syncInputHeight()
-		case "pgup":
-			m.viewport.PageUp()
-		case "pgdown":
-			m.viewport.PageDown()
-		case "tab":
-			if m.files.visible && m.acceptFilePicker() {
-				m.syncInputHeight()
-				m.layout()
-				break
-			}
-			if m.picker.visible && m.acceptSlashPicker(true) {
-				m.syncInputHeight()
-				m.layout()
-				break
-			}
-			if m.workflow != nil {
-				m.workflowVisible = !m.workflowVisible
-				m.layout()
-				break
-			}
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			cmds = append(cmds, cmd)
-			m.updateInlinePickers()
-			m.syncInputHeight()
-		case "ctrl+l":
-			m.blocks = nil
-			m.refreshViewport()
-		case "ctrl+o":
-			m.toggleLatestToolResultExpansion()
-		default:
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			cmds = append(cmds, cmd)
-			m.updateInlinePickers()
-			m.syncInputHeight()
-		}
+		cmds = append(cmds, m.handleKey(msg))
 
 	case tea.PasteMsg:
 		if m.perms.visible || m.models.visible || m.sessions.visible || m.approval != nil {
 			break
 		}
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		cmds = append(cmds, cmd)
-		m.updateInlinePickers()
-		m.syncInputHeight()
+		cmds = append(cmds, m.updateInput(msg))
 
 	case agentEventMsg:
 		m.handleEvent(msg.ev)
@@ -759,11 +577,7 @@ func (m *model) steerActiveTurn(displayText, agentText string) {
 		m.appendBlock(errorBlock{err: fmt.Errorf("this operation cannot be steered; use ctrl+enter to queue a follow-up")})
 		return
 	}
-	m.input.Reset()
-	m.hideSlashPicker()
-	m.hideFilePicker()
-	m.syncInputHeight()
-	m.layout()
+	m.resetInput()
 	m.appendBlock(userBlock{text: displayText})
 	m.pendingSteering = append(m.pendingSteering, displayText)
 	if len(used) > 0 {
@@ -783,11 +597,7 @@ func (m *model) queueFollowUp(displayText string) {
 	}
 	agentText, images := extractImagePaths(displayText)
 	m.queued = &queuedTurn{displayText: displayText, agentText: agentText, images: images}
-	m.input.Reset()
-	m.hideSlashPicker()
-	m.hideFilePicker()
-	m.syncInputHeight()
-	m.layout()
+	m.resetInput()
 	m.appendBlock(noticeBlock{text: "queued next: " + oneLine(displayText)})
 }
 
