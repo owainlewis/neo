@@ -1,15 +1,19 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os/exec"
-	"syscall"
+	"sync"
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
 )
+
+// MaxBashOutputBytes bounds command output in memory while leaving enough of
+// both ends to diagnose failures. The agent applies its own final transcript
+// cap, but the tool must not buffer an unbounded command before reaching it.
+const MaxBashOutputBytes = 256 * 1024
 
 type Bash struct {
 	Timeout time.Duration
@@ -21,7 +25,7 @@ func (Bash) Name() string { return "bash" }
 func (Bash) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "bash",
-		Description: "Run a shell command via /bin/bash -c. Returns combined stdout+stderr. Use for git, tests, builds, file inspection beyond Read.",
+		Description: "Run a shell command via /bin/bash -c. Returns bounded combined stdout+stderr, retaining the start and end when truncated. Use for git, tests, builds, file inspection beyond Read.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -48,12 +52,12 @@ func (b Bash) Run(ctx context.Context, input map[string]any) (string, error) {
 	if b.CWD != "" {
 		c.Dir = b.CWD
 	}
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var buf bytes.Buffer
+	configureProcessGroup(c)
+	buf := newBoundedOutput(MaxBashOutputBytes)
 	c.Stdout = &buf
 	c.Stderr = &buf
 	if err := c.Start(); err != nil {
-		return buf.String(), err
+		return buf.String(), fmt.Errorf("start bash command: %w", err)
 	}
 	done := make(chan error, 1)
 	go func() {
@@ -72,7 +76,10 @@ func (b Bash) Run(ctx context.Context, input map[string]any) (string, error) {
 
 	out := buf.String()
 	if ctxErr != nil {
-		return out, fmt.Errorf("bash cancelled: %w", ctxErr)
+		if ctxErr == context.DeadlineExceeded {
+			return out, fmt.Errorf("bash command exceeded timeout %s: %w", timeout, ctxErr)
+		}
+		return out, fmt.Errorf("bash command cancelled: %w", ctxErr)
 	}
 	if runErr != nil {
 		// Surface as an error so the agent marks the tool_result with is_error=true.
@@ -85,9 +92,59 @@ func (b Bash) Run(ctx context.Context, input map[string]any) (string, error) {
 	return out, nil
 }
 
-func killProcessGroup(c *exec.Cmd) {
-	if c.Process == nil {
-		return
+type boundedOutput struct {
+	mu      sync.Mutex
+	limit   int
+	headCap int
+	head    []byte
+	tail    []byte
+	total   int
+}
+
+func newBoundedOutput(limit int) boundedOutput {
+	headCap := limit / 2
+	return boundedOutput{limit: limit, headCap: headCap}
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	n := len(p)
+	b.total += n
+	if remaining := b.headCap - len(b.head); remaining > 0 {
+		keep := min(remaining, len(p))
+		b.head = append(b.head, p[:keep]...)
+		p = p[keep:]
 	}
-	_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+	if len(p) > 0 {
+		// Reserve space for the truncation marker so String always remains
+		// below the advertised limit.
+		tailCap := max(0, b.limit-b.headCap-256)
+		if len(p) >= tailCap {
+			b.tail = append(b.tail[:0], p[len(p)-tailCap:]...)
+		} else {
+			b.tail = append(b.tail, p...)
+			if len(b.tail) > tailCap {
+				b.tail = append(b.tail[:0], b.tail[len(b.tail)-tailCap:]...)
+			}
+		}
+	}
+	return n, nil
+}
+
+func (b *boundedOutput) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.total <= len(b.head)+len(b.tail) {
+		return string(append(append([]byte(nil), b.head...), b.tail...))
+	}
+	omitted := b.total - len(b.head) - len(b.tail)
+	marker := fmt.Sprintf("\n\n[bash output truncated: omitted %d bytes; showing first %d and last %d bytes]\n\n", omitted, len(b.head), len(b.tail))
+	out := make([]byte, 0, len(b.head)+len(marker)+len(b.tail))
+	out = append(out, b.head...)
+	out = append(out, marker...)
+	out = append(out, b.tail...)
+	return string(out)
 }

@@ -10,7 +10,7 @@ Neo exposes a small built-in tool surface to the model.
 The subagent has NO memory of this conversation — include everything it needs in the prompt.
 ok=false: the subagent failed, timed out, or was denied (output says why; re-plan).
 ok=true: it completed — judge the output's content yourself. |
-| `bash` | Run a shell command via /bin/bash -c. Returns combined stdout+stderr. Use for git, tests, builds, file inspection beyond Read. |
+| `bash` | Run a shell command via /bin/bash -c. Returns bounded combined stdout+stderr, retaining the start and end when truncated. Use for git, tests, builds, file inspection beyond Read. |
 | `edit_file` | Replace exactly one occurrence of old_string with new_string in a file. Fails if old_string is missing or appears more than once. |
 | `glob` | Find files under the workspace root using a glob pattern. Supports ** for recursive matches. Returns JSON: {matches:[path],truncated,count}. |
 | `grep` | Search text files under the workspace with a regular expression. Returns JSON: {matches:[{path,line,text,context_before?,context_after?}],truncated,count}. |
@@ -48,7 +48,7 @@ ok=true: it completed — judge the output's content yourself.
 
 ### `bash`
 
-Run a shell command via /bin/bash -c. Returns combined stdout+stderr. Use for git, tests, builds, file inspection beyond Read.
+Run a shell command via /bin/bash -c. Returns bounded combined stdout+stderr, retaining the start and end when truncated. Use for git, tests, builds, file inspection beyond Read.
 
 ```json
 {
