@@ -3,12 +3,11 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  // TODO: set to the real docs domain once Cloudflare Pages is connected.
-  site: 'https://docs.neo.dev',
+  site: 'https://neoharness.dev',
   integrations: [
     starlight({
       title: 'Neo',
-      description: 'A workflow-first coding agent for your terminal, written in Go.',
+      description: 'A workflow-native coding agent you can trust with the repo.',
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/owainlewis/neo' }],
       editLink: {

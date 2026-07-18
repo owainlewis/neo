@@ -1,7 +1,8 @@
 # neo docs website
 
-Astro + [Starlight](https://starlight.astro.build), styled minimalist (monochrome + one accent,
-monospace headings) to match the tone of the CLI. Deployed to Cloudflare Pages.
+Astro + [Starlight](https://starlight.astro.build), with a custom product landing page and a
+shared, technical visual system for the documentation. Deployed to Cloudflare Pages at
+`neoharness.dev`.
 
 ```bash
 bun install
@@ -14,7 +15,8 @@ Configure Cloudflare Pages with `website` as the project root and `dist` as the 
 
 ## How content is organized
 
-- `src/content/docs/index.mdx` — the marketing splash page (hero + feature cards). Hand-written.
+- `src/content/docs/index.mdx` — the marketing entry point. Its page UI lives in
+  `src/components/LandingPage.astro` and is hand-written.
 - `src/content/docs/docs/install.md`, `quick-start.md` — hand-written user-facing guides, adapted
   from the root `README.md`.
 - `src/content/docs/docs/reference/**` — **generated, not committed.** `scripts/prepare-docs.mjs`
