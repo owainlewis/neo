@@ -9,6 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
@@ -40,6 +41,7 @@ func makeTestModel() *model {
 	ta := textarea.New()
 	ta.Focus()
 	ta.SetWidth(78)
+	sp := spinner.New(spinner.WithSpinner(statusSpinner))
 	return &model{
 		ctx:            context.Background(),
 		width:          80,
@@ -47,6 +49,7 @@ func makeTestModel() *model {
 		ag:             agent.New(agent.Config{Model: "test", Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(tools.ReadFile{}), Policy: permission.New("ask", ".")}),
 		input:          ta,
 		viewport:       viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
+		spin:           sp,
 		modelTag:       "test",
 		cwd:            "~",
 		branch:         "main",

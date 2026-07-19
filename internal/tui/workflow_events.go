@@ -11,7 +11,7 @@ import (
 func (m *model) handleWorkflowEvent(ev workflow.Event) {
 	if ev.Action == "clear" {
 		m.workflow = nil
-		m.workflowVisible = true
+		m.workflowVisible = false
 		m.layout()
 		m.refreshViewport()
 		return
@@ -20,7 +20,7 @@ func (m *model) handleWorkflowEvent(ev workflow.Event) {
 	if ev.Action == "create" {
 		wb := &workflowBlock{title: ev.State.Title, items: ev.State.Items}
 		m.workflow = wb
-		m.workflowVisible = true
+		m.workflowVisible = false
 		m.layout()
 		m.refreshViewport()
 		return
@@ -71,36 +71,6 @@ func (m *model) noteWorkflowActivity(detail string) {
 			return
 		}
 	}
-}
-
-func toolActivity(name string, args map[string]any) string {
-	switch name {
-	case "bash":
-		if cmd, ok := args["command"].(string); ok && strings.TrimSpace(cmd) != "" {
-			return "$ " + oneLine(cmd)
-		}
-	case "read_file", "write_file":
-		if p, ok := args["path"].(string); ok && strings.TrimSpace(p) != "" {
-			return name + " " + p
-		}
-	case "edit_file":
-		if p, ok := args["path"].(string); ok && strings.TrimSpace(p) != "" {
-			return "edit " + p
-		}
-	case "grep":
-		if pat, ok := args["pattern"].(string); ok && strings.TrimSpace(pat) != "" {
-			return "grep " + pat
-		}
-	case "glob":
-		if pat, ok := args["pattern"].(string); ok && strings.TrimSpace(pat) != "" {
-			return "glob " + pat
-		}
-	case "agent":
-		if prompt, ok := args["prompt"].(string); ok && strings.TrimSpace(prompt) != "" {
-			return "agent " + oneLine(prompt)
-		}
-	}
-	return name
 }
 
 // handleStepEvent folds the supervisor's event stream into tree blocks:

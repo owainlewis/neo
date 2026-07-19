@@ -40,7 +40,7 @@ type resultSummaryBlock struct {
 }
 
 func (b resultSummaryBlock) render(width int, _ *glamour.TermRenderer) string {
-	glyph := styAccent.Render("✓")
+	glyph := styOK.Render("✓")
 	if b.failed {
 		glyph = styErr.Render("✗")
 	}
@@ -73,16 +73,16 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	done, failed, skipped := workflowCounts(b.items)
 	total := len(b.items)
 	meta := fmt.Sprintf("%d/%d", done+failed+skipped, total)
-	sb.WriteString(styAccent.Render(title) + styMuted.Render("  "+meta) + "\n")
+	sb.WriteString(styLabel.Render(title) + styMuted.Render("  "+meta) + "\n")
 	for _, item := range b.items {
 		glyph := styMuted.Render("○")
 		textStyle := lipgloss.NewStyle()
 		switch item.Status {
 		case workflow.Running:
 			glyph = styTool.Render("●")
-			textStyle = styTool
+			textStyle = styLabel
 		case workflow.Done:
-			glyph = styAccent.Render("✓")
+			glyph = styOK.Render("✓")
 		case workflow.Failed:
 			glyph = styErr.Render("✗")
 		case workflow.Skipped:
@@ -90,7 +90,7 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 		}
 		line := fmt.Sprintf("%s %s", glyph, textStyle.Render(item.Text))
 		if strings.TrimSpace(item.Detail) != "" {
-			line += styMuted.Render(" — " + truncate(oneLine(item.Detail), max(width-8, 20)))
+			line += styDim.Render("  " + truncate(oneLine(item.Detail), max(width-8, 20)))
 		}
 		sb.WriteString(line + "\n")
 	}
@@ -133,13 +133,14 @@ type thinkingBlock struct{ text string }
 
 func (b thinkingBlock) render(width int, _ *glamour.TermRenderer) string {
 	body := strings.ReplaceAll(wrap(b.text, width-2), "\n", "\n  ")
-	return styDim.Render("• ") + styThinking.Render(body)
+	return "  " + styThinking.Render(body)
 }
 
 type toolCallBlock struct {
 	name    string
 	args    map[string]any
 	startAt time.Time
+	elapsed time.Duration
 	// verbose selects full tool-card rendering. When false (the default),
 	// the block renders as a single concise status line instead.
 	verbose bool
@@ -147,7 +148,11 @@ type toolCallBlock struct {
 
 func (b toolCallBlock) render(width int, _ *glamour.TermRenderer) string {
 	if !b.verbose {
-		return styMuted.Render(toolReceiptLine(b.name, b.args))
+		line := styOK.Render("✓") + " " + styMuted.Render(toolReceiptLine(b.name, b.args))
+		if b.elapsed > 0 {
+			line += styDim.Render("  " + formatElapsed(b.elapsed))
+		}
+		return truncate(line, max(width, 1))
 	}
 	header, body := toolCardContent(b.name, b.args)
 	card := styTool.Render(header)
@@ -297,16 +302,16 @@ func (b *treeBlock) renderNode(sb *strings.Builder, id int, prefix string, last 
 	if n.done {
 		elapsed = n.elapsed
 		if n.ok {
-			glyph = styAccent.Render("✓")
+			glyph = styOK.Render("✓")
 		} else {
 			glyph = styErr.Render("✗")
 		}
 	}
-	task := truncate(oneLine(n.task), 44)
+	task := styMuted.Render(truncate(oneLine(n.task), 44))
 	sb.WriteString(fmt.Sprintf("%s%s%s %s %s %s\n",
-		prefix, connector, glyph, padRight(n.step, 12), task, styMuted.Render(formatElapsed(elapsed))))
+		prefix, connector, glyph, styLabel.Render(padRight(n.step, 12)), task, styDim.Render(formatElapsed(elapsed))))
 	if !n.done && n.lastLine != "" {
-		sb.WriteString(childPrefix + styMuted.Render("  └ "+truncate(oneLine(n.lastLine), max(width-12, 10))) + "\n")
+		sb.WriteString(childPrefix + styDim.Render("  └ "+truncate(oneLine(n.lastLine), max(width-12, 10))) + "\n")
 	}
 	kids := b.children[id]
 	for i, k := range kids {

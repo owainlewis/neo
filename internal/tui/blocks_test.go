@@ -118,9 +118,28 @@ func TestToolResultBlockCanRenderCompactAndExpanded(t *testing.T) {
 }
 
 func TestToolCallBlockRendersConciseReceiptByDefault(t *testing.T) {
-	out := plain(toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}.render(80, nil))
-	if out != "Read internal/tui/model.go" {
+	out := plain(toolCallBlock{
+		name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}, elapsed: 2 * time.Second,
+	}.render(80, nil))
+	if out != "✓ Read internal/tui/model.go  2s" {
 		t.Fatalf("concise tool call render = %q, want a completed receipt", out)
+	}
+}
+
+func TestConsecutiveToolReceiptsRenderAsTightTimeline(t *testing.T) {
+	read := toolCallBlock{name: "read_file", args: map[string]any{"path": "a.go"}}
+	edit := toolCallBlock{name: "edit_file", args: map[string]any{"path": "a.go"}}
+	if gap := blockSeparator(read, edit); gap != "" {
+		t.Fatalf("consecutive tool receipt gap = %q, want tight timeline", gap)
+	}
+	if gap := blockSeparator(edit, textBlock{text: "Done."}); gap != "\n" {
+		t.Fatalf("tool-to-response gap = %q, want semantic separation", gap)
+	}
+}
+
+func TestSubsecondActivityUsesReadableElapsedTime(t *testing.T) {
+	if got := formatElapsed(250 * time.Millisecond); got != "<1s" {
+		t.Fatalf("formatElapsed(250ms) = %q, want <1s", got)
 	}
 }
 
@@ -246,7 +265,7 @@ func TestTranscriptReplayRespectsOutputModeAndKeepsFailures(t *testing.T) {
 	}
 }
 
-func TestToolPreambleRendersAsDimTraceLiveAndOnReplay(t *testing.T) {
+func TestToolPreambleRendersAsQuietCommentaryLiveAndOnReplay(t *testing.T) {
 	m := makeTestModel()
 	m.handleEvent(agent.Event{Kind: agent.EventAssistantCommentary, Text: "I’ll inspect the load path first."})
 	if len(m.blocks) != 1 {
@@ -255,8 +274,11 @@ func TestToolPreambleRendersAsDimTraceLiveAndOnReplay(t *testing.T) {
 	if _, ok := m.blocks[0].(thinkingBlock); !ok {
 		t.Fatalf("live commentary block = %T, want thinkingBlock", m.blocks[0])
 	}
-	if got := strings.TrimSpace(plain(m.blocks[0].render(80, nil))); got != "• I’ll inspect the load path first." {
+	if got := strings.TrimSpace(plain(m.blocks[0].render(80, nil))); got != "I’ll inspect the load path first." {
 		t.Fatalf("live commentary render = %q", got)
+	}
+	if raw := m.blocks[0].render(80, nil); strings.Contains(raw, "\x1b[3m") {
+		t.Fatalf("commentary should not use terminal italics: %q", raw)
 	}
 
 	replay := makeTestModel()
@@ -348,14 +370,14 @@ func TestWorkflowBlockRenderShowsProgressAndCompletion(t *testing.T) {
 	}
 }
 
-func TestStatusLineShowsWorkingStateAndRealActivity(t *testing.T) {
+func TestStatusLineShowsOneLineOfRealActivity(t *testing.T) {
 	m := makeTestModel()
 	m.busy = true
 	m.busySince = time.Now().Add(-4 * time.Second)
 	m.currentTool = &toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"Working (4s · ↩ steer · ctrl+↩ queue · esc interrupt)", "└ Reading internal/tui/model.go"} {
+	for _, want := range []string{"● Reading internal/tui/model.go · 4s", "↩ steer", "ctrl+↩ queue"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status line missing %q: %q", want, out)
 		}
@@ -363,8 +385,70 @@ func TestStatusLineShowsWorkingStateAndRealActivity(t *testing.T) {
 
 	m.currentTool = nil
 	out = plain(m.statusLine())
-	if !strings.Contains(out, "Working (") || strings.Contains(out, "└") {
+	if !strings.Contains(out, "Thinking · 4s") || strings.Contains(out, "Reading") {
 		t.Fatalf("generic working state should not invent activity: %q", out)
+	}
+}
+
+func TestStatusLineCombinesWorkflowStepAndToolActivity(t *testing.T) {
+	m := makeTestModel()
+	m.width = 120
+	m.busy = true
+	m.busySince = time.Now().Add(-7 * time.Second)
+	m.workflow = &workflowBlock{title: "Polish progress", items: []workflow.Item{
+		{ID: "1", Text: "Inspect", Status: workflow.Done},
+		{ID: "2", Text: "Refine progress UI", Status: workflow.Running},
+		{ID: "3", Text: "Verify", Status: workflow.Pending},
+	}}
+	m.currentTool = &toolCallBlock{name: "edit_file", args: map[string]any{"path": "internal/tui/blocks.go"}}
+
+	out := plain(m.statusLine())
+	for _, want := range []string{"2/3 Refine progress UI", "Editing internal/tui/blocks.go", "7s", "tab plan"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status line missing %q: %q", want, out)
+		}
+	}
+}
+
+func TestStatusLinePreservesElapsedAndControlsWithLongActivity(t *testing.T) {
+	m := makeTestModel()
+	m.width = 80
+	m.busy = true
+	m.busySince = time.Now().Add(-9 * time.Second)
+	m.workflow = &workflowBlock{items: []workflow.Item{
+		{ID: "1", Text: "Implement a deliberately long workflow step description", Status: workflow.Running},
+	}}
+	m.currentTool = &toolCallBlock{name: "edit_file", args: map[string]any{
+		"path": "a/very/long/path/to/internal/tui/progress_renderer.go",
+	}}
+
+	out := plain(m.statusLine())
+	for _, want := range []string{"9s", "tab plan", "esc interrupt"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("long status line hid %q: %q", want, out)
+		}
+	}
+	if got := len([]rune(out)); got > m.width {
+		t.Fatalf("status width = %d, want <= %d: %q", got, m.width, out)
+	}
+}
+
+func TestStatusLineKeepsApprovalControlWithWorkflow(t *testing.T) {
+	m := makeTestModel()
+	m.width = 48
+	m.busy = true
+	m.busySince = time.Now()
+	m.workflow = &workflowBlock{items: []workflow.Item{{ID: "1", Text: "Inspect", Status: workflow.Running}}}
+	m.approval = &approvalState{}
+
+	out := plain(m.statusLine())
+	for _, want := range []string{"Waiting for", "tab plan", "esc deny"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("approval status missing %q: %q", want, out)
+		}
+	}
+	if strings.Contains(out, "interrupt") {
+		t.Fatalf("approval status advertises interrupt instead of deny: %q", out)
 	}
 }
 
@@ -386,8 +470,8 @@ func TestStatusLineHeightTracksActivityDetail(t *testing.T) {
 		t.Fatalf("generic working status height = %d, want 1", got)
 	}
 	m.currentTool = &toolCallBlock{name: "read_file"}
-	if got := m.statusLineHeight(); got != 2 {
-		t.Fatalf("activity status height = %d, want 2", got)
+	if got := m.statusLineHeight(); got != 1 {
+		t.Fatalf("activity status height = %d, want 1", got)
 	}
 }
 
@@ -413,8 +497,8 @@ func TestStatusLineUsesApprovalHintAndFitsNarrowWidth(t *testing.T) {
 	m.width = 24
 	m.approval = nil
 	lines := strings.Split(plain(m.statusLine()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("status lines = %d, want 2: %q", len(lines), lines)
+	if len(lines) != 1 {
+		t.Fatalf("status lines = %d, want 1: %q", len(lines), lines)
 	}
 	for i, line := range lines {
 		if got := len([]rune(line)); got > m.width {

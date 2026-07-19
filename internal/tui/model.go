@@ -834,29 +834,88 @@ func (m *model) statusLine() string {
 
 	elapsed := time.Since(m.busySince)
 
-	hint := "↩ steer · ctrl+↩ queue · esc interrupt"
+	fullHint := "↩ steer · ctrl+↩ queue · esc interrupt"
+	compactHint := "esc interrupt"
 	if m.approval != nil {
-		hint = "esc to deny"
+		fullHint = "esc to deny"
+		compactHint = "esc deny"
 	} else if m.queued != nil && m.turn.direct {
-		hint = "next queued · esc interrupt"
+		fullHint = "next queued · esc interrupt"
+		compactHint = "queued · esc interrupt"
 	} else if m.queued != nil {
-		hint = "next queued · ↩ steer · esc interrupt"
+		fullHint = "next queued · ↩ steer · esc interrupt"
+		compactHint = "queued · esc interrupt"
 	} else if m.turn.direct {
-		hint = "ctrl+↩ queue · esc interrupt"
+		fullHint = "ctrl+↩ queue · esc interrupt"
 	}
-	header := fmt.Sprintf("Working (%s · %s)", formatElapsedCompact(elapsed), hint)
-	line := truncate(" "+m.spin.View()+" "+styMuted.Render(header), max(m.width, 1))
-	detail := ""
-	switch {
-	case m.approval != nil:
-		detail = "Waiting for approval"
-	case m.currentTool != nil:
-		detail = capitalize(toolVerb(m.currentTool.name, m.currentTool.args))
+	if m.workflow != nil {
+		planHint := "tab plan"
+		if m.workflowVisible {
+			planHint = "tab hide plan"
+		}
+		fullHint = planHint + " · " + fullHint
+		compactHint = planHint + " · " + compactHint
 	}
-	if detail != "" {
-		line += "\n" + truncate("   "+styDim.Render("└ "+detail), max(m.width, 1))
+	activity := m.statusActivity()
+	prefix := " " + m.spin.View() + " "
+	timing := " · " + formatElapsedCompact(elapsed)
+	hint := statusHintForWidth(m.width-lipgloss.Width(prefix)-lipgloss.Width(timing), fullHint, compactHint)
+	suffix := timing
+	if hint != "" {
+		suffix += "   " + hint
 	}
-	return line
+	activityWidth := max(m.width-lipgloss.Width(prefix)-lipgloss.Width(suffix), 1)
+	line := prefix + styLabel.Render(truncate(activity, activityWidth)) + styDim.Render(suffix)
+	return truncate(line, max(m.width, 1))
+}
+
+func statusHintForWidth(available int, full, compact string) string {
+	const minimumActivityWidth = 16
+	if lipgloss.Width(full)+3+minimumActivityWidth <= available {
+		return full
+	}
+	if lipgloss.Width(compact)+3+minimumActivityWidth <= available {
+		return compact
+	}
+	return ""
+}
+
+func (m *model) statusActivity() string {
+	if m.approval != nil {
+		return "Waiting for approval"
+	}
+	parts := []string{}
+	if workflow := m.workflowProgress(); workflow != "" {
+		parts = append(parts, workflow)
+	}
+	if m.currentTool != nil {
+		parts = append(parts, capitalize(toolVerb(m.currentTool.name, m.currentTool.args)))
+	}
+	if len(parts) == 0 {
+		return "Thinking"
+	}
+	return strings.Join(parts, " · ")
+}
+
+func (m *model) workflowProgress() string {
+	if m.workflow == nil || len(m.workflow.items) == 0 {
+		return ""
+	}
+	for i, item := range m.workflow.items {
+		if item.Status == workflow.Running {
+			return fmt.Sprintf("%d/%d %s", i+1, len(m.workflow.items), oneLine(item.Text))
+		}
+	}
+	done, failed, skipped := workflowCounts(m.workflow.items)
+	finished := done + failed + skipped
+	if finished == len(m.workflow.items) {
+		return fmt.Sprintf("%d/%d Plan complete", finished, len(m.workflow.items))
+	}
+	title := strings.TrimSpace(m.workflow.title)
+	if title == "" {
+		title = "Plan"
+	}
+	return fmt.Sprintf("%d/%d %s", finished, len(m.workflow.items), oneLine(title))
 }
 
 func formatElapsedCompact(d time.Duration) string {
@@ -875,6 +934,9 @@ func capitalize(s string) string {
 }
 
 func formatElapsed(d time.Duration) string {
+	if d > 0 && d < time.Second {
+		return "<1s"
+	}
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
@@ -938,9 +1000,6 @@ func (m *model) layout() {
 }
 
 func (m *model) statusLineHeight() int {
-	if m.busy && (m.currentTool != nil || m.approval != nil) {
-		return 2
-	}
 	return 1
 }
 
@@ -1019,7 +1078,7 @@ func (m *model) refreshViewport() {
 	var sb strings.Builder
 	for i, b := range m.blocks {
 		if i > 0 {
-			sb.WriteString("\n")
+			sb.WriteString(blockSeparator(m.blocks[i-1], b))
 		}
 		sb.WriteString(b.render(m.width, m.md))
 		sb.WriteString("\n")
@@ -1030,6 +1089,15 @@ func (m *model) refreshViewport() {
 	} else {
 		m.viewport.SetYOffset(previousOffset)
 	}
+}
+
+func blockSeparator(previous, next block) string {
+	previousTool, previousOK := previous.(toolCallBlock)
+	nextTool, nextOK := next.(toolCallBlock)
+	if previousOK && nextOK && !previousTool.verbose && !nextTool.verbose {
+		return ""
+	}
+	return "\n"
 }
 
 func (m *model) handleEvent(e agent.Event) {
@@ -1056,7 +1124,7 @@ func (m *model) handleEvent(e agent.Event) {
 			break
 		}
 		m.turn.tools++
-		m.noteWorkflowActivity(toolActivity(e.Name, e.Args))
+		m.noteWorkflowActivity(capitalize(toolVerb(e.Name, e.Args)))
 		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now(), verbose: m.verbose}
 		m.currentTool = &tc
 		if e.Name == "agent" {
@@ -1096,10 +1164,11 @@ func (m *model) handleEvent(e agent.Event) {
 			break
 		}
 		if !m.verbose && !e.IsError && completedTool != nil {
+			completedTool.elapsed = elapsed
 			m.appendBlock(*completedTool)
 		}
-		// In concise mode, routine successful agent results add no scannable
-		// information beyond the call's status line, so only errors render.
+		// In concise mode, routine successful result bodies add no scannable
+		// information beyond the compact receipt, so only errors render.
 		// Direct ! commands are user-requested output, not intermediate agent
 		// activity, and must remain visible in either mode.
 		if m.verbose || e.IsError || m.turn.direct {
