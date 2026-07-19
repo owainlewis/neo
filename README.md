@@ -3,40 +3,44 @@
 [![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Most coding agents are free-form: you type a request and hope the model picks
-the right sequence of steps. Neo is workflow-first — encode a checklist once,
-in a prompt, a skill, or an `AGENTS.md`, and Neo runs the agent through it step
-by step with live, visible progress instead of a black box. That checklist is
-what makes a multi-step task repeatable instead of a one-off improvisation.
+## A minimalist coding agent for serious builders.
 
-Neo is also a single Go binary with sensible defaults (permission modes and
-workflows work out of the box, no plugins to assemble first) and support for
-multiple providers (Anthropic, OpenAI API key, OpenAI subscription, OpenRouter,
-or Google Gemini) so switching backends is a config line, not a rewrite.
+Neo is fast to set up: one Go binary with built-in file and shell tools, local
+sessions, configurable permissions, and no product telemetry. Use the model
+you trust and keep working in your terminal.
+
+Start Neo in a repository and give it a task. It can read and edit files,
+search code, run commands, follow project instructions, save sessions, and
+delegate focused work to subagents. There is no separate runtime or plugin
+stack to set up.
 
 ![neo splash screen](docs/screenshot.png)
 
 ## Features
 
-- **Workflow-first.** Give Neo numbered steps, or ask it to plan a workflow,
-  and the TUI shows a live checklist while the agent works through each step
-  in order. Skills let you encode that checklist once and reuse it.
-- **Sensible defaults.** Permission modes (`ask`, `trusted`, `readonly`),
-  `AGENTS.md` support, and visible workflows all work the moment you install
-  Neo — nothing to configure before it's useful.
+- **Minimal by design.** Install one Go binary with built-in read, search,
+  shell, write, edit, agent, and workflow tools. There is no runtime or plugin
+  system to assemble first.
 - **Multi-provider.** Anthropic, OpenAI (API key), OpenAI (ChatGPT/Codex
-  subscription), OpenRouter, or Google Gemini. Switch with one config line.
-- **Minimalist.** A single Go binary, six built-in tools (read, search, shell,
-  write, edit), no runtime dependency. The core agent loop is small and
-  policy-free on purpose — file, shell, session, and prompt features are
-  layered on as independent modules, not baked into the loop.
+  subscription), OpenRouter, or Google Gemini. Switch providers and models in
+  the terminal without restarting Neo.
+- **Configurable permissions.** Use `readonly` to inspect, `ask` to approve
+  shell commands and file changes, or `trusted` for routine work with prompts
+  around high-risk commands and workspace checks for built-in file tools.
+- **Local sessions.** Chats are stored on your disk. Search, resume, and keep
+  working without a Neo account.
 - **Interactive chat.** `neo` opens a Bubble Tea terminal UI. Type a task and
   watch the agent work.
-- **AGENTS.md support.** Drop an `AGENTS.md` in your project (or `~/.neo/`) and
-  its guidance is loaded into the agent's system prompt. Feature-flagged.
+- **Project instructions.** Drop an `AGENTS.md` in your project (or `~/.neo/`)
+  and Neo loads its guidance for the session.
+- **Focused subagents.** Delegate independent work while Neo limits agent
+  depth, runtime, fan-out, and total agent count.
 - **Skills.** Reusable prompt snippets in `.neo/skills/<name>/SKILL.md`. Mention
   `$name` in a message or run `/name args` and the skill's instructions are
   expanded into that turn.
+- **Visible workflows when you need them.** Give Neo numbered steps, or ask it
+  to plan a workflow, and the TUI shows progress, tool activity, and delegated
+  work while the task runs.
 
 ## Install
 
