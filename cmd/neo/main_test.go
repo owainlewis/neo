@@ -176,6 +176,34 @@ func TestDoctorProviderCheckRejectsUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestDoctorChecksContinueAfterConfigFailure(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	t.Setenv("HOME", t.TempDir())
+	if err := os.WriteFile(filepath.Join(root, "neo.yaml"), []byte("permissions: [invalid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := doctorChecks()
+	want := []string{"config", "provider", "credentials", "model", "sessions", "git", "workspace"}
+	if len(checks) != len(want) {
+		t.Fatalf("checks = %d, want %d: %#v", len(checks), len(want), checks)
+	}
+	for i, name := range want {
+		if checks[i].Name != name {
+			t.Fatalf("check %d = %s, want %s", i, checks[i].Name, name)
+		}
+	}
+	if checks[0].Status != doctorFail {
+		t.Fatalf("config status = %s, want fail", checks[0].Status)
+	}
+	for _, check := range checks[1:4] {
+		if check.Status != doctorWarn || !strings.Contains(check.Detail, "skipped: config failed to load") {
+			t.Fatalf("%s check = %s/%q, want skipped warning", check.Name, check.Status, check.Detail)
+		}
+	}
+}
+
 func TestChatSystem_IgnoresProjectMemoryFile(t *testing.T) {
 	root := t.TempDir()
 	cwd := filepath.Join(root, "pkg")
