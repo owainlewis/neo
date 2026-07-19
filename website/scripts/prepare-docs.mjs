@@ -1,7 +1,7 @@
-// Copies generated developer docs from ../docs/developer into
+// Copies developer docs from ../docs/developer into
 // src/content/docs/docs/, adding Starlight frontmatter and rewriting
 // relative .md links into site routes. Run automatically before dev/build
-// so the docs site never drifts from `go run ./cmd/neo-docs` output.
+// so the docs site uses the repository's contributor documentation directly.
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,9 +16,8 @@ const destDir = resolve(websiteDir, 'src/content/docs/docs/reference');
 
 // These pages are the landing pages for the "Internals" sidebar group —
 // implementation-level material for people extending or contributing to
-// Neo, not required reading to use it. The Go generator (cmd/neo-docs)
-// doesn't know about the website's sidebar grouping, so that framing is
-// added here at the website layer instead of in the generated source.
+// Neo, not required reading to use it. That framing is added here at the
+// website layer instead of in the source Markdown.
 const CONTRIBUTOR_NOTE_PATHS = new Set(['index.md', 'guides/index.md']);
 const CONTRIBUTOR_NOTE =
   ':::note[For contributors]\n' +
@@ -48,7 +47,7 @@ async function copyDir(source, destination) {
 }
 
 function transform(raw, relPath) {
-  const body = raw.replace(/^<!--.*?-->\n+/, '');
+  const body = raw;
   const titleMatch = body.match(/^#\s+(.+)$/m);
   const title = titleMatch ? titleMatch[1].trim() : 'Untitled';
   const withoutTitle = titleMatch ? body.replace(titleMatch[0], '').trimStart() : body;

@@ -176,7 +176,7 @@ func TestRemovedSlashCommandsAreNotBuiltIn(t *testing.T) {
 	m := makeTestModel()
 	help := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
 
-	for _, cmd := range []string{"/tools", "/permissions"} {
+	for _, cmd := range []string{"/tools", "/tokens", "/sessions", "/permissions"} {
 		if strings.Contains(help, cmd) {
 			t.Fatalf("help still advertises %s: %s", cmd, help)
 		}
@@ -186,25 +186,14 @@ func TestRemovedSlashCommandsAreNotBuiltIn(t *testing.T) {
 	}
 }
 
-func TestSlashCommand_TokensModelAndClear(t *testing.T) {
-	for _, tc := range []struct {
-		cmd  string
-		want string
-	}{
-		{"/tokens", "input: 0"},
-		{"/model", "model: test"},
-	} {
-		t.Run(tc.cmd, func(t *testing.T) {
-			m := makeTestModel()
-			m.handleSlashCommand(tc.cmd)
-			out := plain(m.blocks[0].render(80, nil))
-			if !strings.Contains(out, tc.want) {
-				t.Fatalf("%s output missing %q: %s", tc.cmd, tc.want, out)
-			}
-		})
+func TestSlashCommand_ModelAndClear(t *testing.T) {
+	m := makeTestModel()
+	m.handleSlashCommand("/model")
+	if out := plain(m.blocks[0].render(80, nil)); !strings.Contains(out, "model: test") {
+		t.Fatalf("/model output: %s", out)
 	}
 
-	m := makeTestModel()
+	m = makeTestModel()
 	m.ag.SetUsage(llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4})
 	m.blocks = append(m.blocks, noticeBlock{text: "x"})
 	m.handleSlashCommand("/clear")
@@ -252,7 +241,7 @@ func TestSlashCommand_ClearShowsSaveError(t *testing.T) {
 }
 
 func TestSlashCommand_StatefulCommandsRequireIdle(t *testing.T) {
-	for _, cmd := range []string{"/clear", "/tokens"} {
+	for _, cmd := range []string{"/clear", "/model"} {
 		t.Run(cmd, func(t *testing.T) {
 			m := makeTestModel()
 			m.busy = true

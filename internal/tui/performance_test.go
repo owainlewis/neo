@@ -55,14 +55,9 @@ func BenchmarkLargeTranscriptRefresh(b *testing.B) {
 func BenchmarkActiveSubagentTreeRender(b *testing.B) {
 	tree := newTreeBlock()
 	now := time.Now()
-	for root := 1; root <= 8; root++ {
-		tree.roots = append(tree.roots, root)
-		tree.nodes[root] = &treeNode{id: root, step: "worker", task: fmt.Sprintf("task %d", root), startAt: now}
-		for child := 1; child <= 7; child++ {
-			id := root*100 + child
-			tree.nodes[id] = &treeNode{id: id, parent: root, step: "check", task: fmt.Sprintf("subtask %d", child), startAt: now, lastLine: "running focused verification"}
-			tree.children[root] = append(tree.children[root], id)
-		}
+	for id := 1; id <= 20; id++ {
+		tree.roots = append(tree.roots, id)
+		tree.nodes[id] = &treeNode{id: id, task: fmt.Sprintf("task %d", id), startAt: now, lastLine: "running focused verification"}
 	}
 	b.ReportAllocs()
 

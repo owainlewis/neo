@@ -149,39 +149,13 @@ func sessionBackend(cfg *config.Config, meta session.Metadata) (string, string) 
 }
 
 func modelChoices(ctx context.Context, cfg *config.Config, activeProvider string) []tui.ModelChoice {
-	var choices []tui.ModelChoice
-	for _, provider := range configuredProviders(cfg, activeProvider) {
-		providerChoices := providerModelChoices(ctx, cfg, provider, provider == activeProvider)
-		for i := range providerChoices {
-			providerChoices[i].Provider = provider
-		}
-		choices = append(choices, providerChoices...)
-	}
-	return choices
-}
-
-// configuredProviders treats an available local credential source as provider
-// configuration. The active provider is always first because chat startup has
-// already validated it; additional providers require their credential to be
-// present before they enter the picker.
-func configuredProviders(cfg *config.Config, active string) []string {
-	if active == "" {
-		active = cfg.Provider
-		if active == "" {
-			active = "anthropic"
+	if activeProvider == "" {
+		activeProvider = cfg.Provider
+		if activeProvider == "" {
+			activeProvider = "anthropic"
 		}
 	}
-	ordered := []string{active, "anthropic", "openai", "openrouter", "google"}
-	seen := map[string]bool{}
-	var providers []string
-	for _, provider := range ordered {
-		if seen[provider] || (provider != active && !providerCredentialPresent(cfg, provider)) {
-			continue
-		}
-		seen[provider] = true
-		providers = append(providers, provider)
-	}
-	return providers
+	return providerModelChoices(ctx, cfg, activeProvider)
 }
 
 func providerCredentialPresent(cfg *config.Config, provider string) bool {
@@ -207,7 +181,7 @@ func providerCredentialPresent(cfg *config.Config, provider string) bool {
 	}
 }
 
-func providerModelChoices(ctx context.Context, cfg *config.Config, provider string, active bool) []tui.ModelChoice {
+func providerModelChoices(ctx context.Context, cfg *config.Config, provider string) []tui.ModelChoice {
 	switch provider {
 	case "openai":
 		if cfg.OpenAIAuth == config.OpenAIAuthSubscription {
@@ -226,11 +200,6 @@ func providerModelChoices(ctx context.Context, cfg *config.Config, provider stri
 			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},
 		}
 	case "openrouter":
-		if !active {
-			return []tui.ModelChoice{
-				{ID: openrouter.DefaultModel, Name: openrouter.DefaultModel, Description: "Default OpenRouter model"},
-			}
-		}
 		return openRouterModelChoices(ctx)
 	case "google":
 		return []tui.ModelChoice{

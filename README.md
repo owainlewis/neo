@@ -30,7 +30,7 @@ from first inspection to tested change.
 - **One coordinator, focused workers.** Delegate bounded work to subagents and
   bring their evidence back into one coherent workflow.
 - **Your model, your choice.** Use Anthropic, OpenAI, Google Gemini, or
-  OpenRouter, then switch provider and model without leaving the terminal.
+  OpenRouter, and switch models for the active provider without leaving the terminal.
 - **Control that fits the task.** Choose trusted, approval-based, or read-only
   permissions. Steer active work or queue the next instruction at any time.
 - **A small, dependable foundation.** One native Go binary, built-in tools,

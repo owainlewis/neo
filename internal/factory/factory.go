@@ -1,41 +1,32 @@
 // Package factory supervises chat-spawned subagents. The public model-facing
 // surface is the agent tool: the coordinator writes a self-contained prompt,
-// the supervisor enforces depth/fanout/agent/time budgets, and the UI receives
-// an event tree for live progress. Legacy project-local step resolution remains
-// internal support code, but default named steps are no longer advertised.
+// the supervisor enforces agent/time budgets, and the UI receives events for
+// live progress.
 //
 // Division of labor:
 //
 //	agents decide    — planning, sequencing, triage, judgment
-//	code  constrains — depth, fanout, agent count, time
+//	code  constrains — agent count, time
 //	code  observes   — events, attribution, rendering
 //	code  never interprets — no state machines over agent outcomes
 package factory
 
 import (
 	"strings"
-	"sync"
 	"time"
 )
 
-// Budget is the cage. Enforced by the runtime regardless of what any agent
-// asks for. Agent-count is tree-wide; the rest are per node.
+// Budget is enforced by the runtime regardless of what an agent asks for.
 type Budget struct {
-	MaxDepth      int           // coordinator=0, children=1, grandchildren=2
-	MaxChildren   int           // per node
-	MaxAgents     int           // tree-wide cap on agent steps
-	MaxWall       time.Duration // per agent step
-	ScriptTimeout time.Duration // per script step
+	MaxAgents int           // session-wide cap on subagents
+	MaxWall   time.Duration // per subagent
 }
 
 // DefaultBudget is a short leash suitable for early supervised runs.
 func DefaultBudget() Budget {
 	return Budget{
-		MaxDepth:      3,
-		MaxChildren:   8,
-		MaxAgents:     20,
-		MaxWall:       15 * time.Minute,
-		ScriptTimeout: 2 * time.Minute,
+		MaxAgents: 20,
+		MaxWall:   15 * time.Minute,
 	}
 }
 
@@ -48,44 +39,18 @@ type AgentEvent struct {
 	Body string `json:"body,omitempty"`
 }
 
-// Event is the attributed stream: every agent event tagged with its node
-// and the node's place in the tree, so a consumer can reconstruct the whole
-// hierarchy from the stream alone. One channel; the UI is a fold over it;
-// events.jsonl is a tee of it.
+// Event tags an agent event with the execution that produced it.
 type Event struct {
-	At     time.Time  `json:"at"`
-	Node   int        `json:"node"`
-	Parent int        `json:"parent,omitempty"`
-	Depth  int        `json:"depth,omitempty"`
-	Step   string     `json:"step"`
-	Task   string     `json:"task,omitempty"`
-	Ev     AgentEvent `json:"ev"`
+	At   time.Time  `json:"at"`
+	Node int        `json:"node"`
+	Task string     `json:"task,omitempty"`
+	Ev   AgentEvent `json:"ev"`
 }
 
-// Node is one subagent/script execution in the tree.
+// Node is one subagent execution.
 type Node struct {
-	ID      int
-	Parent  int // 0 = the root's virtual parent
-	Step    string
-	Kind    string // "agent" | "script"
-	Task    string // clipped, for the UI
-	Depth   int
-	Started time.Time
-
-	mu       sync.Mutex
-	done     bool
-	err      string
-	lastLine string
-	children []int
-}
-
-// NodeView is an immutable snapshot of a Node for rendering.
-type NodeView struct {
-	ID, Parent, Depth int
-	Step, Kind, Task  string
-	Done              bool
-	Err, LastLine     string
-	Elapsed           time.Duration
+	ID   int
+	Task string // clipped, for the UI
 }
 
 // clip returns the first line of s, truncated to at most n runes.

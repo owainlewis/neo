@@ -100,7 +100,6 @@ If you built Neo locally but did not install it onto your `PATH`, run `./neo` in
 | `neo sessions` | List saved chats |
 | `neo doctor` | Check local config, credentials, sessions, git, and workspace |
 | `neo sessions search <query>` | Search saved chat transcripts |
-| `neo update` | Install the latest stable release |
 | `neo resume <id>` | Resume a saved chat |
 | `neo login` / `neo logout` | Set up or remove OpenAI subscription auth |
 

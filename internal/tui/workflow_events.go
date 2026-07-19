@@ -73,10 +73,7 @@ func (m *model) noteWorkflowActivity(detail string) {
 	}
 }
 
-// handleStepEvent folds the supervisor's event stream into tree blocks:
-// "start" places a node (a fresh block per top-level call unless the
-// previous block is still the active tree), "done"/"fail" settle it, and
-// everything else updates the node's live status line.
+// handleStepEvent folds the supervisor's event stream into activity blocks.
 func (m *model) handleStepEvent(ev factory.Event) {
 	switch ev.Ev.Kind {
 	case "start":
@@ -107,31 +104,18 @@ func (m *model) handleStepEvent(ev factory.Event) {
 	}
 }
 
-// startTreeNode places a started node in a tree block. Top-level calls
-// (children of the chat agent, node 0) root a block; deeper nodes attach
-// under their parent's block wherever it lives.
+// startTreeNode places a started agent in the current activity block.
 func (m *model) startTreeNode(ev factory.Event) {
 	if m.treeIndex == nil {
 		m.treeIndex = map[int]*treeBlock{}
 	}
-	node := &treeNode{id: ev.Node, parent: ev.Parent, step: ev.Step, task: ev.Task, startAt: time.Now()}
-	if ev.Parent == 0 {
-		if m.activeTree == nil || len(m.blocks) == 0 || m.blocks[len(m.blocks)-1] != block(m.activeTree) {
-			m.activeTree = newTreeBlock()
-			m.appendBlock(m.activeTree)
-		}
-		m.activeTree.roots = append(m.activeTree.roots, ev.Node)
-		m.activeTree.nodes[ev.Node] = node
-		m.treeIndex[ev.Node] = m.activeTree
-		m.refreshViewport()
-		return
+	node := &treeNode{id: ev.Node, task: ev.Task, startAt: time.Now()}
+	if m.activeTree == nil || len(m.blocks) == 0 || m.blocks[len(m.blocks)-1] != block(m.activeTree) {
+		m.activeTree = newTreeBlock()
+		m.appendBlock(m.activeTree)
 	}
-	tb := m.treeIndex[ev.Parent]
-	if tb == nil {
-		return // parent unknown (e.g. events from a pre-resume session)
-	}
-	tb.nodes[ev.Node] = node
-	tb.children[ev.Parent] = append(tb.children[ev.Parent], ev.Node)
-	m.treeIndex[ev.Node] = tb
+	m.activeTree.roots = append(m.activeTree.roots, ev.Node)
+	m.activeTree.nodes[ev.Node] = node
+	m.treeIndex[ev.Node] = m.activeTree
 	m.refreshViewport()
 }

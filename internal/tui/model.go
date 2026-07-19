@@ -23,23 +23,19 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/permission"
-	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workflow"
 	"github.com/owainlewis/neo/internal/workspace"
 )
 
 type Options struct {
-	AfterSend       func() error
-	SessionStore    *session.Store
-	CurrentSession  *session.Session
-	OnSessionResume func(*session.Session) error
-	ModelChoices    []ModelChoice
-	Provider        string
-	ModelSwitcher   func(ModelChoice) error
-	StepEvents      <-chan factory.Event
-	WorkflowEvents  <-chan workflow.Event
-	Verbose         bool
+	AfterSend      func() error
+	ModelChoices   []ModelChoice
+	Provider       string
+	ModelSwitcher  func(string) error
+	StepEvents     <-chan factory.Event
+	WorkflowEvents <-chan workflow.Event
+	Verbose        bool
 }
 
 type Option func(*Options)
@@ -48,22 +44,9 @@ func WithAfterSend(fn func() error) Option {
 	return func(opts *Options) { opts.AfterSend = fn }
 }
 
-func WithSessions(store *session.Store, current *session.Session, onResume func(*session.Session) error) Option {
-	return func(opts *Options) {
-		opts.SessionStore = store
-		opts.CurrentSession = current
-		opts.OnSessionResume = onResume
-	}
-}
-
-func WithModelChoices(choices []ModelChoice) Option {
-	return func(opts *Options) { opts.ModelChoices = choices }
-}
-
-// WithModelSwitcher enables provider-aware model selection. The callback must
-// finish the backend switch before returning; the TUI updates its labels only
-// after it succeeds.
-func WithModelSwitcher(provider string, choices []ModelChoice, fn func(ModelChoice) error) Option {
+// WithModelSwitcher enables model selection for the active provider. The
+// callback must finish the model switch before returning.
+func WithModelSwitcher(provider string, choices []ModelChoice, fn func(string) error) Option {
 	return func(opts *Options) {
 		opts.Provider = provider
 		opts.ModelChoices = choices
@@ -72,7 +55,7 @@ func WithModelSwitcher(provider string, choices []ModelChoice, fn func(ModelChoi
 }
 
 // WithStepEvents subscribes the TUI to the factory supervisor's event
-// stream, which the chat view folds into live subagent trees while agent
+// stream, which the chat view folds into live subagent activity while agent
 // calls execute.
 func WithStepEvents(ch <-chan factory.Event) Option {
 	return func(opts *Options) { opts.StepEvents = ch }
@@ -187,7 +170,6 @@ type model struct {
 	spin     spinner.Model
 	picker   commandPicker
 	files    filePicker
-	sessions sessionBrowser
 	models   modelBrowser
 
 	// lastInputHeight is the textarea height the current layout was computed
@@ -204,7 +186,7 @@ type model struct {
 	workflow        *workflowBlock
 	workflowVisible bool
 	turn            turnStats
-	activeTree      *treeBlock         // block receiving new top-level subagent trees
+	activeTree      *treeBlock         // block receiving new subagent activity
 	treeIndex       map[int]*treeBlock // supervisor node id -> the block holding it
 	approval        *approvalState
 	// allow holds the rules the user granted via "always allow" during this
@@ -228,14 +210,10 @@ type model struct {
 	// invocations before a turn is sent.
 	skills []skills.Skill
 
-	afterSend         func() error
-	sessionStore      *session.Store
-	currentSessionID  string
-	currentSessionCWD string
-	onSessionResume   func(*session.Session) error
-	modelChoices      []ModelChoice
-	modelSwitcher     func(ModelChoice) error
-	verbose           bool
+	afterSend     func() error
+	modelChoices  []ModelChoice
+	modelSwitcher func(string) error
+	verbose       bool
 }
 
 func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
@@ -305,39 +283,26 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	if version == "" {
 		version = "dev"
 	}
-	currentSessionID := ""
-	currentSessionCWD := absCWD
-	if opts.CurrentSession != nil {
-		currentSessionID = opts.CurrentSession.Metadata.ID
-		if opts.CurrentSession.Metadata.CWD != "" {
-			currentSessionCWD = opts.CurrentSession.Metadata.CWD
-		}
-	}
-
 	providerTag := strings.TrimSpace(opts.Provider)
 	m := &model{
-		ctx:               ctx,
-		ag:                ag,
-		modelTag:          modelTag,
-		providerTag:       providerTag,
-		mdStyleName:       styleName,
-		cwd:               cwd,
-		branch:            branch,
-		viewport:          vp,
-		input:             ta,
-		spin:              sp,
-		files:             newFilePicker(workspace.Root(absCWD)),
-		md:                md,
-		skills:            sk,
-		afterSend:         opts.AfterSend,
-		sessionStore:      opts.SessionStore,
-		currentSessionID:  currentSessionID,
-		currentSessionCWD: currentSessionCWD,
-		onSessionResume:   opts.OnSessionResume,
-		modelChoices:      normalizeModelChoices(providerTag, modelTag, opts.ModelChoices),
-		modelSwitcher:     opts.ModelSwitcher,
-		verbose:           opts.Verbose,
-		steer:             ag.Steer,
+		ctx:           ctx,
+		ag:            ag,
+		modelTag:      modelTag,
+		providerTag:   providerTag,
+		mdStyleName:   styleName,
+		cwd:           cwd,
+		branch:        branch,
+		viewport:      vp,
+		input:         ta,
+		spin:          sp,
+		files:         newFilePicker(workspace.Root(absCWD)),
+		md:            md,
+		skills:        sk,
+		afterSend:     opts.AfterSend,
+		modelChoices:  normalizeModelChoices(modelTag, opts.ModelChoices),
+		modelSwitcher: opts.ModelSwitcher,
+		verbose:       opts.Verbose,
+		steer:         ag.Steer,
 	}
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
@@ -369,16 +334,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.models.visible {
 			return m.handleModelBrowserKey(msg)
 		}
-		if m.sessions.visible {
-			return m.handleSessionBrowserKey(msg)
-		}
 		if m.approval != nil {
 			return m, m.handleApprovalKey(msg)
 		}
 		cmds = append(cmds, m.handleKey(msg))
 
 	case tea.PasteMsg:
-		if m.models.visible || m.sessions.visible || m.approval != nil {
+		if m.models.visible || m.approval != nil {
 			break
 		}
 		cmds = append(cmds, m.updateInput(msg))
@@ -450,7 +412,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		cmds = append(cmds, cmd)
-		// A live tree shows elapsed time on its running nodes; repaint on
+		// Live subagent activity shows elapsed time; repaint on
 		// the spinner's cadence so the counters don't freeze between events.
 		if m.activeTree != nil && m.activeTree.running() {
 			m.refreshViewport()
@@ -482,9 +444,6 @@ func (m *model) View() tea.View {
 	}
 	if m.width == 0 {
 		return makeView("loading…")
-	}
-	if m.sessions.visible {
-		return makeView(m.sessionBrowserView())
 	}
 	if m.models.visible {
 		return makeView(m.modelBrowserView())
@@ -616,12 +575,8 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 	switch cmd {
 	case "/help":
 		m.appendBlock(helpBlock{commands: m.slashCommands()})
-	case "/tokens":
-		m.appendBlock(tokensBlock{usage: m.ag.Usage()})
 	case "/model":
 		m.openModelBrowser()
-	case "/sessions":
-		m.openSessionBrowser()
 	case "/clear":
 		m.ag.Clear()
 		m.blocks = nil
@@ -650,7 +605,7 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 
 func slashCommandRequiresIdle(cmd string) bool {
 	switch cmd {
-	case "/clear", "/tokens", "/sessions", "/model":
+	case "/clear", "/model":
 		return true
 	default:
 		return false
@@ -1086,7 +1041,7 @@ func blockSeparator(previous, next block) string {
 func (m *model) handleEvent(e agent.Event) {
 	switch e.Kind {
 	case agent.EventAssistantText:
-		m.activeTree = nil // assistant commentary splits subagent trees
+		m.activeTree = nil // assistant commentary splits subagent activity
 		if strings.TrimSpace(e.Text) != "" {
 			m.appendBlock(textBlock{text: e.Text})
 		}
@@ -1111,7 +1066,7 @@ func (m *model) handleEvent(e agent.Event) {
 		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now(), verbose: m.verbose}
 		m.currentTool = &tc
 		if e.Name == "agent" {
-			// The supervisor's "start" event draws this call as a tree
+			// The supervisor's "start" event draws this call as activity
 			// node; no generic tool card.
 			break
 		}
@@ -1139,7 +1094,7 @@ func (m *model) handleEvent(e agent.Event) {
 			m.turn.errors++
 		}
 		if e.Name == "agent" {
-			// Success renders in the tree. Failures/denials keep an error card
+			// Success renders in the activity block. Failures keep an error card
 			// so the output is inspectable.
 			if e.IsError || !runStepOK(e.Text) {
 				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true, elapsed: elapsed})

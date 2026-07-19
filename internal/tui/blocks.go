@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
-	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -227,37 +226,30 @@ func (b toolResultBlock) isTruncated() bool {
 	return len(strings.Split(body, "\n")) > toolResultMaxLines
 }
 
-// treeNode is one step execution in a treeBlock: a node of the supervisor's
-// tree, reconstructed in the UI purely from the event stream.
+// treeNode is one subagent execution reconstructed from the event stream.
 type treeNode struct {
-	id, parent int
-	step, task string
-	startAt    time.Time
-	done, ok   bool
-	elapsed    time.Duration
-	lastLine   string // latest activity while running
+	id       int
+	task     string
+	startAt  time.Time
+	done, ok bool
+	elapsed  time.Duration
+	lastLine string // latest activity while running
 }
 
-// treeBlock renders the supervisor subtrees spawned by the chat agent's
-// agent calls — subagents and their nested subagents, live:
+// treeBlock renders consecutive subagents spawned by the chat agent:
 //
-//	● ship  add rate limiting to invites          2m07s
-//	├─ ✓ checks                                       4s
-//	├─ ● worker  implement limiter middleware     1m12s
-//	│     └ bash: just test
-//	└─ ✓ verify  branch vs acceptance criteria      31s
+//	● agent  add rate limiting to invites          2m07s
+//	✓ agent  verify branch vs acceptance criteria     31s
 //
-// Consecutive top-level calls share one block (their trees render as
-// siblings); assistant text in between starts a new block. It is a pointer
-// block, mutated in place as events arrive.
+// Consecutive calls share one block; assistant text in between starts a new
+// block. It is a pointer block, mutated in place as events arrive.
 type treeBlock struct {
-	nodes    map[int]*treeNode
-	children map[int][]int
-	roots    []int
+	nodes map[int]*treeNode
+	roots []int
 }
 
 func newTreeBlock() *treeBlock {
-	return &treeBlock{nodes: map[int]*treeNode{}, children: map[int][]int{}}
+	return &treeBlock{nodes: map[int]*treeNode{}}
 }
 
 // running reports whether any node in the block is still in flight.
@@ -270,30 +262,22 @@ func (b *treeBlock) running() bool {
 	return false
 }
 
-// render draws the tree as plain styled lines, no background card: mixing
+// render draws the activity as plain styled lines, no background card: mixing
 // foreground-styled spans inside a Background style breaks the fill at
 // every inner ANSI reset, which reads as patchy off-color blocks.
 func (b *treeBlock) render(width int, _ *glamour.TermRenderer) string {
 	var sb strings.Builder
 	for _, id := range b.roots {
-		b.renderNode(&sb, id, "", true, width)
+		b.renderNode(&sb, id, width)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (b *treeBlock) renderNode(sb *strings.Builder, id int, prefix string, last bool, width int) {
+func (b *treeBlock) renderNode(sb *strings.Builder, id int, width int) {
 	n := b.nodes[id]
 	if n == nil {
 		return
 	}
-	connector, childPrefix := "├─ ", prefix+"│  "
-	if last {
-		connector, childPrefix = "└─ ", prefix+"   "
-	}
-	if n.parent == 0 { // the chat agent's own calls are the roots
-		connector, childPrefix = "", ""
-	}
-
 	glyph := styTool.Render("●")
 	elapsed := time.Since(n.startAt)
 	if n.done {
@@ -305,14 +289,10 @@ func (b *treeBlock) renderNode(sb *strings.Builder, id int, prefix string, last 
 		}
 	}
 	task := styMuted.Render(truncate(oneLine(n.task), 44))
-	sb.WriteString(fmt.Sprintf("%s%s%s %s %s %s\n",
-		prefix, connector, glyph, styLabel.Render(padRight(n.step, 12)), task, styDim.Render(formatElapsed(elapsed))))
+	sb.WriteString(fmt.Sprintf("%s %s %s %s\n",
+		glyph, styLabel.Render(padRight("agent", 12)), task, styDim.Render(formatElapsed(elapsed))))
 	if !n.done && n.lastLine != "" {
-		sb.WriteString(childPrefix + styDim.Render("  └ "+truncate(oneLine(n.lastLine), max(width-12, 10))) + "\n")
-	}
-	kids := b.children[id]
-	for i, k := range kids {
-		b.renderNode(sb, k, childPrefix, i == len(kids)-1, width)
+		sb.WriteString(styDim.Render("  └ "+truncate(oneLine(n.lastLine), max(width-12, 10))) + "\n")
 	}
 }
 
@@ -351,20 +331,6 @@ func (b maxTurnsBlock) render(width int, _ *glamour.TermRenderer) string {
 		msg = fmt.Sprintf("Paused after %d steps. Reply to continue.", b.limit)
 	}
 	return accentCard(styMuted.Render(msg), colWarn)
-}
-
-type tokensBlock struct {
-	usage llm.Usage
-}
-
-func (b tokensBlock) render(width int, _ *glamour.TermRenderer) string {
-	lines := []string{
-		fmt.Sprintf("input: %d", b.usage.InputTokens),
-		fmt.Sprintf("output: %d", b.usage.OutputTokens),
-		fmt.Sprintf("cache write: %d", b.usage.CacheCreationTokens),
-		fmt.Sprintf("cache read: %d", b.usage.CacheReadTokens),
-	}
-	return styCardResult.Width(width - 2).Render(strings.Join(lines, "\n"))
 }
 
 type approvalBlock struct {

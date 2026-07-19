@@ -92,14 +92,6 @@ lint:
     go vet ./...
     golangci-lint run
 
-# Generate developer docs
-docs:
-    go run ./cmd/neo-docs
-
-# Check generated developer docs are current
-docs-check:
-    go run ./cmd/neo-docs --check
-
 # Print the version that would be stamped (for debugging)
 print-version:
     @echo {{version}}
