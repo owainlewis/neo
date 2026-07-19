@@ -107,13 +107,21 @@ func (m *model) slashPickerView() string {
 	if !m.picker.visible || len(m.picker.matches) == 0 {
 		return ""
 	}
-	return renderSlashPicker(m.width, m.picker)
+	return renderSlashPicker(m.width, m.picker, m.maxInlinePickerRows())
 }
 
-func renderSlashPicker(width int, picker commandPicker) string {
+func renderSlashPicker(width int, picker commandPicker, rowLimits ...int) string {
 	if width <= 0 || len(picker.matches) == 0 {
 		return ""
 	}
+	maxRows := len(picker.matches) + 1
+	if len(rowLimits) > 0 {
+		maxRows = min(maxRows, rowLimits[0])
+	}
+	if maxRows < 2 {
+		return ""
+	}
+	start, end := pickerWindow(len(picker.matches), picker.selected, maxRows-1)
 	contentWidth := width - 2 // styPicker adds one column of horizontal padding.
 	if contentWidth < 1 {
 		contentWidth = 1
@@ -132,7 +140,8 @@ func renderSlashPicker(width int, picker commandPicker) string {
 	}
 
 	var lines []string
-	for i, c := range picker.matches {
+	for i := start; i < end; i++ {
+		c := picker.matches[i]
 		name := padRight(truncate(slashPickerDisplayName(c.cmd), cmdWidth), cmdWidth)
 		prefix := "  "
 		cmdStyle := styPickerCommand
@@ -150,6 +159,19 @@ func renderSlashPicker(width int, picker commandPicker) string {
 	}
 	lines = append(lines, styMuted.Render(fmt.Sprintf("(%d/%d)", picker.selected+1, len(picker.matches))))
 	return styPicker.Render(strings.Join(lines, "\n"))
+}
+
+func pickerWindow(total, selected, limit int) (int, int) {
+	if limit <= 0 || total <= 0 {
+		return 0, 0
+	}
+	if limit >= total {
+		return 0, total
+	}
+	selected = min(max(selected, 0), total-1)
+	start := max(selected-limit+1, 0)
+	end := min(start+limit, total)
+	return start, end
 }
 
 func slashPickerCommandWidth(commands []slashCommand) int {

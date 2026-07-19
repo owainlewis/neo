@@ -248,19 +248,28 @@ func (m *model) filePickerView() string {
 	if !m.files.visible || len(m.files.matches) == 0 {
 		return ""
 	}
-	return renderFilePicker(m.width, m.files)
+	return renderFilePicker(m.width, m.files, m.maxInlinePickerRows())
 }
 
-func renderFilePicker(width int, picker filePicker) string {
+func renderFilePicker(width int, picker filePicker, rowLimits ...int) string {
 	if width <= 0 || len(picker.matches) == 0 {
 		return ""
 	}
+	maxRows := len(picker.matches) + 1
+	if len(rowLimits) > 0 {
+		maxRows = min(maxRows, rowLimits[0])
+	}
+	if maxRows < 2 {
+		return ""
+	}
+	start, end := pickerWindow(len(picker.matches), picker.selected, maxRows-1)
 	contentWidth := width - 2 // styPicker adds one column of horizontal padding.
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 	var lines []string
-	for i, path := range picker.matches {
+	for i := start; i < end; i++ {
+		path := picker.matches[i]
 		prefix := "  "
 		style := styPickerCommand
 		if i == picker.selected {
