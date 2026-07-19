@@ -555,7 +555,7 @@ internal/tui/           Bubble Tea terminal UI
 ## Docs Site
 
 A browsable docs site lives in [`website/`](website/), built with Astro + Starlight and deployed
-to Cloudflare Pages. It covers install, quick start, and the same generated developer reference
+to GitHub Pages. It covers install, quick start, and the same generated developer reference
 described below, organized into a proper sidebar with search. Run it locally with:
 
 ```bash

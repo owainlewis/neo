@@ -1,8 +1,8 @@
 # neo docs website
 
 Astro + [Starlight](https://starlight.astro.build), with a custom product landing page and a
-shared, technical visual system for the documentation. Deployed to Cloudflare Pages at
-`neoharness.dev`.
+shared, technical visual system for the documentation. Published through GitHub Pages, with
+`neoharness.dev` configured as the custom domain once its DNS records point to GitHub Pages.
 
 ```bash
 bun install
@@ -11,7 +11,8 @@ bun run build    # outputs to dist/
 bun run preview  # serve the built output locally
 ```
 
-Configure Cloudflare Pages with `website` as the project root and `dist` as the publish directory.
+GitHub Actions builds `website/dist` and deploys it to GitHub Pages. The custom domain is configured
+in the repository's Pages settings, with DNS managed separately in Cloudflare.
 
 ## How content is organized
 
