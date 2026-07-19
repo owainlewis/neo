@@ -56,14 +56,12 @@ detect_platform() {
   case "$(uname -s)" in
     Linux)  os="linux"  ;;
     Darwin) os="darwin" ;;
-    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
     *) die "Unsupported OS: $(uname -s)" ;;
   esac
 
   case "$(uname -m)" in
     x86_64|amd64)  arch="amd64" ;;
     aarch64|arm64) arch="arm64" ;;
-    armv7l)        arch="arm"   ;;
     *) die "Unsupported architecture: $(uname -m)" ;;
   esac
 
@@ -123,17 +121,13 @@ verify_checksum() {
   local checksums="${tmp_dir}/checksums.txt"
   local url="https://github.com/${REPO}/releases/download/${version}/checksums.txt"
 
-  if ! download "$url" "$checksums" 2>/dev/null; then
-    warn "checksums.txt not found; skipping checksum verification"
-    return 0
-  fi
+  download "$url" "$checksums" 2>/dev/null || \
+    die "Could not download checksums.txt for ${version}; refusing to install an unverified binary"
 
   local expected
   expected=$(awk -v asset="$asset" '$2 == asset { print $1; exit }' "$checksums")
-  if [[ -z "$expected" ]]; then
-    warn "No checksum entry for ${asset}; skipping checksum verification"
-    return 0
-  fi
+  [[ -n "$expected" ]] || \
+    die "No checksum found for ${asset}; refusing to install an unverified binary"
 
   local actual
   if command -v sha256sum &>/dev/null; then
@@ -141,8 +135,7 @@ verify_checksum() {
   elif command -v shasum &>/dev/null; then
     actual=$(shasum -a 256 "$file" | awk '{print $1}')
   else
-    warn "No SHA-256 tool found; skipping checksum verification"
-    return 0
+    die "SHA-256 verification requires sha256sum or shasum"
   fi
 
   [[ "$actual" == "$expected" ]] || die "Checksum mismatch for ${asset}"
@@ -152,8 +145,6 @@ verify_checksum() {
 # ── Install via pre-built release binary ─────────────────────────────────────
 install_from_release() {
   local version="$1" platform="$2" bin_dir="$3"
-  local ext=""
-  [[ "$platform" == windows* ]] && ext=".exe"
 
   # Expected GoReleaser asset name pattern: neo_<os>_<arch>.tar.gz
   local asset="neo_${platform}.tar.gz"
@@ -163,46 +154,22 @@ install_from_release() {
   trap "rm -rf '$tmp_dir'" EXIT
 
   info "Downloading ${asset} (${version})…"
-  if ! download "$url" "${tmp_dir}/${asset}" 2>/dev/null; then
-    warn "Release asset not found at: $url"
-    return 1
-  fi
+  download "$url" "${tmp_dir}/${asset}" 2>/dev/null || \
+    die "Could not download release asset: ${url}"
 
   verify_checksum "${tmp_dir}/${asset}" "$asset" "$version" "$tmp_dir"
 
   command -v tar &>/dev/null || die "tar is required to extract ${asset}"
   tar -xzf "${tmp_dir}/${asset}" -C "$tmp_dir"
 
-  local extracted="${tmp_dir}/${BIN_NAME}${ext}"
+  local extracted="${tmp_dir}/${BIN_NAME}"
   if [[ ! -f "$extracted" ]]; then
-    extracted=$(find "$tmp_dir" -type f -name "${BIN_NAME}${ext}" | head -n 1)
+    extracted=$(find "$tmp_dir" -type f -name "${BIN_NAME}" | head -n 1)
   fi
-  [[ -n "$extracted" && -f "$extracted" ]] || die "Archive did not contain ${BIN_NAME}${ext}"
+  [[ -n "$extracted" && -f "$extracted" ]] || die "Archive did not contain ${BIN_NAME}"
 
   mkdir -p "$bin_dir"
-  install -m 0755 "$extracted" "${bin_dir}/${BIN_NAME}${ext}"
-  success "Installed ${BIN_NAME} → ${bin_dir}/${BIN_NAME}${ext}"
-  return 0
-}
-
-# ── Install via go install (fallback) ────────────────────────────────────────
-install_from_go() {
-  local version="$1" bin_dir="$2"
-
-  command -v go &>/dev/null || die "go is not installed. Install Go 1.25+ from https://go.dev/dl/ and retry."
-
-  local go_version
-  go_version=$(go version | awk '{print $3}' | sed 's/go//')
-  info "Using go install (Go ${go_version})…"
-
-  local pkg="github.com/${REPO}/cmd/neo"
-  local ref="@latest"
-  [[ "$version" != "latest" ]] && ref="@${version}"
-
-  GOBIN="$bin_dir" go install \
-    -ldflags "-X main.Version=${version}" \
-    "${pkg}${ref}"
-
+  install -m 0755 "$extracted" "${bin_dir}/${BIN_NAME}"
   success "Installed ${BIN_NAME} → ${bin_dir}/${BIN_NAME}"
 }
 
@@ -253,11 +220,7 @@ main() {
   fi
   info "Version: ${VERSION}"
 
-  # Try pre-built binary first, fall back to go install
-  if ! install_from_release "$VERSION" "$platform" "$bin_dir"; then
-    warn "Falling back to go install…"
-    install_from_go "$VERSION" "$bin_dir"
-  fi
+  install_from_release "$VERSION" "$platform" "$bin_dir"
 
   check_path "$bin_dir"
   check_api_key

@@ -6,11 +6,11 @@ any destructive action.
 
 ## Goal
 
-Publish a new stable release that is available in all supported install paths:
+Publish a new stable release through the single supported install path:
 
 - GitHub Releases, with Linux/macOS archives and checksums.
-- The one-line installer, which installs the latest stable GitHub release.
-- Homebrew, via the `owainlewis/tap/neo` cask when the tap token is configured.
+- The one-line installer, which verifies and installs the latest stable GitHub
+  release.
 
 ## Important context
 
@@ -19,9 +19,6 @@ Publish a new stable release that is available in all supported install paths:
 - GoReleaser config is `.goreleaser.yaml`.
 - Release notes live in `CHANGELOG.md`.
 - Generated docs under `docs/developer/` must not be edited by hand.
-- The Homebrew tap update needs the `HOMEBREW_TAP_GITHUB_TOKEN` Actions secret.
-  If the secret is missing, the GitHub release can still succeed, but Homebrew
-  publishing will be skipped.
 
 ## Safety rules
 
@@ -43,13 +40,9 @@ releases.
 If the repository is not on the expected release base, or unrelated changes are
 present, either move to a clean worktree or ask the user how to proceed.
 
-### 2. Check publishing prerequisites
+### 2. Check publishing access
 
 Confirm GitHub CLI access is available for this repository.
-
-Check whether the `HOMEBREW_TAP_GITHUB_TOKEN` secret exists by name only. Do not
-show its value. If it is missing, tell the user that Homebrew publishing will be
-skipped unless they add the secret before release.
 
 ### 3. Choose the version
 
@@ -138,25 +131,6 @@ Because the installer resolves the latest stable GitHub release, a successful
 latest release with those assets is enough to confirm the download install path.
 Do not run remote install scripts unless the user asks for an install test.
 
-### 10. Verify Homebrew, when enabled
-
-If the Homebrew token was configured, confirm the tap repository was updated.
-The expected result is a commit in `owainlewis/homebrew-tap` like:
-
-```text
-Brew cask update for neo vX.Y.Z
-```
-
-Also confirm `Casks/neo.rb` contains the released version without the leading
-`v`, for example:
-
-```ruby
-version "X.Y.Z"
-```
-
-If the token was missing or Homebrew publishing was skipped, clearly report that
-GitHub release publishing succeeded but Homebrew was not updated.
-
 ## Final report
 
 End with a concise release summary:
@@ -165,6 +139,5 @@ End with a concise release summary:
 - GitHub release URL.
 - Assets published.
 - Release workflow result.
-- Homebrew tap result, including tap commit evidence when available.
 - Local checks that were run.
 - Any unrelated local changes that were intentionally left untouched.

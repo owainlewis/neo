@@ -44,8 +44,9 @@ from first inspection to tested change.
 curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash
 ```
 
-Homebrew and `go install` are also supported. See every option in the
-[installation guide](website/src/content/docs/docs/install.md).
+The installer downloads the matching GitHub release and verifies its SHA-256
+checksum before installing it. See the [installation guide](website/src/content/docs/docs/install.md)
+for version pinning and custom install directories.
 
 ### 2. Connect a model
 

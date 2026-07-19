@@ -56,27 +56,3 @@ release:
     ```bash
     curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash
     ```
-
-    ```bash
-    brew install --cask owainlewis/tap/neo
-    ```
-
-homebrew_casks:
-  - name: neo
-    ids:
-      - neo
-    binaries:
-      - neo
-    repository:
-      owner: owainlewis
-      name: homebrew-tap
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    skip_upload: "{{ if .Env.HOMEBREW_TAP_GITHUB_TOKEN }}false{{ else }}true{{ end }}"
-    directory: Casks
-    homepage: https://github.com/owainlewis/neo
-    description: Fast, minimalist coding agent written in Go
-    commit_author:
-      name: goreleaserbot
-      email: noreply@github.com
-    commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
