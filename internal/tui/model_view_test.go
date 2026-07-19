@@ -7,6 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/owainlewis/neo/internal/workflow"
 )
 
 func TestNewModelEnablesMouseWheel(t *testing.T) {
@@ -110,5 +112,69 @@ func TestNewTranscriptActivityFollowsWhenViewportIsAtBottom(t *testing.T) {
 
 	if got := m.viewport.YOffset(); got <= before || !m.viewport.AtBottom() {
 		t.Fatalf("offset after new activity = %d, want new bottom below %d", got, before)
+	}
+}
+
+func TestWorkflowPanelKeepsFollowingLiveOutput(t *testing.T) {
+	t.Parallel()
+
+	m := makeTestModel()
+	m.height = 18
+	m.layout()
+	m.blocks = []block{textBlock{text: strings.Join([]string{
+		"one", "two", "three", "four", "five", "six", "seven", "eight",
+	}, "\n")}}
+	m.refreshViewport()
+	if !m.viewport.AtBottom() {
+		t.Fatal("viewport should start at the bottom")
+	}
+
+	m.handleWorkflowEvent(workflow.Event{
+		Action: "create",
+		State: workflow.State{
+			Title: "Fix scrolling",
+			Items: []workflow.Item{
+				{ID: "1", Text: "Inspect", Status: workflow.Done},
+				{ID: "2", Text: "Implement", Status: workflow.Running},
+				{ID: "3", Text: "Test", Status: workflow.Pending},
+			},
+		},
+	})
+	m.appendBlock(textBlock{text: "latest live output"})
+
+	if !m.viewport.AtBottom() {
+		t.Fatal("workflow panel resize stopped following live output")
+	}
+	if got := plain(m.viewport.View()); !strings.Contains(got, "latest live output") {
+		t.Fatalf("latest output is hidden after workflow panel resize:\n%s", got)
+	}
+}
+
+func TestWorkflowPanelDoesNotMoveManuallyScrolledTranscript(t *testing.T) {
+	t.Parallel()
+
+	m := makeTestModel()
+	m.height = 18
+	m.layout()
+	m.blocks = []block{textBlock{text: strings.Join([]string{
+		"one", "two", "three", "four", "five", "six", "seven", "eight",
+	}, "\n")}}
+	m.refreshViewport()
+	m.viewport.ScrollUp(2)
+	before := m.viewport.YOffset()
+
+	m.handleWorkflowEvent(workflow.Event{
+		Action: "create",
+		State: workflow.State{
+			Title: "Fix scrolling",
+			Items: []workflow.Item{
+				{ID: "1", Text: "Inspect", Status: workflow.Running},
+				{ID: "2", Text: "Implement", Status: workflow.Pending},
+			},
+		},
+	})
+
+	if got := m.viewport.YOffset(); got != before {
+		t.Fatalf("workflow panel moved manually scrolled transcript to %d, want %d", got, before)
 	}
 }

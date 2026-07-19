@@ -909,6 +909,7 @@ func (m *model) syncInputHeight() {
 }
 
 func (m *model) layout() {
+	followOutput := m.viewport.AtBottom()
 	inputHeight := m.input.Height() + 2 // textarea body + top/bottom padding
 	pickerHeight := 0
 	if m.picker.visible && len(m.picker.matches) > 0 {
@@ -924,6 +925,11 @@ func (m *model) layout() {
 	}
 	m.viewport.SetWidth(m.width)
 	m.viewport.SetHeight(vpH)
+	// Shrinking the viewport makes it report as scrolled up. Preserve live
+	// output following when layout chrome grows around a bottomed viewport.
+	if followOutput {
+		m.viewport.GotoBottom()
+	}
 	m.input.SetWidth(m.width - 2)
 	if m.md != nil {
 		// Re-create renderer at the new width so code blocks wrap nicely.
