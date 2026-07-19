@@ -237,19 +237,24 @@ func TestWorkflowToolFailureRendersAndMarksTurnFailed(t *testing.T) {
 
 func TestTranscriptReplayRespectsOutputModeAndKeepsFailures(t *testing.T) {
 	messages := []llm.Message{
-		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", Name: "read_file", Input: map[string]any{"path": "main.go"}}}},
-		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", Content: "package main"}}},
-		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", Name: "bash", Input: map[string]any{"command": "false"}}}},
-		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", Content: "exit 1", IsError: true}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", ID: "read-1", Name: "read_file", Input: map[string]any{"path": "main.go"}}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: "read-1", Content: "package main"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", ID: "bash-1", Name: "bash", Input: map[string]any{"command": "false"}}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: "bash-1", Content: "exit 1", IsError: true}}},
 	}
 
 	concise := makeTestModel()
 	concise.appendTranscript(messages)
-	if len(concise.blocks) != 3 {
-		t.Fatalf("concise replay blocks = %d, want two calls and one failure: %#v", len(concise.blocks), concise.blocks)
+	if len(concise.blocks) != 2 {
+		t.Fatalf("concise replay blocks = %d, want successful call and failure: %#v", len(concise.blocks), concise.blocks)
 	}
-	if result, ok := concise.blocks[2].(toolResultBlock); !ok || !result.isError {
-		t.Fatalf("concise replay did not preserve failure: %#v", concise.blocks[2])
+	if result, ok := concise.blocks[1].(toolResultBlock); !ok || !result.isError {
+		t.Fatalf("concise replay did not preserve failure: %#v", concise.blocks[1])
+	}
+	for _, block := range concise.blocks {
+		if got := plain(block.render(80, nil)); strings.Contains(got, "✓ Ran false") {
+			t.Fatalf("concise replay marked failed tool successful: %q", got)
+		}
 	}
 
 	verbose := makeTestModel()
@@ -263,6 +268,57 @@ func TestTranscriptReplayRespectsOutputModeAndKeepsFailures(t *testing.T) {
 		if !ok || !call.verbose {
 			t.Fatalf("verbose replay call at %d = %#v", index, verbose.blocks[index])
 		}
+	}
+}
+
+func TestTranscriptReplayPairsRepeatedAndEmptyToolIDsByOccurrence(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []llm.Message
+		want     []string
+		reject   string
+	}{
+		{
+			name: "repeated synthesized ID",
+			messages: []llm.Message{
+				{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", ID: "bash", Name: "bash", Input: map[string]any{"command": "true"}}}},
+				{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: "bash", Content: ""}}},
+				{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", ID: "bash", Name: "bash", Input: map[string]any{"command": "false"}}}},
+				{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: "bash", Content: "exit 1", IsError: true}}},
+			},
+			want:   []string{"✓ Ran true", "exit 1"},
+			reject: "✓ Ran false",
+		},
+		{
+			name: "legacy empty ID",
+			messages: []llm.Message{
+				{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", Name: "bash", Input: map[string]any{"command": "false"}}}},
+				{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", Content: "exit 1", IsError: true}}},
+			},
+			want:   []string{"exit 1"},
+			reject: "✓ Ran false",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := makeTestModel()
+			m.appendTranscript(tc.messages)
+			var rendered strings.Builder
+			for _, block := range m.blocks {
+				rendered.WriteString(plain(block.render(80, nil)))
+				rendered.WriteByte('\n')
+			}
+			got := rendered.String()
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("replay missing %q:\n%s", want, got)
+				}
+			}
+			if strings.Contains(got, tc.reject) {
+				t.Fatalf("replay contains %q:\n%s", tc.reject, got)
+			}
+		})
 	}
 }
 

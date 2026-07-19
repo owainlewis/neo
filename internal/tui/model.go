@@ -1189,7 +1189,8 @@ func (m *model) handleEvent(e agent.Event) {
 }
 
 func (m *model) appendTranscript(messages []llm.Message) {
-	for _, msg := range messages {
+	failedToolUses := failedTranscriptToolUseOccurrences(messages)
+	for messageIndex, msg := range messages {
 		switch msg.Role {
 		case llm.RoleUser:
 			var toolResults []llm.ContentBlock
@@ -1216,7 +1217,7 @@ func (m *model) appendTranscript(messages []llm.Message) {
 			}
 		case llm.RoleAssistant:
 			hasTools := hasTranscriptToolUse(msg.Content)
-			for _, block := range msg.Content {
+			for blockIndex, block := range msg.Content {
 				switch block.Type {
 				case "text":
 					if strings.TrimSpace(block.Text) != "" {
@@ -1227,12 +1228,46 @@ func (m *model) appendTranscript(messages []llm.Message) {
 						}
 					}
 				case "tool_use":
+					occurrence := transcriptToolUseOccurrence{message: messageIndex, block: blockIndex}
+					if !m.verbose && failedToolUses[occurrence] {
+						continue
+					}
 					m.blocks = append(m.blocks, toolCallBlock{name: block.Name, args: block.Input, verbose: m.verbose})
 				}
 			}
 		}
 	}
 	m.refreshViewport()
+}
+
+type transcriptToolUseOccurrence struct {
+	message int
+	block   int
+}
+
+func failedTranscriptToolUseOccurrences(messages []llm.Message) map[transcriptToolUseOccurrence]bool {
+	failed := make(map[transcriptToolUseOccurrence]bool)
+	pending := make(map[string][]transcriptToolUseOccurrence)
+	for messageIndex, msg := range messages {
+		for blockIndex, block := range msg.Content {
+			switch block.Type {
+			case "tool_use":
+				occurrence := transcriptToolUseOccurrence{message: messageIndex, block: blockIndex}
+				pending[block.ID] = append(pending[block.ID], occurrence)
+			case "tool_result":
+				queue := pending[block.ToolUseID]
+				if len(queue) == 0 {
+					continue
+				}
+				occurrence := queue[0]
+				pending[block.ToolUseID] = queue[1:]
+				if block.IsError {
+					failed[occurrence] = true
+				}
+			}
+		}
+	}
+	return failed
 }
 
 func hasTranscriptToolUse(content []llm.ContentBlock) bool {
