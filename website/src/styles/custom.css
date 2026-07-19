@@ -228,6 +228,10 @@ body:has(.neo-home) .site-title::after {
   width: 100%;
 }
 
+.neo-hero .neo-eyebrow {
+  margin-bottom: 1rem;
+}
+
 .neo-hero .neo-hero-lede {
   max-width: 36rem;
   margin-inline: auto;
@@ -557,6 +561,134 @@ body:has(.neo-home) .site-title::after {
   padding: 0 1.15rem;
   background: #f2f2ed;
   border-top: 1px solid var(--neo-line);
+}
+
+.neo-models {
+  padding: var(--neo-space-6) max(1.5rem, calc((100vw - 70rem) / 2));
+  background: var(--neo-white);
+  border-block: 1px solid var(--neo-line);
+}
+
+.neo-models-heading {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: var(--neo-space-4);
+  align-items: end;
+  margin-bottom: var(--neo-space-4);
+}
+
+.neo-models-heading h2 {
+  max-width: 12ch;
+  margin-top: 0.45rem;
+  font-size: clamp(2.7rem, 5vw, 4.6rem);
+  line-height: 1;
+}
+
+.neo-models-heading > p {
+  max-width: 30rem;
+  color: var(--neo-muted);
+}
+
+.neo-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--neo-line-dark);
+  border-radius: 0.65rem;
+}
+
+.neo-provider-grid article {
+  display: flex;
+  gap: 0.9rem;
+  align-items: center;
+  min-width: 0;
+  padding: 1.35rem;
+}
+
+.neo-provider-grid article > div {
+  min-width: 0;
+}
+
+.neo-provider-grid article + article {
+  border-left: 1px solid var(--neo-line);
+}
+
+.neo-provider-logo {
+  flex: 0 0 1.65rem;
+  width: 1.65rem;
+  height: 1.65rem;
+  fill: var(--neo-ink);
+}
+
+.neo-provider-gemini {
+  fill: #7961a4;
+}
+
+.neo-provider-openrouter {
+  fill: var(--neo-moss);
+}
+
+.neo-provider-grid strong,
+.neo-provider-grid small {
+  display: block;
+}
+
+.neo-provider-grid strong {
+  color: var(--neo-ink);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.neo-provider-grid small {
+  margin-top: 0.15rem;
+  color: var(--neo-faint);
+  font-size: 0.68rem;
+}
+
+.neo-current-models {
+  margin-top: var(--neo-space-3);
+}
+
+.neo-current-models > p {
+  color: var(--neo-faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.neo-current-models ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding: 0;
+  margin-top: 0.85rem;
+  list-style: none;
+}
+
+.neo-current-models a {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  color: var(--neo-ink);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  text-decoration: none;
+  background: var(--neo-paper);
+  border: 1px solid var(--neo-line);
+  border-radius: 999px;
+}
+
+.neo-current-models a:hover {
+  color: var(--neo-moss);
+  border-color: var(--neo-moss);
+}
+
+.neo-current-models > small {
+  display: block;
+  margin-top: 0.85rem;
+  color: var(--neo-faint);
+  font-size: 0.7rem;
 }
 
 .neo-product {
@@ -939,18 +1071,29 @@ body:has(.neo-home) .site-title::after {
   color: var(--neo-muted);
 }
 
+.neo-final code {
+  color: var(--neo-ink);
+  font-family: var(--sl-font-mono);
+  font-size: 0.88em;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
 .neo-final .neo-actions {
   justify-content: center;
 }
 
 @media (max-width: 64rem) {
   .neo-product-heading,
+  .neo-models-heading,
   .neo-orchestration,
   .neo-foundation {
     grid-template-columns: 1fr;
   }
 
-  .neo-product-heading {
+  .neo-product-heading,
+  .neo-models-heading {
     gap: 1rem;
   }
 
@@ -971,6 +1114,18 @@ body:has(.neo-home) .site-title::after {
 
   .neo-principles {
     grid-template-columns: 1fr;
+  }
+
+  .neo-provider-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .neo-provider-grid article:nth-child(3) {
+    border-left: 0;
+  }
+
+  .neo-provider-grid article:nth-child(n + 3) {
+    border-top: 1px solid var(--neo-line);
   }
 
   .neo-principles article,
@@ -1033,8 +1188,18 @@ body:has(.neo-home) .site-title::after {
   }
 
   .neo-product,
+  .neo-models,
   .neo-orchestration {
     padding-inline: 1rem;
+  }
+
+  .neo-provider-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .neo-provider-grid article + article {
+    border-top: 1px solid var(--neo-line);
+    border-left: 0;
   }
 
   .neo-request,

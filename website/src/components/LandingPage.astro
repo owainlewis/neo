@@ -3,20 +3,42 @@ import DemoWorkflow from './DemoWorkflow.astro';
 
 const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash';
 
-const heroWorkflow = {
-  variant: 'hero' as const,
-  project: 'neo / billing-api',
-  title: 'Fix duplicate invoice retries',
-  progress: '3 / 4',
-  items: [
-    { label: 'Trace retry path', detail: '9 files read', status: 'complete' as const },
-    { label: 'Add idempotency guard', detail: '2 files changed', status: 'complete' as const },
-    { label: 'Test concurrent delivery', detail: 'go test ./internal/billing/...', status: 'active' as const },
-    { label: 'Review the diff', detail: 'waiting' },
-  ],
-  agent: { label: 'review agent', detail: 'Checking race conditions', elapsed: '12s' },
-  footer: ['2 agents', 'claude-opus-4-8'],
-};
+// Provider marks use SVG paths from Simple Icons (CC0-1.0).
+const providers = [
+  {
+    name: 'Anthropic',
+    detail: 'API key',
+    slug: 'anthropic',
+    path: 'M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z',
+  },
+  {
+    name: 'OpenAI',
+    detail: 'API key or subscription',
+    slug: 'openai',
+    path: 'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z',
+  },
+  {
+    name: 'Google Gemini',
+    detail: 'API key',
+    slug: 'gemini',
+    path: 'M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81',
+  },
+  {
+    name: 'OpenRouter',
+    detail: 'Live model catalogue',
+    slug: 'openrouter',
+    path: 'M16.778 1.844v1.919q-.569-.026-1.138-.032-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237-2.911 2.066-2.731 1.95-4.14 2.75-.396.223-1.342.574-2.185.798-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799 1.41.798 1.228.683 4.14 2.75 2.126 1.509 4.22 2.11 6.148 2.236.88.058 1.716.041 2.555.005v1.918l7.222-4.168-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021-1.364-.09-2.417-.357-3.979-1.465-2.244-1.593-2.866-2.027-3.68-2.508.889-.518 1.449-.906 3.822-2.59 1.56-1.109 2.614-1.377 3.978-1.466.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z',
+  },
+];
+
+const currentModels = [
+  { name: 'Claude Sonnet 5', href: 'https://openrouter.ai/anthropic/claude-sonnet-5' },
+  { name: 'GPT-5.6 Sol', href: 'https://openrouter.ai/openai/gpt-5.6-sol' },
+  { name: 'Gemini 3.5 Flash', href: 'https://openrouter.ai/google/gemini-3.5-flash' },
+  { name: 'Kimi K3', href: 'https://openrouter.ai/moonshotai/kimi-k3' },
+  { name: 'DeepSeek V4 Pro', href: 'https://openrouter.ai/deepseek/deepseek-v4-pro' },
+  { name: 'Qwen3.7 Max', href: 'https://openrouter.ai/qwen/qwen3.7-max' },
+];
 
 const productWorkflow = {
   variant: 'product' as const,
@@ -49,10 +71,11 @@ const agentWorkflow = {
 <div class="neo-home not-content">
   <section class="neo-hero" aria-labelledby="neo-title">
     <div class="neo-hero-copy">
-      <h1 id="neo-title">Run coding tasks as visible, repeatable workflows.</h1>
+      <p class="neo-eyebrow">Open source · Runs in your terminal</p>
+      <h1 id="neo-title">A minimalist coding agent for serious builders.</h1>
       <p class="neo-hero-lede">
-        Give Neo a task or a checklist. It shows each step, applies your permission settings, and
-        shows shell commands and test output as it works.
+        Neo is one Go binary with built-in file and shell tools, local sessions, configurable
+        permissions, and no product telemetry. Use the model you trust and keep working in your terminal.
       </p>
       <div class="neo-actions">
         <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
@@ -68,16 +91,45 @@ const agentWorkflow = {
       </div>
     </div>
 
-    <DemoWorkflow {...heroWorkflow} />
+  </section>
+
+  <section class="neo-models" aria-labelledby="models-title">
+    <div class="neo-models-heading">
+      <div>
+        <p class="neo-label">Providers and models</p>
+        <h2 id="models-title">Use the best model for the job.</h2>
+      </div>
+      <p>
+        Connect Anthropic, OpenAI, Google, or OpenRouter. Switch the provider and model from the
+        terminal without changing how Neo works.
+      </p>
+    </div>
+    <div class="neo-provider-grid" aria-label="Supported model providers">
+      {providers.map((provider) => (
+        <article>
+          <svg class={`neo-provider-logo neo-provider-${provider.slug}`} viewBox="0 0 24 24" aria-hidden="true">
+            <path d={provider.path}></path>
+          </svg>
+          <div><strong>{provider.name}</strong><small>{provider.detail}</small></div>
+        </article>
+      ))}
+    </div>
+    <div class="neo-current-models">
+      <p>Current tool-capable models available directly or through OpenRouter</p>
+      <ul>
+        {currentModels.map((model) => <li><a href={model.href}>{model.name}<span aria-hidden="true">↗</span></a></li>)}
+      </ul>
+      <small>Model availability and names come from provider APIs and can change.</small>
+    </div>
   </section>
 
   <section class="neo-product" aria-labelledby="workflow-title">
     <div class="neo-product-heading">
       <div>
-        <p class="neo-label">A task in Neo</p>
-        <h2 id="workflow-title">See what the agent is doing.</h2>
+        <p class="neo-label">When tasks get longer</p>
+        <h2 id="workflow-title">Track the work without reading a wall of chat.</h2>
       </div>
-      <p>Neo turns the plan into a live checklist, so you can follow progress and catch a bad step early.</p>
+      <p>For multi-step work, Neo can show the plan, active tools, test output, and delegated tasks as they run.</p>
     </div>
 
     <DemoWorkflow {...productWorkflow} />
@@ -85,38 +137,38 @@ const agentWorkflow = {
 
   <section class="neo-intro" aria-labelledby="difference-title">
     <p class="neo-label">Why Neo</p>
-    <h2 id="difference-title">Repeat complex tasks without writing a new prompt every time.</h2>
+    <h2 id="difference-title">A focused tool for working in real repositories.</h2>
     <p>
-      Put your process in a numbered prompt, a skill, or an AGENTS.md file. Neo follows it step by
-      step, uses the access level you set, and shows the commands and test results as it works.
+      Neo can read and edit files, search code, run commands, follow AGENTS.md instructions, save
+      sessions, and delegate focused work. There is no Neo account or plugin stack to set up.
     </p>
   </section>
 
   <section class="neo-principles" aria-label="Neo principles">
     <article>
       <span>01</span>
-      <h3>Follow every step</h3>
-      <p>See the current step, completed work, tool calls, and delegated tasks in the terminal.</p>
+      <h3>Runs where you work</h3>
+      <p>Start Neo in a repository and work from the same terminal you already use.</p>
     </article>
     <article>
       <span>02</span>
-      <h3>Set the access level</h3>
-      <p>Use readonly for inspection, ask to approve changes, or trusted for routine work.</p>
+      <h3>Uses your rules</h3>
+      <p>Load project instructions from AGENTS.md and reusable skills from your repository.</p>
     </article>
     <article>
       <span>03</span>
-      <h3>Choose your model</h3>
-      <p>Use Anthropic, OpenAI, Gemini, or OpenRouter. Switch providers without changing your workflow.</p>
+      <h3>Limits access</h3>
+      <p>Use readonly for inspection, ask to approve changes, or trusted for routine work.</p>
     </article>
   </section>
 
   <section class="neo-orchestration" aria-labelledby="orchestration-title">
     <div class="neo-orchestration-copy">
       <p class="neo-label">Orchestration</p>
-      <h2 id="orchestration-title">Split a large task across focused agents.</h2>
+      <h2 id="orchestration-title">Delegate focused work when a task needs it.</h2>
       <p>
-        A coordinator can give independent work to fresh subagents, collect their results, and keep
-        the main checklist up to date. You can see which agent owns each part.
+        Neo can start fresh subagents for independent work, cap their depth and runtime, and return
+        their findings to the coordinator. You can see which agent owns each part.
       </p>
       <a class="neo-text-link" href="/docs/reference/guides/agent-loop/">How the agent loop works <span aria-hidden="true">→</span></a>
     </div>
@@ -126,10 +178,10 @@ const agentWorkflow = {
   <section class="neo-foundation" aria-labelledby="foundation-title">
     <div>
       <p class="neo-label">The foundation</p>
-      <h2 id="foundation-title">A local tool you can inspect and control.</h2>
+      <h2 id="foundation-title">One Go binary. No runtime or plugin stack.</h2>
     </div>
     <dl>
-      <div><dt>One binary</dt><dd>Install Neo without setting up a separate runtime or plugin system.</dd></div>
+      <div><dt>Built-in tools</dt><dd>Read, search, edit, write, and run shell commands without adding plugins.</dd></div>
       <div><dt>Local sessions</dt><dd>Resume or search past work from session files stored on your disk.</dd></div>
       <div><dt>Open source</dt><dd>Read the code that runs commands and edits files in your repository.</dd></div>
       <div><dt>No telemetry</dt><dd>Neo does not send product analytics from your machine.</dd></div>
@@ -138,8 +190,8 @@ const agentWorkflow = {
 
   <section class="neo-final" aria-labelledby="final-title">
     <p class="neo-label">Neo Harness</p>
-    <h2 id="final-title">Run your next coding task with Neo.</h2>
-    <p>Install the binary, choose a model provider, and start Neo in your repository.</p>
+    <h2 id="final-title">Try Neo in a real repository.</h2>
+    <p>Install the binary, connect a model provider, and run <code>neo</code>.</p>
     <div class="neo-actions">
       <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
       <a class="neo-text-link" href="/docs/quick-start/">Read the quick start <span aria-hidden="true">→</span></a>
