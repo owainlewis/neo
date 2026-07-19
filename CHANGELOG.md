@@ -2,6 +2,44 @@
 
 All notable changes to Neo will be documented in this file.
 
+## [v0.3.0] - 2026-07-19
+
+### Highlights
+
+- Added Google Gemini as a first-class provider and made provider and model switching available from the running TUI.
+- Added active steering and queued follow-up instructions so users can redirect ongoing work without breaking tool-call transcripts.
+- Expanded the coordinator experience with live subagent activity, configurable subagent backends, slash-invoked skills, and clearer workflow progress.
+- Reworked the terminal UI around concise tool receipts, visible task status, native text selection, and less noisy output.
+
+### Added
+
+- Google Gemini provider support.
+- Runtime provider and model switching from the model picker.
+- Active-turn steering and queued follow-up messages.
+- Live subagent activity in the terminal UI.
+- Configurable provider and model selection for subagents.
+- Skill invocation through slash commands.
+- Lightweight performance regression budgets for workflows, tools, and the TUI.
+- A public Astro and Starlight website for product guidance and generated developer documentation.
+
+### Changed
+
+- Made workflow checklists model-driven and separated compact progress from normal output.
+- Defaulted routine tool activity to concise receipts, with verbose output remaining configurable.
+- Simplified provider, CLI, composer, agent-loop, and landing-page internals.
+- Replaced `.neo/commands` prompt templates and `features.prompt_commands` with slash-invoked `.neo/skills`; existing custom prompt commands must be migrated to skills.
+- Removed project memory and its bundled repository artifacts to keep Neo focused on explicit project instructions, skills, and local sessions.
+- Moved website deployment from Cloudflare Pages to GitHub Pages while keeping DNS independent.
+
+### Fixed
+
+- Hardened built-in tools, permission checks, and provider-native tool argument decoding.
+- Restored native terminal text selection and kept selection working across TUI updates.
+- Reported recovered tool failures correctly and kept progress separate from assistant output.
+- Ran independent `neo doctor` checks even when configuration loading fails.
+- Removed redundant tool output, duplicate max-turn summaries, and dead retry wrappers.
+- Installed Neo onto a runnable path more reliably.
+
 ## [v0.2.2] - 2026-07-07
 
 ### Changed
@@ -56,6 +94,7 @@ All notable changes to Neo will be documented in this file.
 
 - Initial public release.
 
+[v0.3.0]: https://github.com/owainlewis/neo/compare/v0.2.2...v0.3.0
 [v0.2.2]: https://github.com/owainlewis/neo/compare/v0.2.1...v0.2.2
 [v0.2.1]: https://github.com/owainlewis/neo/compare/v0.2.0...v0.2.1
 [v0.2.0]: https://github.com/owainlewis/neo/compare/v0.1.0...v0.2.0
