@@ -42,18 +42,22 @@ const currentModels = [
 
 const productWorkflow = {
   variant: 'product' as const,
-  project: 'payments-api',
-  mode: 'ask mode',
-  request: 'Harden webhook verification and prove it works',
-  progress: '3 of 4 complete',
+  project: '~/Code/payments-api · main',
+  mode: 'working',
+  request: 'Fix reported webhook bugs and ship the change',
+  progress: '2 of 9',
   items: [
-    { label: 'Trace the request path', detail: 'Read 8 files', status: 'done' as const },
-    { label: 'Implement signature validation', detail: 'Edited 3 files', status: 'done' as const },
-    { label: 'Test failure modes', detail: 'Running go test ./internal/webhook/...', status: 'active' as const },
-    { label: 'Review the final diff', detail: 'Waiting on tests' },
+    { label: 'Create the issue', detail: 'Created GitHub issue #210', status: 'done' as const },
+    { label: 'Create an isolated branch and worktree', detail: 'Running git worktree add', status: 'active' as const },
+    { label: 'Trace and fix the bugs', detail: '' },
+    { label: 'Review the diff with a subagent', detail: '' },
+    { label: 'Run focused tests', detail: '' },
+    { label: 'Open the pull request', detail: '' },
+    { label: 'Watch CI and code review', detail: '' },
+    { label: 'Address valid feedback', detail: '' },
+    { label: 'Merge the change', detail: '' },
   ],
-  agent: { label: 'review agent', detail: 'checking replay protection' },
-  proof: { command: 'ok github.com/acme/payments/internal/webhook', elapsed: '0.84s' },
+  agent: { label: 'tool', detail: 'creating a clean workspace for the fix' },
 };
 
 const agentWorkflow = {
@@ -61,21 +65,21 @@ const agentWorkflow = {
   coordinator: { owner: 'Neo', task: 'Harden webhook verification', status: 'coordinator' },
   rows: [
     { number: '01', label: 'Trace request path', status: 'complete', statusClass: 'complete' },
-    { number: '02', label: 'Implement validation', status: 'working', statusClass: 'working' },
-    { number: '03', label: 'Review failure modes', status: 'queued' },
+    { number: '02', label: 'Check failure modes', status: 'working', statusClass: 'working' },
+    { number: '03', label: 'Review test coverage', status: 'queued' },
   ],
-  note: 'Depth, fan-out, runtime, and agent count are all capped.',
+  note: 'Depth, fan-out, runtime, and agent count stay capped.',
 };
 ---
 
 <div class="neo-home not-content">
   <section class="neo-hero" aria-labelledby="neo-title">
     <div class="neo-hero-copy">
-      <p class="neo-eyebrow">Open source · Fast to set up</p>
-      <h1 id="neo-title">A minimalist coding agent for serious builders.</h1>
+      <p class="neo-eyebrow">Fast · Workflow-first · Open source</p>
+      <h1 id="neo-title">Built for real engineering.</h1>
       <p class="neo-hero-lede">
-        Neo is one Go binary with built-in file and shell tools, local sessions, configurable
-        permissions, and no product telemetry. Use the model you trust and keep working in your terminal.
+        Neo turns complex repository work into a visible workflow. Delegate focused tasks to subagents
+        and keep tools, tests, reviews, and delivery moving in one terminal.
       </p>
       <div class="neo-actions">
         <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
@@ -90,7 +94,37 @@ const agentWorkflow = {
         <span class="neo-copy-status" data-copy-status aria-live="polite"></span>
       </div>
     </div>
+    <div class="neo-hero-workflow">
+      <DemoWorkflow {...productWorkflow} />
+    </div>
+  </section>
 
+  <section class="neo-speed" aria-labelledby="speed-title">
+    <div class="neo-speed-heading">
+      <p class="neo-label">Built for speed</p>
+      <h2 id="speed-title">Less waiting. More useful work in motion.</h2>
+      <p>
+        Neo already coordinates visible workflows and focused subagents. Parallel execution is the
+        next speed layer, with tool calls and subagents now in development.
+      </p>
+    </div>
+    <div class="neo-speed-grid">
+      <article>
+        <div class="neo-speed-card-meta"><span>01</span><small>In development</small></div>
+        <h3>Parallel tool calls</h3>
+        <p>Run independent read, search, and inspection calls together instead of waiting on a serial queue.</p>
+      </article>
+      <article>
+        <div class="neo-speed-card-meta"><span>02</span><small>In development</small></div>
+        <h3>Parallel subagents</h3>
+        <p>Give focused workers separate jobs, run them concurrently, then return their evidence to one coordinator.</p>
+      </article>
+      <article>
+        <div class="neo-speed-card-meta"><span>03</span><small>Available now</small></div>
+        <h3>Workflow-native</h3>
+        <p>See the plan, active work, tool activity, tests, and delegated tasks without reading a wall of chat.</p>
+      </article>
+    </div>
   </section>
 
   <section class="neo-models" aria-labelledby="models-title">
@@ -123,52 +157,40 @@ const agentWorkflow = {
     </div>
   </section>
 
-  <section class="neo-product" aria-labelledby="workflow-title">
-    <div class="neo-product-heading">
-      <div>
-        <p class="neo-label">When tasks get longer</p>
-        <h2 id="workflow-title">Track the work without reading a wall of chat.</h2>
-      </div>
-      <p>For multi-step work, Neo can show the plan, active tools, test output, and delegated tasks as they run.</p>
-    </div>
-
-    <DemoWorkflow {...productWorkflow} />
-  </section>
-
   <section class="neo-intro" aria-labelledby="difference-title">
-    <p class="neo-label">Why Neo</p>
-    <h2 id="difference-title">A focused tool for working in real repositories.</h2>
+    <p class="neo-label">From issue to merge</p>
+    <h2 id="difference-title">The whole engineering workflow, not just the edit.</h2>
     <p>
-      Neo can read and edit files, search code, run commands, follow AGENTS.md instructions, save
-      sessions, and delegate focused work. There is no Neo account or plugin stack to set up.
+      Neo can inspect the issue, isolate the work, change the code, run tests, delegate review,
+      open the pull request, and respond to feedback. The workflow stays visible from start to finish.
     </p>
   </section>
 
   <section class="neo-principles" aria-label="Neo principles">
     <article>
       <span>01</span>
-      <h3>Runs where you work</h3>
-      <p>Start Neo in a repository and work from the same terminal you already use.</p>
+      <h3>Works in the real repository</h3>
+      <p>Start with the code, git state, project instructions, and tools your team already uses.</p>
     </article>
     <article>
       <span>02</span>
-      <h3>Uses your rules</h3>
-      <p>Load project instructions from AGENTS.md and reusable skills from your repository.</p>
+      <h3>Proves the change</h3>
+      <p>Keep tests, builds, diff review, CI, and feedback inside the same visible workflow.</p>
     </article>
     <article>
       <span>03</span>
-      <h3>Limits access</h3>
-      <p>Use readonly for inspection, ask to approve changes, or trusted for routine work.</p>
+      <h3>Follows your rules</h3>
+      <p>Load AGENTS.md, reusable skills, and configurable permissions for the way your team works.</p>
     </article>
   </section>
 
   <section class="neo-orchestration" aria-labelledby="orchestration-title">
     <div class="neo-orchestration-copy">
-      <p class="neo-label">Orchestration</p>
-      <h2 id="orchestration-title">Delegate focused work when a task needs it.</h2>
+      <p class="neo-label">Focused delegation</p>
+      <h2 id="orchestration-title">One coordinator. Focused workers.</h2>
       <p>
-        Neo can start fresh subagents for independent work, cap their depth and runtime, and return
-        their findings to the coordinator. You can see which agent owns each part.
+        Neo can start fresh subagents on focused parts of a task and return their findings to one
+        coordinator. You can see who owns each part while runtime limits keep the work bounded.
       </p>
       <a class="neo-text-link" href="/docs/reference/guides/agent-loop/">How the agent loop works <span aria-hidden="true">→</span></a>
     </div>

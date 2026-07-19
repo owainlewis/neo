@@ -7,7 +7,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Neo',
-      description: 'A workflow-native coding agent you can trust with the repo.',
+      description: 'A fast, workflow-native coding agent built for real engineering.',
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/owainlewis/neo' }],
       editLink: {

@@ -61,7 +61,7 @@ const props = Astro.props as Props;
           >
             <span aria-hidden="true">{item.status === 'complete' ? '✓' : item.status === 'active' ? <i class="neo-status-dot"></i> : ''}</span>
             <div>
-              <strong>{item.label}</strong><small>{item.detail}</small>
+              <strong>{item.label}</strong>{item.detail && <small>{item.detail}</small>}
               <span class="sr-only">{item.status === 'complete' ? 'complete' : item.status === 'active' ? 'in progress' : 'pending'}</span>
             </div>
           </li>
@@ -102,7 +102,7 @@ const props = Astro.props as Props;
           >
             <span class="neo-check" aria-hidden="true">{item.status === 'done' ? '✓' : item.status === 'active' ? <i class="neo-status-dot"></i> : ''}</span>
             <div>
-              <strong>{item.label}</strong><small>{item.detail}</small>
+              <strong>{item.label}</strong>{item.detail && <small>{item.detail}</small>}
               <span class="sr-only">{item.status === 'done' ? 'complete' : item.status === 'active' ? 'in progress' : 'pending'}</span>
               {item.status === 'active' && props.agent && (
                 <div class="neo-agent"><span>{props.agent.label}</span><span>{props.agent.detail}</span></div>
