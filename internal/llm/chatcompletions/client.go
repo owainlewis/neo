@@ -298,5 +298,3 @@ func toUsage(u *Usage) llm.Usage {
 	}
 	return llm.Usage{InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens}
 }
-
-func sleep(ctx context.Context, d time.Duration) error { return retry.Sleep(ctx, d) }

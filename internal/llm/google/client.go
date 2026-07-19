@@ -450,5 +450,3 @@ func stopReason(c candidate) string {
 	}
 	return "end_turn"
 }
-
-func sleep(ctx context.Context, d time.Duration) error { return retry.Sleep(ctx, d) }
