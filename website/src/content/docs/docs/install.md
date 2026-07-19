@@ -37,4 +37,9 @@ just build
 `just build` stamps the current git description into the binary as the version shown on the
 splash screen. Run `just print-version` to preview the stamped value.
 
+## Updating
+
+Use the same channel you installed with: rerun the one-line installer, run
+`brew upgrade --cask owainlewis/tap/neo`, or repeat the `go install` command.
+
 Next: [Quick start](/docs/quick-start/).

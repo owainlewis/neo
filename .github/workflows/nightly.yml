@@ -31,9 +31,7 @@ jobs:
           cache: true
 
       - name: Verify repository
-        run: |
-          go test ./...
-          go run ./cmd/neo-docs --check
+        run: go test ./...
 
       - name: Determine nightly metadata
         id: nightly

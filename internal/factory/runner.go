@@ -14,16 +14,12 @@ import (
 	"github.com/owainlewis/neo/internal/tools"
 )
 
-// defaultStepTools is what an agent step gets when its frontmatter declares
-// no tools: observation only. A role is a tool set — granting write access
-// must be explicit.
-var defaultStepTools = []string{"bash", "read_file", "grep", "glob"}
+const dynamicAgentSystemPrompt = `You are a focused subagent spawned by Neo's chat coordinator.
 
-const defaultStepMaxTurns = agent.DefaultMaxTurns
+You have no memory of the parent conversation except the prompt you receive. Follow that prompt exactly, use tools as needed, and return a concise report with evidence. Do not commit changes unless explicitly asked.`
 
-// AgentRunner runs agent steps on neo's core agent loop. Each step gets a
-// fresh agent (amnesiac by design) with a registry filtered to the step's
-// frontmatter tool list — role enforcement by construction, not prose.
+// AgentRunner runs chat-spawned subagents on Neo's core agent loop. Each call
+// gets a fresh agent with the standard coding tool set and no nested agent tool.
 type AgentRunner struct {
 	backendMu    sync.RWMutex
 	Provider     llm.Provider
@@ -31,17 +27,12 @@ type AgentRunner struct {
 	Root         string // workspace root; bounds file tools via permission policy
 	BashTimeout  time.Duration
 
-	// Mode is the permission mode child agents run under. Steps execute
-	// autonomously (there is no approver inside a step), so "ask" cannot be
-	// honored mid-step; but "readonly" must propagate — a readonly session
-	// delegating a step must not gain write access through the side door.
-	// Empty defaults to trusted (the standalone step CLI case).
+	// Mode is the permission mode child agents run under. They execute
+	// autonomously (there is no approver inside a subagent), so "ask" cannot be
+	// honored during a run; but "readonly" must propagate — a readonly session
+	// delegating must not gain write access through the side door.
+	// Empty defaults to trusted.
 	Mode permission.Mode
-
-	// Sup is set after NewSupervisor. It is used only when a step explicitly
-	// opts into the agent tool; dynamic chat subagents do not get nested
-	// delegation by default.
-	Sup *Supervisor
 }
 
 // SetBackend updates the default provider and model used by future workers.
@@ -67,16 +58,8 @@ func (r *AgentRunner) backend() (llm.Provider, string) {
 	return r.Provider, r.DefaultModel
 }
 
-func (r *AgentRunner) RunAgentStep(ctx context.Context, step Step, dir, input string, nodeID int, events chan<- AgentEvent) (string, error) {
-	provider, defaultModel := r.backend()
-	model := step.Model
-	if model == "" {
-		model = defaultModel
-	}
-	maxTurns := step.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = defaultStepMaxTurns
-	}
+func (r *AgentRunner) RunAgent(ctx context.Context, dir, input string, events chan<- AgentEvent) (string, error) {
+	provider, model := r.backend()
 
 	mode := r.Mode
 	if mode == "" || mode == permission.ModeAsk {
@@ -84,12 +67,12 @@ func (r *AgentRunner) RunAgentStep(ctx context.Context, step Step, dir, input st
 	}
 	ag := agent.New(agent.Config{
 		Model:     model,
-		System:    step.Prompt,
+		System:    dynamicAgentSystemPrompt,
 		Provider:  provider,
-		Tools:     r.registry(step, dir, nodeID),
+		Tools:     r.registry(dir),
 		Policy:    permission.New(string(mode), r.Root),
 		Compactor: compact.NewSummarizer(provider, model),
-		MaxTurns:  maxTurns,
+		MaxTurns:  agent.DefaultMaxTurns,
 		OnEvent: func(e agent.Event) {
 			if ev, ok := translate(e); ok {
 				select {
@@ -109,28 +92,19 @@ func (r *AgentRunner) RunAgentStep(ctx context.Context, step Step, dir, input st
 	return out, err
 }
 
-// registry builds the subagent's tool set. An empty frontmatter list means
-// observation-only for legacy static steps; dynamic chat subagents pass an
-// explicit tool list.
-func (r *AgentRunner) registry(step Step, dir string, nodeID int) *tools.Registry {
+func (r *AgentRunner) registry(dir string) *tools.Registry {
 	bashTimeout := r.BashTimeout
 	if bashTimeout <= 0 {
 		bashTimeout = 2 * time.Minute
 	}
-	all := tools.NewRegistry(
+	return tools.NewRegistry(
 		tools.Bash{Timeout: bashTimeout, CWD: dir},
 		tools.ReadFile{},
 		tools.WriteFile{},
 		tools.EditFile{},
 		tools.Grep{Root: r.Root},
 		tools.Glob{Root: r.Root},
-		AgentTool{Sup: r.Sup, CallerNode: nodeID, Dir: dir},
 	)
-	allowed := step.Tools
-	if len(allowed) == 0 {
-		allowed = defaultStepTools
-	}
-	return all.Filter(allowed)
 }
 
 // translate maps core agent loop events onto the factory event stream.

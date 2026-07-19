@@ -18,20 +18,15 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 )
 
-const (
-	DefaultSource = "tui"
-	indexFile     = "index.json"
-)
+const indexFile = "index.json"
 
 var ErrNotFound = errors.New("session not found")
 
 type Metadata struct {
-	ID       string `json:"id"`
-	Title    string `json:"title,omitempty"`
-	Source   string `json:"source"`
-	External string `json:"external,omitempty"`
-	CWD      string `json:"cwd"`
-	Model    string `json:"model"`
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	CWD   string `json:"cwd"`
+	Model string `json:"model"`
 	// Provider records which LLM backend produced this transcript. Transcripts
 	// can carry provider-specific blocks, so resume logic uses this to decide
 	// whether the saved model still applies.
@@ -103,9 +98,6 @@ func (s *Store) Create(ctx context.Context, meta Metadata) (*Session, error) {
 		}
 		meta.ID = id
 	}
-	if meta.Source == "" {
-		meta.Source = DefaultSource
-	}
 	if meta.CreatedAt.IsZero() {
 		meta.CreatedAt = now
 	}
@@ -155,9 +147,6 @@ func (s *Store) Save(_ context.Context, sess *Session) error {
 	if hasPathSeparator(sess.Metadata.ID) {
 		return fmt.Errorf("invalid session id %q", sess.Metadata.ID)
 	}
-	if sess.Metadata.Source == "" {
-		sess.Metadata.Source = DefaultSource
-	}
 	now := time.Now().UTC()
 	if sess.Metadata.CreatedAt.IsZero() {
 		sess.Metadata.CreatedAt = now
@@ -196,19 +185,6 @@ func (s *Store) List(_ context.Context) ([]Metadata, error) {
 	return items, nil
 }
 
-func (s *Store) FindByExternal(ctx context.Context, source, external string) (*Session, error) {
-	items, err := s.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, meta := range items {
-		if meta.Source == source && meta.External == external {
-			return s.Load(ctx, meta.ID)
-		}
-	}
-	return nil, ErrNotFound
-}
-
 func (s *Store) Search(ctx context.Context, query string) ([]SearchResult, []SearchWarning, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -239,28 +215,6 @@ func (s *Store) Search(ctx context.Context, query string) ([]SearchResult, []Sea
 		}
 	}
 	return results, warnings, nil
-}
-
-func (s *Store) Delete(ctx context.Context, id string) error {
-	id, err := cleanID(id)
-	if err != nil {
-		return fmt.Errorf("invalid session id %q", id)
-	}
-	if err := os.Remove(s.sessionPath(id)); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("delete session %s: %w", id, err)
-	}
-	idx, err := s.readIndex()
-	if err != nil {
-		return err
-	}
-	filtered := idx.Sessions[:0]
-	for _, meta := range idx.Sessions {
-		if meta.ID != id {
-			filtered = append(filtered, meta)
-		}
-	}
-	idx.Sessions = filtered
-	return s.writeIndex(idx)
 }
 
 func TitleFromMessages(messages []llm.Message) string {

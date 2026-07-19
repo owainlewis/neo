@@ -21,10 +21,10 @@ in the repository's Pages settings, with DNS managed separately in Cloudflare.
 - `src/content/docs/docs/install.md`, `quick-start.md` — hand-written user-facing guides, adapted
   from the root `README.md`.
 - `src/content/docs/docs/reference/**` — **generated, not committed.** `scripts/prepare-docs.mjs`
-  copies `../docs/developer/**` (itself produced by `go run ./cmd/neo-docs` in the main repo) into
+  copies `../docs/developer/**` into
   this folder before every `dev`/`build`, adding Starlight frontmatter and rewriting `*.md` links
   into site routes. Don't hand-edit files here — they're wiped and regenerated on every run. To
-  change this content, edit the Go doc generator or the source docs in `../docs/developer`.
+  change this content, edit the source docs in `../docs/developer`.
 
 ## Theming gotcha (read before touching `src/styles/custom.css`)
 

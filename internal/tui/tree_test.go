@@ -18,23 +18,18 @@ func renderPlain(b block, width int) string {
 }
 
 func stepEv(node, parent int, step, kind, body, task string) factory.Event {
-	depth := 0
-	if parent != 0 {
-		depth = 1
-	}
-	return factory.Event{Node: node, Parent: parent, Depth: depth, Step: step, Task: task,
+	return factory.Event{Node: node, Task: task,
 		Ev: factory.AgentEvent{Kind: kind, Body: body}}
 }
 
-func TestTreeBuildsStepsAndSubSteps(t *testing.T) {
+func TestTreeBuildsParallelAgents(t *testing.T) {
 	m := makeTestModel()
 
-	// ship starts, spawns checks (script) and verify (agent), all finish.
-	m.handleStepEvent(stepEv(1, 0, "ship", "start", "", "add rate limiting"))
-	m.handleStepEvent(stepEv(2, 1, "checks", "start", "", "34"))
-	m.handleStepEvent(stepEv(2, 1, "checks", "done", "ALL CHECKS GREEN", "34"))
-	m.handleStepEvent(stepEv(3, 1, "verify", "start", "", "branch vs criteria"))
-	m.handleStepEvent(stepEv(3, 1, "verify", "tool", "bash: just test", "branch vs criteria"))
+	m.handleStepEvent(stepEv(1, 0, "agent", "start", "", "add rate limiting"))
+	m.handleStepEvent(stepEv(2, 0, "agent", "start", "", "run checks"))
+	m.handleStepEvent(stepEv(2, 0, "agent", "done", "ALL CHECKS GREEN", "run checks"))
+	m.handleStepEvent(stepEv(3, 0, "agent", "start", "", "branch vs criteria"))
+	m.handleStepEvent(stepEv(3, 0, "agent", "tool", "bash: just test", "branch vs criteria"))
 
 	if len(m.blocks) != 1 {
 		t.Fatalf("blocks = %d, want 1", len(m.blocks))
@@ -45,9 +40,9 @@ func TestTreeBuildsStepsAndSubSteps(t *testing.T) {
 	}
 	out := renderPlain(tb, 100)
 	for _, want := range []string{
-		"● ship", "add rate limiting",
-		"├─ ✓ checks",
-		"└─ ● verify",
+		"● agent", "add rate limiting",
+		"✓ agent", "run checks",
+		"branch vs criteria",
 		"└ bash: just test",
 	} {
 		if !strings.Contains(out, want) {
@@ -55,11 +50,10 @@ func TestTreeBuildsStepsAndSubSteps(t *testing.T) {
 		}
 	}
 
-	// Children settle, then the root: glyphs update, status line clears.
-	m.handleStepEvent(stepEv(3, 1, "verify", "done", "VERDICT: PASS", ""))
-	m.handleStepEvent(stepEv(1, 0, "ship", "done", "shipped", ""))
+	m.handleStepEvent(stepEv(3, 0, "agent", "done", "VERDICT: PASS", ""))
+	m.handleStepEvent(stepEv(1, 0, "agent", "done", "shipped", ""))
 	out = renderPlain(tb, 100)
-	for _, want := range []string{"✓ ship", "└─ ✓ verify"} {
+	for _, want := range []string{"✓ agent", "branch vs criteria"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("settled tree missing %q:\n%s", want, out)
 		}
@@ -78,7 +72,7 @@ func TestTreeFailureGlyph(t *testing.T) {
 	m.handleStepEvent(stepEv(1, 0, "verify", "fail", "agent step error: timeout", ""))
 
 	out := renderPlain(m.blocks[0].(*treeBlock), 100)
-	if !strings.Contains(out, "✗ verify") {
+	if !strings.Contains(out, "✗ agent") {
 		t.Errorf("missing failure glyph:\n%s", out)
 	}
 }
@@ -142,12 +136,11 @@ func TestTreeAgentCallEmitsNoGenericCard(t *testing.T) {
 	}
 }
 
-func TestTreeOrphanEventsIgnored(t *testing.T) {
+func TestTreeUnknownAgentUpdatesIgnored(t *testing.T) {
 	m := makeTestModel()
-	m.handleStepEvent(stepEv(9, 4, "verify", "start", "", "")) // unknown parent
-	m.handleStepEvent(stepEv(9, 4, "verify", "tool", "x", ""))
+	m.handleStepEvent(stepEv(9, 0, "agent", "tool", "x", ""))
 	if len(m.blocks) != 0 {
-		t.Fatalf("orphan events must not create blocks: %d", len(m.blocks))
+		t.Fatalf("unknown updates must not create blocks: %d", len(m.blocks))
 	}
 }
 

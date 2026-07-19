@@ -78,8 +78,6 @@ func main() {
 		runSessions(ctx, os.Args[2:])
 	case "doctor":
 		os.Exit(runDoctor(ctx))
-	case "update":
-		runUpdate(ctx, os.Args[2:])
 	case "resume":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: neo resume <session-id>")
@@ -109,12 +107,6 @@ USAGE:
   neo sessions search <query>
                      Search saved session transcripts
   neo doctor         Check local config and environment
-  neo update         Install the latest stable release
-  neo update --check Check for a stable release without installing
-  neo update --nightly
-                     Install the latest nightly release
-  neo update --nightly --check
-                     Check for a nightly release without installing
   neo resume <id>    Resume a saved chat session
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials
@@ -168,11 +160,6 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []ll
 		} else if section := projectctx.Augment("", docs); section != "" {
 			// Dynamic tail: kept uncached and after the breakpoint so it never
 			// evicts the cached base.
-			blocks = append(blocks, llm.SystemBlock{Text: section})
-		}
-	}
-	if doc, ok := projectctx.LoadGitContext(cwd); ok {
-		if section := projectctx.GitSection(doc); section != "" {
 			blocks = append(blocks, llm.SystemBlock{Text: section})
 		}
 	}
@@ -265,7 +252,6 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	if sess == nil {
 		var err error
 		sess, err = store.Create(ctx, session.Metadata{
-			Source:   session.DefaultSource,
 			CWD:      cwd,
 			Model:    model,
 			Provider: providerName,
@@ -303,33 +289,18 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		return store.Save(ctx, sess)
 	}
 
-	switchBackend := func(choice tui.ModelChoice) error {
-		next, err := checkedProvider(ctx, cfg, choice.Provider)
-		if err != nil {
-			return fmt.Errorf("switch to %s: %w", choice.Provider, err)
-		}
+	switchModel := func(nextModel string) error {
 		if agentRunner != nil && agentRunnerFollowsCoordinator {
-			if err := agentRunner.SetBackend(next, choice.ID); err != nil {
+			if err := agentRunner.SetBackend(prov, nextModel); err != nil {
 				return err
 			}
 		}
-		return ag.SetBackend(next, choice.ID, chatCompactor(next, choice.ID, cfg))
+		return ag.SetBackend(prov, nextModel, chatCompactor(prov, nextModel, cfg))
 	}
 
 	if err := tui.Run(ctx, ag, model, Version, sk,
 		tui.WithAfterSend(saveSession),
-		tui.WithSessions(store, sess, func(resumed *session.Session) error {
-			resumedProvider, resumedModel := sessionBackend(cfg, resumed.Metadata)
-			activeProvider, activeModel := ag.Backend()
-			if resumedProvider != activeProvider || resumedModel != activeModel {
-				if err := switchBackend(tui.ModelChoice{Provider: resumedProvider, ID: resumedModel}); err != nil {
-					return err
-				}
-			}
-			sess = resumed
-			return nil
-		}),
-		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName), switchBackend),
+		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName), switchModel),
 		tui.WithStepEvents(stepEvents),
 		tui.WithWorkflowEvents(workflowEvents),
 		tui.WithVerbose(cfg.VerboseEnabled()),

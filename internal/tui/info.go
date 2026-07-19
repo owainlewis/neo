@@ -21,8 +21,6 @@ var baseSlashCommands = []slashCommand{
 	{"/clear", "clear the current transcript"},
 	{"/help", "show this list"},
 	{"/model", "select the active model"},
-	{"/sessions", "resume a saved session"},
-	{"/tokens", "show token usage"},
 }
 
 var keyBindings = []struct {

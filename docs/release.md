@@ -18,7 +18,7 @@ Publish a new stable release through the single supported install path:
 - The release workflow is `.github/workflows/release.yml`.
 - GoReleaser config is `.goreleaser.yaml`.
 - Release notes live in `CHANGELOG.md`.
-- Generated docs under `docs/developer/` must not be edited by hand.
+- Developer docs under `docs/developer/` are maintained directly in Markdown.
 
 ## Safety rules
 

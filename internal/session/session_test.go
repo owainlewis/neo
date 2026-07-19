@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -15,9 +14,8 @@ import (
 func TestStoreCreateSaveLoadList(t *testing.T) {
 	store := NewStore(t.TempDir())
 	sess, err := store.Create(context.Background(), Metadata{
-		Source: "tui",
-		CWD:    "/repo",
-		Model:  "test-model",
+		CWD:   "/repo",
+		Model: "test-model",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -171,8 +169,8 @@ func TestStoreSearchSkipsMalformedSession(t *testing.T) {
 
 func TestStoreListNewestFirst(t *testing.T) {
 	store := NewStore(t.TempDir())
-	older := &Session{Metadata: Metadata{ID: "older", Source: "tui", CreatedAt: time.Now().Add(-time.Hour)}}
-	newer := &Session{Metadata: Metadata{ID: "newer", Source: "tui", CreatedAt: time.Now()}}
+	older := &Session{Metadata: Metadata{ID: "older", CreatedAt: time.Now().Add(-time.Hour)}}
+	newer := &Session{Metadata: Metadata{ID: "newer", CreatedAt: time.Now()}}
 	if err := store.Save(context.Background(), older); err != nil {
 		t.Fatalf("save older: %v", err)
 	}
@@ -192,7 +190,7 @@ func TestStoreListNewestFirst(t *testing.T) {
 func saveSearchSession(t *testing.T, store *Store, id, title, text string) {
 	t.Helper()
 	sess := &Session{
-		Metadata: Metadata{ID: id, Source: "tui", CWD: "/repo", Model: "test", Title: title},
+		Metadata: Metadata{ID: id, CWD: "/repo", Model: "test", Title: title},
 		Messages: []llm.Message{{
 			Role: llm.RoleUser,
 			Content: []llm.ContentBlock{{
@@ -203,47 +201,6 @@ func saveSearchSession(t *testing.T, store *Store, id, title, text string) {
 	}
 	if err := store.Save(context.Background(), sess); err != nil {
 		t.Fatalf("save search session: %v", err)
-	}
-}
-
-func TestStoreFindByExternal(t *testing.T) {
-	store := NewStore(t.TempDir())
-	_, err := store.Create(context.Background(), Metadata{Source: "telegram", External: "chat:123"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	found, err := store.FindByExternal(context.Background(), "telegram", "chat:123")
-	if err != nil {
-		t.Fatalf("FindByExternal: %v", err)
-	}
-	if found.Metadata.Source != "telegram" || found.Metadata.External != "chat:123" {
-		t.Fatalf("unexpected session: %#v", found.Metadata)
-	}
-	_, err = store.FindByExternal(context.Background(), "telegram", "chat:missing")
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected ErrNotFound, got %v", err)
-	}
-}
-
-func TestStoreDelete(t *testing.T) {
-	store := NewStore(t.TempDir())
-	sess, err := store.Create(context.Background(), Metadata{Source: "tui"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if err := store.Delete(context.Background(), sess.Metadata.ID); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	_, err = store.Load(context.Background(), sess.Metadata.ID)
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected ErrNotFound, got %v", err)
-	}
-	items, err := store.List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(items) != 0 {
-		t.Fatalf("expected empty list, got %#v", items)
 	}
 }
 

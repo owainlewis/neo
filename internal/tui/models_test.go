@@ -10,7 +10,7 @@ import (
 
 func TestSlashCommand_ModelOpensSearchableBrowser(t *testing.T) {
 	m := makeTestModel()
-	m.modelChoices = normalizeModelChoices("", "test", []ModelChoice{
+	m.modelChoices = normalizeModelChoices("test", []ModelChoice{
 		{ID: "gpt-5.2", Name: "GPT-5.2", Description: "flagship"},
 		{ID: "gpt-4o", Name: "GPT-4o", Description: "fast"},
 	})
@@ -36,7 +36,7 @@ func TestSlashCommand_ModelOpensSearchableBrowser(t *testing.T) {
 
 func TestModelBrowser_EnterSelectsModelAndSaves(t *testing.T) {
 	m := makeTestModel()
-	m.modelChoices = normalizeModelChoices("", "test", []ModelChoice{
+	m.modelChoices = normalizeModelChoices("test", []ModelChoice{
 		{ID: "gpt-5.2", Name: "GPT-5.2"},
 	})
 	saveCalls := 0
@@ -66,7 +66,7 @@ func TestModelBrowser_EnterSelectsModelAndSaves(t *testing.T) {
 	if saveCalls != 2 {
 		t.Fatalf("saveCalls = %d, want 2", saveCalls)
 	}
-	out := plain(renderBlocks(m.blocks))
+	out := plain(m.viewportContent())
 	if !strings.Contains(out, "model: gpt-5.2") {
 		t.Fatalf("selection notice missing: %s", out)
 	}
@@ -74,7 +74,7 @@ func TestModelBrowser_EnterSelectsModelAndSaves(t *testing.T) {
 
 func TestModelBrowser_SaveErrorKeepsBrowserOpen(t *testing.T) {
 	m := makeTestModel()
-	m.modelChoices = normalizeModelChoices("", "test", []ModelChoice{{ID: "gpt-5.2"}})
+	m.modelChoices = normalizeModelChoices("test", []ModelChoice{{ID: "gpt-5.2"}})
 	m.afterSend = func() error { return fmt.Errorf("save failed") }
 
 	m.handleSlashCommand("/model")
@@ -89,16 +89,16 @@ func TestModelBrowser_SaveErrorKeepsBrowserOpen(t *testing.T) {
 	}
 }
 
-func TestModelBrowser_SwitchesProviderAndModelTogether(t *testing.T) {
+func TestModelBrowser_UsesSwitcher(t *testing.T) {
 	m := makeTestModel()
 	m.providerTag = "anthropic"
-	m.modelChoices = normalizeModelChoices("anthropic", "test", []ModelChoice{
-		{Provider: "anthropic", ID: "test"},
-		{Provider: "openai", ID: "gpt-5.2"},
+	m.modelChoices = normalizeModelChoices("test", []ModelChoice{
+		{ID: "test"},
+		{ID: "claude-sonnet-4-6"},
 	})
-	var selected ModelChoice
-	m.modelSwitcher = func(choice ModelChoice) error {
-		selected = choice
+	var selected string
+	m.modelSwitcher = func(model string) error {
+		selected = model
 		return nil
 	}
 
@@ -106,13 +106,13 @@ func TestModelBrowser_SwitchesProviderAndModelTogether(t *testing.T) {
 	m.handleModelBrowserKey(keyPress(tea.KeyDown))
 	m.handleModelBrowserKey(keyPress(tea.KeyEnter))
 
-	if selected.Provider != "openai" || selected.ID != "gpt-5.2" {
-		t.Fatalf("selected = %#v, want openai/gpt-5.2", selected)
+	if selected != "claude-sonnet-4-6" {
+		t.Fatalf("selected = %q", selected)
 	}
-	if m.providerTag != "openai" || m.modelTag != "gpt-5.2" {
-		t.Fatalf("visible backend = %s/%s, want openai/gpt-5.2", m.providerTag, m.modelTag)
+	if m.providerTag != "anthropic" || m.modelTag != "claude-sonnet-4-6" {
+		t.Fatalf("visible backend = %s/%s", m.providerTag, m.modelTag)
 	}
-	if got := plain(m.footerLine()); !strings.Contains(got, "openai/gpt-5.2") {
+	if got := plain(m.footerLine()); !strings.Contains(got, "anthropic/claude-sonnet-4-6") {
 		t.Fatalf("footer does not show provider and model: %q", got)
 	}
 }
@@ -120,11 +120,11 @@ func TestModelBrowser_SwitchesProviderAndModelTogether(t *testing.T) {
 func TestModelBrowser_SwitchFailureKeepsCurrentBackend(t *testing.T) {
 	m := makeTestModel()
 	m.providerTag = "anthropic"
-	m.modelChoices = normalizeModelChoices("anthropic", "test", []ModelChoice{
-		{Provider: "anthropic", ID: "test"},
-		{Provider: "openai", ID: "gpt-5.2"},
+	m.modelChoices = normalizeModelChoices("test", []ModelChoice{
+		{ID: "test"},
+		{ID: "claude-sonnet-4-6"},
 	})
-	m.modelSwitcher = func(ModelChoice) error { return fmt.Errorf("credential expired") }
+	m.modelSwitcher = func(string) error { return fmt.Errorf("switch failed") }
 
 	m.handleSlashCommand("/model")
 	m.handleModelBrowserKey(keyPress(tea.KeyDown))
@@ -134,16 +134,6 @@ func TestModelBrowser_SwitchFailureKeepsCurrentBackend(t *testing.T) {
 		t.Fatal("failed switch should keep the picker open with an error")
 	}
 	if m.providerTag != "anthropic" || m.modelTag != "test" {
-		t.Fatalf("backend changed after failed switch: %s/%s", m.providerTag, m.modelTag)
-	}
-}
-
-func TestNormalizeModelChoices_AllowsSameModelIDAcrossProviders(t *testing.T) {
-	choices := normalizeModelChoices("anthropic", "shared", []ModelChoice{
-		{Provider: "anthropic", ID: "shared"},
-		{Provider: "openrouter", ID: "shared"},
-	})
-	if len(choices) != 2 {
-		t.Fatalf("choices = %#v, want both provider/model pairs", choices)
+		t.Fatalf("model changed after failed switch: %s/%s", m.providerTag, m.modelTag)
 	}
 }
