@@ -92,7 +92,7 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 		maxMatches = defaultSearchMax
 	}
 
-	files, err := filesUnder(target)
+	files, err := filesUnder(ctx, target)
 	if err != nil {
 		return "", err
 	}
@@ -238,7 +238,10 @@ func scopedPath(root, path string) (string, error) {
 	return workspace.ResolveWithin(root, path)
 }
 
-func filesUnder(path string) ([]string, error) {
+func filesUnder(ctx context.Context, path string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -248,6 +251,9 @@ func filesUnder(path string) ([]string, error) {
 	}
 	var files []string
 	err = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return nil
 		}

@@ -346,9 +346,9 @@ func toResponse(out apiResponse) (*llm.Response, error) {
 			sawToolCall = true
 			input := map[string]any{}
 			if item.Arguments != "" {
-				// Arguments is a JSON string; on a decode error pass an empty object
-				// rather than failing the whole turn.
-				_ = json.Unmarshal([]byte(item.Arguments), &input)
+				if err := json.Unmarshal([]byte(item.Arguments), &input); err != nil {
+					return nil, fmt.Errorf("openai: decode tool arguments for %s: %w", item.Name, err)
+				}
 			}
 			content = append(content, llm.ContentBlock{
 				Type:  "tool_use",

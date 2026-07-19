@@ -172,3 +172,38 @@ func TestWorkspacePolicyDeniesMutationSymlinkEscape(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkspacePolicyBashOutsideWorkspaceRequiresApproval(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "README.md")
+	if err := os.WriteFile(inside, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		cmd  string
+		want Decision
+	}{
+		{"absolute inside allowed", "cat " + inside, Allow},
+		{"absolute outside asks", "cat /etc/passwd", Ask},
+		{"home path asks", "cat ~/.ssh/id_rsa", Ask},
+		{"parent escape asks", "cat ../secret.txt", Ask},
+		{"redirect outside asks", "cat </etc/passwd", Ask},
+		{"attached redirect outside asks", "cat</etc/passwd", Ask},
+		{"fd redirect outside asks", "echo hi 2>/tmp/neo.err", Ask},
+		{"flag value outside asks", "grep --file=/etc/passwd needle", Ask},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := New("trusted", root).Decide(context.Background(), Request{
+				ToolName: "bash",
+				Args:     map[string]any{"command": tt.cmd},
+			})
+			if got.Decision != tt.want {
+				t.Fatalf("decision = %v, want %v (reason %q)", got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}

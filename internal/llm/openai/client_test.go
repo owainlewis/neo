@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -395,5 +396,20 @@ func TestComplete_4xxNoRetry(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("expected no retries on 4xx, got %d calls", calls)
+	}
+}
+
+func TestToResponseRejectsMalformedToolArguments(t *testing.T) {
+	_, err := toResponse(apiResponse{Output: []outputItem{{
+		Type:      "function_call",
+		CallID:    "call_1",
+		Name:      "bash",
+		Arguments: `{"command":`,
+	}}})
+	if err == nil {
+		t.Fatal("expected malformed tool arguments to fail")
+	}
+	if !strings.Contains(err.Error(), "decode tool arguments") || !strings.Contains(err.Error(), "bash") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
