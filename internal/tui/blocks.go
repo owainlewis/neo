@@ -142,7 +142,10 @@ type toolCallBlock struct {
 
 func (b toolCallBlock) render(width int, _ *glamour.TermRenderer) string {
 	if !b.verbose {
-		line := styOK.Render("✓") + " " + styMuted.Render(toolReceiptLine(b.name, b.args))
+		// Routine successes form an activity trail, not a checklist. Keep them
+		// quiet so green checks remain meaningful for workflow and turn
+		// completion.
+		line := styDim.Render("·") + " " + styMuted.Render(toolReceiptLine(b.name, b.args))
 		if b.elapsed > 0 {
 			line += styDim.Render("  " + formatElapsed(b.elapsed))
 		}

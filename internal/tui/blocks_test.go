@@ -122,8 +122,11 @@ func TestToolCallBlockRendersConciseReceiptByDefault(t *testing.T) {
 	out := plain(toolCallBlock{
 		name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}, elapsed: 2 * time.Second,
 	}.render(80, nil))
-	if out != "✓ Read internal/tui/model.go  2s" {
+	if out != "· Read internal/tui/model.go  2s" {
 		t.Fatalf("concise tool call render = %q, want a completed receipt", out)
+	}
+	if strings.Contains(out, "✓") {
+		t.Fatalf("routine tool receipt should not render as a completed milestone: %q", out)
 	}
 }
 
@@ -252,7 +255,7 @@ func TestTranscriptReplayRespectsOutputModeAndKeepsFailures(t *testing.T) {
 		t.Fatalf("concise replay did not preserve failure: %#v", concise.blocks[1])
 	}
 	for _, block := range concise.blocks {
-		if got := plain(block.render(80, nil)); strings.Contains(got, "✓ Ran false") {
+		if got := plain(block.render(80, nil)); strings.Contains(got, "· Ran false") {
 			t.Fatalf("concise replay marked failed tool successful: %q", got)
 		}
 	}
@@ -286,8 +289,8 @@ func TestTranscriptReplayPairsRepeatedAndEmptyToolIDsByOccurrence(t *testing.T) 
 				{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", ID: "bash", Name: "bash", Input: map[string]any{"command": "false"}}}},
 				{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: "bash", Content: "exit 1", IsError: true}}},
 			},
-			want:   []string{"✓ Ran true", "exit 1"},
-			reject: "✓ Ran false",
+			want:   []string{"· Ran true", "exit 1"},
+			reject: "· Ran false",
 		},
 		{
 			name: "legacy empty ID",
@@ -296,7 +299,7 @@ func TestTranscriptReplayPairsRepeatedAndEmptyToolIDsByOccurrence(t *testing.T) 
 				{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", Content: "exit 1", IsError: true}}},
 			},
 			want:   []string{"exit 1"},
-			reject: "✓ Ran false",
+			reject: "· Ran false",
 		},
 	}
 
