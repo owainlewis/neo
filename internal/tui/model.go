@@ -750,7 +750,10 @@ func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBl
 		return resultSummaryBlock{}, false
 	}
 	maxTurns := errors.Is(err, agent.ErrMaxTurns)
-	failed := !maxTurns && (err != nil || m.turn.errors > 0)
+	// Tool failures are intermediate warnings when the agent recovers and
+	// completes the turn. Direct commands have no later agent outcome, so their
+	// tool result remains the final outcome.
+	failed := !maxTurns && (err != nil || (m.turn.direct && m.turn.errors > 0))
 	label := "Done"
 	if maxTurns {
 		label = "Paused"

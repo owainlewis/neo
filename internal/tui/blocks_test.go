@@ -203,7 +203,7 @@ func TestToolEventsRenderSuccessfulResultsOnlyWhenVerbose(t *testing.T) {
 	}
 }
 
-func TestToolEventsAlwaysRenderFailures(t *testing.T) {
+func TestRecoveredToolFailureRendersAndSummaryIsDone(t *testing.T) {
 	m := makeTestModel()
 	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "bash", Args: map[string]any{"command": "false"}})
 	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "bash", Text: "exit 1", IsError: true})
@@ -215,9 +215,13 @@ func TestToolEventsAlwaysRenderFailures(t *testing.T) {
 	if !ok || !result.isError || result.text != "exit 1" {
 		t.Fatalf("failure result = %#v", m.blocks[0])
 	}
+	summary, ok := m.resultSummary(nil, time.Second)
+	if !ok || summary.failed || summary.label != "Done" {
+		t.Fatalf("recovered tool failure summary = %#v, ok=%v", summary, ok)
+	}
 }
 
-func TestWorkflowToolFailureRendersAndMarksTurnFailed(t *testing.T) {
+func TestRecoveredWorkflowToolFailureRendersAndSummaryIsDone(t *testing.T) {
 	m := makeTestModel()
 	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "workflow", Args: map[string]any{"action": "create"}})
 	m.handleEvent(agent.Event{Kind: agent.EventToolResult, Name: "workflow", Text: "invalid workflow action", IsError: true})
@@ -233,8 +237,22 @@ func TestWorkflowToolFailureRendersAndMarksTurnFailed(t *testing.T) {
 		t.Fatalf("turn errors = %d, want 1", m.turn.errors)
 	}
 	summary, ok := m.resultSummary(nil, time.Second)
-	if !ok || !summary.failed || summary.label != "Finished with issues" {
-		t.Fatalf("workflow failure summary = %#v, ok=%v", summary, ok)
+	if !ok || summary.failed || summary.label != "Done" {
+		t.Fatalf("recovered workflow failure summary = %#v, ok=%v", summary, ok)
+	}
+}
+
+func TestUnrecoveredTurnFailureKeepsErrorBlock(t *testing.T) {
+	m := makeTestModel()
+	m.turn = turnStats{tools: 1, errors: 1}
+
+	m.Update(sendResultMsg{err: fmt.Errorf("provider failed")})
+
+	if len(m.blocks) != 1 {
+		t.Fatalf("blocks = %d, want unrecovered error", len(m.blocks))
+	}
+	if block, ok := m.blocks[0].(errorBlock); !ok || block.err.Error() != "provider failed" {
+		t.Fatalf("unrecovered turn block = %#v", m.blocks[0])
 	}
 }
 

@@ -515,6 +515,36 @@ func TestBangCommand_ConciseModeKeepsRequestedCommandOutput(t *testing.T) {
 	}
 }
 
+func TestBangCommand_FailureMarksSummaryFailed(t *testing.T) {
+	ag := agent.New(agent.Config{
+		Model:    "test",
+		Provider: &llmtest.FakeProvider{},
+		Tools:    tools.NewRegistry(tuiFailTool{}),
+		Policy:   permission.New("trusted", "."),
+	})
+	m := makeTestModel()
+	m.ag = ag
+	m.ag.SetEventHandler(m.handleEvent)
+
+	cmd := m.handleBangCommand("!false")
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
+	m.Update(cmd())
+
+	if len(m.blocks) != 2 {
+		t.Fatalf("expected failed result and summary blocks, got %d: %+v", len(m.blocks), m.blocks)
+	}
+	result, ok := m.blocks[0].(toolResultBlock)
+	if !ok || !result.isError {
+		t.Fatalf("expected failed command result, got %#v", m.blocks[0])
+	}
+	summary, ok := m.blocks[1].(resultSummaryBlock)
+	if !ok || !summary.failed || summary.label != "Finished with issues" {
+		t.Fatalf("failed command summary = %#v", m.blocks[1])
+	}
+}
+
 func TestBangCommand_BusyIsUnavailable(t *testing.T) {
 	m := makeTestModel()
 	m.busy = true
@@ -762,4 +792,14 @@ func (tuiEchoTool) Run(_ context.Context, in map[string]any) (string, error) {
 		return s, nil
 	}
 	return "", nil
+}
+
+type tuiFailTool struct{}
+
+func (tuiFailTool) Name() string { return "bash" }
+func (tuiFailTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: "bash", Description: "bash", InputSchema: map[string]any{"type": "object"}}
+}
+func (tuiFailTool) Run(context.Context, map[string]any) (string, error) {
+	return "exit 1", fmt.Errorf("exit status 1")
 }
