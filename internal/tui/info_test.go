@@ -172,12 +172,25 @@ func TestSlashCommand_UnknownSuggestsHelp(t *testing.T) {
 	}
 }
 
-func TestSlashCommand_ToolsPermissionsTokensModelAndClear(t *testing.T) {
+func TestRemovedSlashCommandsAreNotBuiltIn(t *testing.T) {
+	m := makeTestModel()
+	help := plain(helpBlock{commands: m.slashCommands()}.render(80, nil))
+
+	for _, cmd := range []string{"/tools", "/permissions"} {
+		if strings.Contains(help, cmd) {
+			t.Fatalf("help still advertises %s: %s", cmd, help)
+		}
+		if builtinSlashCommand(cmd) {
+			t.Fatalf("%s is still registered as a built-in command", cmd)
+		}
+	}
+}
+
+func TestSlashCommand_TokensModelAndClear(t *testing.T) {
 	for _, tc := range []struct {
 		cmd  string
 		want string
 	}{
-		{"/tools", "read_file"},
 		{"/tokens", "input: 0"},
 		{"/model", "model: test"},
 	} {
@@ -200,47 +213,6 @@ func TestSlashCommand_ToolsPermissionsTokensModelAndClear(t *testing.T) {
 	}
 	if got := m.ag.Usage(); got != (llm.Usage{}) {
 		t.Fatalf("/clear left usage = %+v", got)
-	}
-}
-
-func TestSlashCommand_PermissionsOpensPicker(t *testing.T) {
-	m := makeTestModel()
-	m.handleSlashCommand("/permissions")
-
-	if !m.perms.visible {
-		t.Fatal("expected permissions picker to open")
-	}
-	out := plain(m.permissionPickerView())
-	flatOut := strings.Join(strings.Fields(out), " ")
-	for _, want := range []string{
-		"Select permission mode",
-		"Current: ask",
-		"bash and file mutations ask first",
-		"workspace path checks still apply",
-		"bash and file mutations are denied",
-	} {
-		if !strings.Contains(flatOut, want) {
-			t.Fatalf("permissions picker missing %q: %s", want, out)
-		}
-	}
-}
-
-func TestPermissionPicker_SelectTrustedUpdatesSessionMode(t *testing.T) {
-	m := makeTestModel()
-	m.handleSlashCommand("/permissions")
-
-	m.Update(keyPress(tea.KeyDown))
-	m.Update(keyPress(tea.KeyEnter))
-
-	if m.perms.visible {
-		t.Fatal("expected permissions picker to close")
-	}
-	if m.permissionMode != "trusted" {
-		t.Fatalf("permissionMode = %q, want trusted", m.permissionMode)
-	}
-	out := plain(m.blocks[0].render(80, nil))
-	if !strings.Contains(out, "permissions: trusted") {
-		t.Fatalf("expected trusted notice, got %s", out)
 	}
 }
 

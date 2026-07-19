@@ -318,7 +318,6 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	if err := tui.Run(ctx, ag, model, Version, sk,
 		tui.WithAfterSend(saveSession),
-		tui.WithPermissionMode(cfg.Permissions.Mode),
 		tui.WithSessions(store, sess, func(resumed *session.Session) error {
 			resumedProvider, resumedModel := sessionBackend(cfg, resumed.Metadata)
 			activeProvider, activeModel := ag.Backend()

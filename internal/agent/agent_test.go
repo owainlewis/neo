@@ -750,64 +750,6 @@ func TestAgent_RunToolReadonlyDeniesBash(t *testing.T) {
 	}
 }
 
-func TestAgent_SetPermissionModeTrustedSkipsApproval(t *testing.T) {
-	prov := &llmtest.FakeProvider{Responses: []llm.Response{
-		llmtest.ToolUse("call_1", "bash", map[string]any{"command": "date"}),
-		llmtest.Text("done"),
-	}}
-	approvals := 0
-	ag := New(Config{
-		Model:    "test-model",
-		Provider: prov,
-		Tools:    tools.NewRegistry(namedTool("bash")),
-		Policy:   permission.New("ask", "."),
-		Approve: func(context.Context, ApprovalRequest) (bool, error) {
-			approvals++
-			return false, nil
-		},
-	})
-	if err := ag.SetPermissionMode("trusted"); err != nil {
-		t.Fatalf("set permission mode: %v", err)
-	}
-	if _, err := ag.Send(context.Background(), "ping"); err != nil {
-		t.Fatalf("send: %v", err)
-	}
-	if approvals != 0 {
-		t.Fatalf("approval prompts = %d, want 0", approvals)
-	}
-	result := ag.Transcript()[2].Content[0]
-	if result.IsError {
-		t.Fatalf("tool result = %+v, want success", result)
-	}
-}
-
-func TestAgent_SetPermissionModeReadonlyDeniesBash(t *testing.T) {
-	prov := &llmtest.FakeProvider{Responses: []llm.Response{
-		llmtest.ToolUse("call_1", "bash", map[string]any{"command": "date"}),
-		llmtest.Text("done"),
-	}}
-	ag := New(Config{
-		Model:    "test-model",
-		Provider: prov,
-		Tools:    tools.NewRegistry(namedTool("bash")),
-		Policy:   permission.New("ask", "."),
-		Approve: func(context.Context, ApprovalRequest) (bool, error) {
-			t.Fatal("readonly should deny bash without asking")
-			return false, nil
-		},
-	})
-	if err := ag.SetPermissionMode("readonly"); err != nil {
-		t.Fatalf("set permission mode: %v", err)
-	}
-	if _, err := ag.Send(context.Background(), "ping"); err != nil {
-		t.Fatalf("send: %v", err)
-	}
-	result := ag.Transcript()[2].Content[0]
-	if !result.IsError || !strings.Contains(result.Content, "readonly denied bash") {
-		t.Fatalf("tool result = %+v, want readonly denial", result)
-	}
-}
-
 func TestAgent_AccumulatesUsage(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
 		{Content: []llm.ContentBlock{{Type: "text", Text: "one"}}, StopReason: "end_turn", Usage: llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}},
