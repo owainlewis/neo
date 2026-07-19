@@ -291,10 +291,9 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	ta.Focus()
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
-	vp.MouseWheelEnabled = true
+	vp.MouseWheelEnabled = false
 	// Content is word-wrapped to the viewport width, so there is nothing to
-	// scroll to horizontally. A horizontal trackpad swipe emits a wheel-right
-	// (or shift+wheel) event that would otherwise slide the whole transcript.
+	// scroll to horizontally.
 	vp.SetHorizontalStep(0)
 
 	sp := spinner.New()
@@ -534,9 +533,9 @@ func (m *model) View() tea.View {
 }
 
 // makeView wraps a rendered string with the v2 View settings we want for
-// every frame: alt screen, cell-motion mouse reporting, and a request for
-// keyboard enhancements. Mouse reporting enables wheel and trackpad scrolling;
-// common terminals keep text selection available with shift+drag.
+// every frame: alt screen, native terminal text selection, and a request for
+// keyboard enhancements. Mouse reporting stays disabled so a plain drag can
+// select any rendered text; page up and page down scroll the transcript.
 // ReportAlternateKeys asks terminals that speak the Kitty
 // keyboard protocol (Kitty, Ghostty, WezTerm, recent iTerm2) to disambiguate
 // shift+enter from a bare enter, which is what lets shift+enter insert a
@@ -545,7 +544,7 @@ func (m *model) View() tea.View {
 func makeView(content string) tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	v.MouseMode = tea.MouseModeNone
 	v.KeyboardEnhancements.ReportAlternateKeys = true
 	return v
 }

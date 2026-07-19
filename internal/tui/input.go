@@ -85,6 +85,10 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) tea.Cmd {
 		m.appendBlock(noticeBlock{text: "won't ask again for " + rule.Label() + " this session"})
 	case "ctrl+o":
 		m.toggleApprovalPreview()
+	case "pgup":
+		m.viewport.PageUp()
+	case "pgdown":
+		m.viewport.PageDown()
 	case "n", "N", "esc":
 		m.finishApproval(false)
 	}

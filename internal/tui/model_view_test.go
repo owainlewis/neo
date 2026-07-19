@@ -13,7 +13,7 @@ import (
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
-func TestNewModelEnablesMouseWheel(t *testing.T) {
+func TestNewModelLeavesMouseWheelToTerminal(t *testing.T) {
 	t.Parallel()
 
 	base := makeTestModel()
@@ -21,35 +21,24 @@ func TestNewModelEnablesMouseWheel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new model: %v", err)
 	}
-	if !m.viewport.MouseWheelEnabled {
-		t.Fatal("MouseWheelEnabled = false, want transcript wheel scrolling")
-	}
-	m.viewport.SetWidth(10)
-	m.viewport.SetContent(strings.Repeat("x", 40))
-	for _, msg := range []tea.MouseWheelMsg{
-		tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight}),
-		tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift}),
-	} {
-		m.Update(msg)
-		if got := m.viewport.XOffset(); got != 0 {
-			t.Fatalf("horizontal wheel changed X offset to %d, want 0", got)
-		}
+	if m.viewport.MouseWheelEnabled {
+		t.Fatal("MouseWheelEnabled = true, want native terminal text selection")
 	}
 }
 
-func TestMakeViewEnablesTranscriptMouseScrolling(t *testing.T) {
+func TestMakeViewLeavesMouseToTerminalForTextSelection(t *testing.T) {
 	t.Parallel()
 
 	v := makeView("visible output")
-	if v.MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("MouseMode = %v, want MouseModeCellMotion for wheel events", v.MouseMode)
+	if v.MouseMode != tea.MouseModeNone {
+		t.Fatalf("MouseMode = %v, want MouseModeNone for native text selection", v.MouseMode)
 	}
 	if !v.AltScreen {
 		t.Fatal("AltScreen = false, want true")
 	}
 }
 
-func TestPageKeysAndMouseWheelScrollTranscript(t *testing.T) {
+func TestPageKeysScrollTranscript(t *testing.T) {
 	t.Parallel()
 
 	v := viewport.New(viewport.WithWidth(20), viewport.WithHeight(3))
@@ -67,14 +56,31 @@ func TestPageKeysAndMouseWheelScrollTranscript(t *testing.T) {
 	if got := m.viewport.YOffset(); got != before {
 		t.Fatalf("page down offset = %d, want %d", got, before)
 	}
+}
 
-	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp}))
+func TestPageKeysScrollTranscriptDuringApproval(t *testing.T) {
+	t.Parallel()
+
+	v := viewport.New(viewport.WithWidth(20), viewport.WithHeight(3))
+	v.SetContent(strings.Join([]string{"one", "two", "three", "four", "five", "six"}, "\n"))
+	v.GotoBottom()
+	m := model{viewport: v, approval: &approvalState{}}
+
+	before := m.viewport.YOffset()
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
 	if got := m.viewport.YOffset(); got >= before {
-		t.Fatalf("wheel up offset = %d, want less than %d", got, before)
+		t.Fatalf("page up offset during approval = %d, want less than %d", got, before)
 	}
-	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	if m.approval == nil {
+		t.Fatal("page up dismissed approval")
+	}
+
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
 	if got := m.viewport.YOffset(); got != before {
-		t.Fatalf("wheel down offset = %d, want %d", got, before)
+		t.Fatalf("page down offset during approval = %d, want %d", got, before)
+	}
+	if m.approval == nil {
+		t.Fatal("page down dismissed approval")
 	}
 }
 
