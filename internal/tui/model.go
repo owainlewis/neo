@@ -515,7 +515,7 @@ func (m *model) View() tea.View {
 		bottom = m.approvalBarView()
 	}
 
-	parts := []string{m.viewport.View()}
+	parts := []string{m.viewport.View(), ""}
 	if workflow := m.workflowPanelView(); workflow != "" {
 		parts = append(parts, workflow, "")
 	}
@@ -921,6 +921,12 @@ func (m *model) footerLine() string {
 // scrolls internally.
 const inputMaxRows = 8
 
+// transcriptProgressGapHeight reserves breathing room between scrollable
+// output and the fixed workflow/status area below it.
+const transcriptProgressGapHeight = 1
+
+const minimumTranscriptHeight = 1
+
 // syncInputHeight re-runs layout when the textarea's (self-managed, soft-wrap
 // aware) height has changed since the last frame, so the viewport resizes to
 // make room. The textarea recalculates its own height on every edit because
@@ -935,18 +941,11 @@ func (m *model) syncInputHeight() {
 func (m *model) layout() {
 	followOutput := m.viewport.AtBottom()
 	previousOffset := m.viewport.YOffset()
-	inputHeight := m.input.Height() + 2 // textarea body + top/bottom padding
-	pickerHeight := 0
-	if m.picker.visible && len(m.picker.matches) > 0 {
-		pickerHeight = len(m.picker.matches) + 1
-	} else if m.files.visible && len(m.files.matches) > 0 {
-		pickerHeight = len(m.files.matches) + 1
-	}
 	workflowHeight := m.workflowPanelHeight()
-	chrome := inputHeight + pickerHeight + workflowHeight + 3 + m.statusLineHeight()
+	chrome := m.fixedChromeHeight() + workflowHeight
 	vpH := m.height - chrome
-	if vpH < 3 {
-		vpH = 3
+	if vpH < minimumTranscriptHeight {
+		vpH = minimumTranscriptHeight
 	}
 	m.viewport.SetWidth(m.width)
 	m.viewport.SetHeight(vpH)
@@ -974,6 +973,23 @@ func (m *model) statusLineHeight() int {
 	return 1
 }
 
+func (m *model) fixedChromeHeight() int {
+	return m.baseChromeHeight() + m.pickerPanelHeight()
+}
+
+func (m *model) baseChromeHeight() int {
+	inputHeight := m.input.Height() + 2 // textarea body + top/bottom padding
+	return inputHeight + transcriptProgressGapHeight + 3 + m.statusLineHeight()
+}
+
+func (m *model) pickerPanelHeight() int {
+	return lipgloss.Height(m.inlinePickerView())
+}
+
+func (m *model) maxInlinePickerRows() int {
+	return max(m.height-m.baseChromeHeight()-minimumTranscriptHeight, 0)
+}
+
 func (m *model) appendBlock(b block) {
 	m.blocks = append(m.blocks, b)
 	m.refreshViewport()
@@ -997,7 +1013,28 @@ func (m *model) workflowPanelView() string {
 	if m.workflow == nil || !m.workflowVisible {
 		return ""
 	}
-	return m.workflow.render(m.width, nil)
+	panel := m.workflow.render(m.width, nil)
+	lines := strings.Split(panel, "\n")
+	maxLines := m.maxWorkflowPanelLines()
+	if maxLines <= 0 {
+		return ""
+	}
+	if len(lines) <= maxLines {
+		return panel
+	}
+	if maxLines == 1 {
+		return truncate(lines[0]+styMuted.Render("  … more"), max(m.width, 1))
+	}
+	visible := append([]string(nil), lines[:maxLines]...)
+	hidden := len(lines) - (maxLines - 1)
+	visible[maxLines-1] = styMuted.Render(fmt.Sprintf("… %d more", hidden))
+	return strings.Join(visible, "\n")
+}
+
+func (m *model) maxWorkflowPanelLines() int {
+	// Expanded plans yield rows to the transcript and retain their trailing
+	// margin before the fixed status line.
+	return max(m.height-m.fixedChromeHeight()-minimumTranscriptHeight-1, 0)
 }
 
 func (m *model) workflowPanelHeight() int {

@@ -36,6 +36,10 @@ func firstLine(s string) string {
 // fields exercised by tests are populated.
 func makeTestModel() *model {
 	ta := textarea.New()
+	ta.DynamicHeight = true
+	ta.MinHeight = 1
+	ta.MaxHeight = inputMaxRows
+	ta.SetHeight(1)
 	ta.Focus()
 	ta.SetWidth(78)
 	sp := spinner.New(spinner.WithSpinner(statusSpinner))

@@ -4,9 +4,11 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/workflow"
 )
@@ -112,6 +114,109 @@ func TestNewTranscriptActivityFollowsWhenViewportIsAtBottom(t *testing.T) {
 
 	if got := m.viewport.YOffset(); got <= before || !m.viewport.AtBottom() {
 		t.Fatalf("offset after new activity = %d, want new bottom below %d", got, before)
+	}
+}
+
+func TestViewSeparatesTranscriptFromProgress(t *testing.T) {
+	t.Parallel()
+
+	m := makeTestModel()
+	m.height = 18
+	m.busy = true
+	m.busySince = time.Now()
+	for i := 0; i < 24; i++ {
+		m.blocks = append(m.blocks, toolCallBlock{name: "bash", args: map[string]any{"command": "cmd" + string(rune('a'+i))}})
+	}
+	m.layout()
+	m.refreshViewport()
+
+	assertGap := func(label, progressText string) {
+		t.Helper()
+		lines := strings.Split(plain(m.View().Content), "\n")
+		outputLine := -1
+		progressLine := -1
+		for i, line := range lines {
+			if strings.Contains(line, "Ran cmdx") {
+				outputLine = i
+			}
+			if strings.Contains(line, progressText) {
+				progressLine = i
+			}
+		}
+		if outputLine < 0 || progressLine < 0 {
+			t.Fatalf("%s: missing output or progress row:\n%s", label, strings.Join(lines, "\n"))
+		}
+		if progressLine-outputLine < 3 {
+			t.Fatalf("%s: output row %d and progress row %d need a full breathing row:\n%s", label, outputLine, progressLine, strings.Join(lines, "\n"))
+		}
+	}
+
+	assertGap("collapsed plan", "Thinking")
+	m.workflow = &workflowBlock{title: "Plan", items: []workflow.Item{
+		{ID: "1", Text: "Inspect", Status: workflow.Running},
+		{ID: "2", Text: "Implement", Status: workflow.Pending},
+	}}
+	m.workflowVisible = true
+	m.layout()
+	m.refreshViewport()
+	assertGap("expanded plan", "Plan  0/2")
+}
+
+func TestViewFitsShortTerminal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		height        int
+		workflowItems int
+		pickerItems   int
+		wantClipped   bool
+	}{
+		{name: "collapsed", height: 9},
+		{name: "expanded", height: 20, workflowItems: 8},
+		{name: "long expanded", height: 12, workflowItems: 20, wantClipped: true},
+		{name: "long picker", height: 12, pickerItems: 20, wantClipped: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := makeTestModel()
+			m.height = tc.height
+			m.busy = true
+			m.busySince = time.Now()
+			m.blocks = []block{toolCallBlock{name: "bash", args: map[string]any{"command": "test"}}}
+			if tc.workflowItems > 0 {
+				items := make([]workflow.Item, tc.workflowItems)
+				for i := range items {
+					items[i] = workflow.Item{ID: string(rune('a' + i)), Text: "Step", Status: workflow.Pending}
+				}
+				m.workflow = &workflowBlock{title: "Plan", items: items}
+				m.workflowVisible = true
+			}
+			if tc.pickerItems > 0 {
+				m.picker.matches = make([]slashCommand, tc.pickerItems)
+				for i := range m.picker.matches {
+					m.picker.matches[i] = slashCommand{cmd: "/cmd" + string(rune('a'+i)), desc: "Command"}
+				}
+				m.picker.visible = true
+				m.picker.selected = tc.pickerItems - 1
+			}
+			m.layout()
+			m.refreshViewport()
+
+			view := m.View().Content
+			if got := lipgloss.Height(view); got > m.height {
+				t.Fatalf("rendered height = %d, want <= terminal height %d:\n%s", got, m.height, plain(view))
+			}
+			if tc.workflowItems > 0 && tc.wantClipped && !strings.Contains(plain(view), "more") {
+				t.Fatalf("clipped workflow has no visible more marker:\n%s", plain(view))
+			}
+			if tc.pickerItems > 0 {
+				out := plain(view)
+				if !strings.Contains(out, "cmdt") || !strings.Contains(out, "(20/20)") {
+					t.Fatalf("picker window lost selected item or total count:\n%s", out)
+				}
+			}
+		})
 	}
 }
 
