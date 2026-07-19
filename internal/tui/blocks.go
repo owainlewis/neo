@@ -66,14 +66,15 @@ type workflowBlock struct {
 
 func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	var sb strings.Builder
-	title := strings.TrimSpace(b.title)
+	title := oneLine(strings.TrimSpace(b.title))
 	if title == "" {
 		title = "Workflow"
 	}
 	done, failed, skipped := workflowCounts(b.items)
 	total := len(b.items)
 	meta := fmt.Sprintf("%d/%d", done+failed+skipped, total)
-	sb.WriteString(styLabel.Render(title) + styMuted.Render("  "+meta) + "\n")
+	header := styLabel.Render(title) + styMuted.Render("  "+meta)
+	sb.WriteString(truncate(header, max(width, 1)) + "\n")
 	for _, item := range b.items {
 		glyph := styMuted.Render("○")
 		textStyle := lipgloss.NewStyle()
@@ -88,18 +89,11 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 		case workflow.Skipped:
 			glyph = styMuted.Render("-")
 		}
-		line := fmt.Sprintf("%s %s", glyph, textStyle.Render(item.Text))
+		line := fmt.Sprintf("%s %s", glyph, textStyle.Render(oneLine(item.Text)))
 		if strings.TrimSpace(item.Detail) != "" {
 			line += styDim.Render("  " + truncate(oneLine(item.Detail), max(width-8, 20)))
 		}
-		sb.WriteString(line + "\n")
-	}
-	if total > 0 && done+failed+skipped == total {
-		label := "Plan complete"
-		if failed > 0 {
-			label = "Plan finished with issues"
-		}
-		sb.WriteString(styMuted.Render(label + fmt.Sprintf(" · %d/%d steps", done+failed+skipped, total)))
+		sb.WriteString(truncate(line, max(width, 1)) + "\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

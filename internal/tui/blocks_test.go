@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
@@ -363,11 +364,40 @@ func TestWorkflowBlockRenderShowsProgressAndCompletion(t *testing.T) {
 		},
 	}).render(80, nil))
 
-	for _, want := range []string{"Plan  2/2", "✓ Inspect", "updated status line", "Plan complete · 2/2 steps"} {
+	for _, want := range []string{"Plan  2/2", "✓ Inspect", "updated status line"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("workflow render missing %q:\n%s", want, out)
 		}
 	}
+}
+
+func TestWorkflowBlockHeightIsStableAndRowsDoNotWrap(t *testing.T) {
+	const width = 32
+	block := &workflowBlock{
+		title: "A deliberately long\nworkflow title",
+		items: []workflow.Item{
+			{ID: "1", Text: "Inspect a deliberately\nlong subsystem name", Status: workflow.Pending},
+			{ID: "2", Text: "Implement", Status: workflow.Running, Detail: "Editing a/very/long/path/to/model.go"},
+		},
+	}
+
+	assertStable := func(state string) {
+		t.Helper()
+		lines := strings.Split(block.render(width, nil), "\n")
+		if len(lines) != 1+len(block.items) {
+			t.Fatalf("%s workflow lines = %d, want %d:\n%s", state, len(lines), 1+len(block.items), plain(strings.Join(lines, "\n")))
+		}
+		for i, line := range lines {
+			if got := lipgloss.Width(line); got > width {
+				t.Fatalf("%s workflow line %d width = %d, want <= %d: %q", state, i, got, width, plain(line))
+			}
+		}
+	}
+
+	assertStable("running")
+	block.items[0].Status = workflow.Done
+	block.items[1].Status = workflow.Done
+	assertStable("complete")
 }
 
 func TestStatusLineShowsOneLineOfRealActivity(t *testing.T) {

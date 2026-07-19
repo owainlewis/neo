@@ -450,7 +450,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if summary, ok := m.resultSummary(msg.err, elapsed); ok {
 			m.appendBlock(summary)
 		}
-		m.hideTerminalWorkflow()
 		cmds = append(cmds, refreshBranch())
 		if msg.err != nil {
 			var recovered []string
@@ -971,6 +970,8 @@ func (m *model) syncInputHeight() {
 }
 
 func (m *model) layout() {
+	followOutput := m.viewport.AtBottom()
+	previousOffset := m.viewport.YOffset()
 	inputHeight := m.input.Height() + 2 // textarea body + top/bottom padding
 	pickerHeight := 0
 	if m.picker.visible && len(m.picker.matches) > 0 {
@@ -986,6 +987,13 @@ func (m *model) layout() {
 	}
 	m.viewport.SetWidth(m.width)
 	m.viewport.SetHeight(vpH)
+	// A shorter viewport otherwise looks manually scrolled even when it was
+	// following the bottom before surrounding UI grew.
+	if followOutput {
+		m.viewport.GotoBottom()
+	} else {
+		m.viewport.SetYOffset(previousOffset)
+	}
 	m.input.SetWidth(m.width - 2)
 	if m.md != nil {
 		// Re-create renderer at the new width so code blocks wrap nicely.
@@ -1050,14 +1058,6 @@ func (m *model) workflowTerminal() bool {
 		}
 	}
 	return true
-}
-
-func (m *model) hideTerminalWorkflow() {
-	if !m.workflowTerminal() {
-		return
-	}
-	m.workflowVisible = false
-	m.layout()
 }
 
 func (m *model) clearTerminalWorkflow() {

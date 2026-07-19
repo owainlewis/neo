@@ -98,8 +98,9 @@ func TestWorkflowPanel_TabDoesNotStealPickerAcceptance(t *testing.T) {
 	}
 }
 
-func TestWorkflowPanel_HidesWhenCompletedTurnFinishes(t *testing.T) {
+func TestWorkflowPanel_UserExpansionSurvivesTurnCompletion(t *testing.T) {
 	m := makeTestModel()
+	m.height = 24
 	m.busy = true
 	m.busySince = time.Now()
 	m.turn = turnStats{workflow: true}
@@ -108,14 +109,19 @@ func TestWorkflowPanel_HidesWhenCompletedTurnFinishes(t *testing.T) {
 		{ID: "2", Text: "test", Status: workflow.Done},
 	}}
 	m.workflowVisible = true
+	m.layout()
+	before := m.viewport.Height()
 
 	m.Update(sendResultMsg{})
 
 	if m.workflow == nil {
 		t.Fatal("completed workflow should remain available for inspection")
 	}
-	if m.workflowVisible {
-		t.Fatal("completed workflow should hide after the turn finishes")
+	if !m.workflowVisible {
+		t.Fatal("completed workflow should remain expanded until the user closes it")
+	}
+	if got := m.viewport.Height(); got != before {
+		t.Fatalf("turn completion changed viewport height from %d to %d", before, got)
 	}
 }
 
