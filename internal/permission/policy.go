@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/owainlewis/neo/internal/workspace"
@@ -62,7 +63,7 @@ func (p WorkspacePolicy) Decide(_ context.Context, req Request) Result {
 	if reason := p.pathDenial(req); reason != "" {
 		return Result{Decision: Deny, Reason: reason}
 	}
-	if reason := explicitApprovalReason(req); reason != "" {
+	if reason := p.explicitApprovalReason(req); reason != "" {
 		switch p.Mode {
 		case ModeReadonly:
 			// Readonly denies mutating tools outright below.
@@ -125,6 +126,10 @@ func isReadTool(tool string) bool {
 }
 
 func explicitApprovalReason(req Request) string {
+	return (WorkspacePolicy{Root: "."}).explicitApprovalReason(req)
+}
+
+func (p WorkspacePolicy) explicitApprovalReason(req Request) string {
 	if req.ToolName != "bash" {
 		return ""
 	}
@@ -135,7 +140,58 @@ func explicitApprovalReason(req Request) string {
 	if reason := dangerousBashReason(cmd); reason != "" {
 		return reason
 	}
+	if reason := p.bashPathApprovalReason(cmd); reason != "" {
+		return reason
+	}
 	return ""
+}
+
+func (p WorkspacePolicy) bashPathApprovalReason(cmd string) string {
+	for _, field := range bashPathCandidates(cmd) {
+		if strings.HasPrefix(field, "~") {
+			return "bash path outside workspace requires approval"
+		}
+		if filepath.IsAbs(field) || field == ".." || strings.HasPrefix(field, "../") || strings.Contains(field, "/../") {
+			if !p.contains(field) {
+				return "bash path outside workspace requires approval"
+			}
+		}
+	}
+	return ""
+}
+
+var bashPathCandidatePattern = regexp.MustCompile("(?:^|[\\s<>=])['\"]?((?:~|/|\\.\\./)[^\\s;|&'\"`]+)")
+
+func bashPathCandidates(cmd string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(s string) {
+		s = strings.Trim(s, "'\" ")
+		s = strings.TrimLeft(s, "<>")
+		for i := 0; i < len(s); i++ {
+			if s[i] == '=' {
+				s = s[i+1:]
+			}
+		}
+		if s == "" || seen[s] {
+			return
+		}
+		if strings.HasPrefix(s, "~") || filepath.IsAbs(s) || s == ".." || strings.HasPrefix(s, "../") || strings.Contains(s, "/../") {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, segment := range shellSegments(cmd) {
+		for _, field := range shellFields(segment) {
+			add(field)
+		}
+	}
+	for _, m := range bashPathCandidatePattern.FindAllStringSubmatch(cmd, -1) {
+		if len(m) > 1 {
+			add(m[1])
+		}
+	}
+	return out
 }
 
 func dangerousBashReason(cmd string) string {

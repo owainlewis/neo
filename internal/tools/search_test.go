@@ -174,3 +174,15 @@ func writeSearchFile(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestGrepFileDiscoveryHonorsCancelledContext(t *testing.T) {
+	root := t.TempDir()
+	writeSearchFile(t, filepath.Join(root, "a.txt"), "needle")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := (Grep{Root: root}).Run(ctx, map[string]any{"pattern": "needle"})
+	if err != context.Canceled {
+		t.Fatalf("error = %v, want context canceled", err)
+	}
+}

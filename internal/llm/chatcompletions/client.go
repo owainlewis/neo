@@ -275,7 +275,9 @@ func ToLLMResponse(out Response) (*llm.Response, error) {
 	for _, tc := range choice.Message.ToolCalls {
 		input := map[string]any{}
 		if tc.Function.Arguments != "" {
-			_ = json.Unmarshal([]byte(tc.Function.Arguments), &input)
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
+				return nil, fmt.Errorf("chat completions: decode tool arguments for %s: %w", tc.Function.Name, err)
+			}
 		}
 		content = append(content, llm.ContentBlock{Type: "tool_use", ID: tc.ID, Name: tc.Function.Name, Input: input})
 	}

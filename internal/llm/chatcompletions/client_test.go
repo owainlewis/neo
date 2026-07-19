@@ -139,3 +139,18 @@ func TestClientComplete_PostsChatCompletionRequest(t *testing.T) {
 		t.Fatalf("response = %#v", resp)
 	}
 }
+
+func TestToLLMResponseRejectsMalformedToolArguments(t *testing.T) {
+	_, err := ToLLMResponse(Response{Choices: []Choice{{
+		FinishReason: "tool_calls",
+		Message: Message{ToolCalls: []ToolCall{{
+			ID: "call_1", Type: "function", Function: FunctionCall{Name: "bash", Arguments: `{"command":`},
+		}}},
+	}}})
+	if err == nil {
+		t.Fatal("expected malformed tool arguments to fail")
+	}
+	if !strings.Contains(err.Error(), "decode tool arguments") || !strings.Contains(err.Error(), "bash") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
