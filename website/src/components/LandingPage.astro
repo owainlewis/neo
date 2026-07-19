@@ -49,10 +49,10 @@ const agentWorkflow = {
 <div class="neo-home not-content">
   <section class="neo-hero" aria-labelledby="neo-title">
     <div class="neo-hero-copy">
-      <h1 id="neo-title">A coding agent you can trust.</h1>
+      <h1 id="neo-title">Run coding tasks as visible, repeatable workflows.</h1>
       <p class="neo-hero-lede">
-        Neo runs long engineering tasks in the open: the plan, the permissions, and the proof stay
-        in front of you. Built for engineers who answer for what ships.
+        Give Neo a task or a checklist. It shows each step, applies your permission settings, and
+        shows shell commands and test output as it works.
       </p>
       <div class="neo-actions">
         <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
@@ -75,9 +75,9 @@ const agentWorkflow = {
     <div class="neo-product-heading">
       <div>
         <p class="neo-label">A task in Neo</p>
-        <h2 id="workflow-title">The work stays legible.</h2>
+        <h2 id="workflow-title">See what the agent is doing.</h2>
       </div>
-      <p>A live checklist makes a long-running task easy to follow, question, and review.</p>
+      <p>Neo turns the plan into a live checklist, so you can follow progress and catch a bad step early.</p>
     </div>
 
     <DemoWorkflow {...productWorkflow} />
@@ -85,39 +85,38 @@ const agentWorkflow = {
 
   <section class="neo-intro" aria-labelledby="difference-title">
     <p class="neo-label">Why Neo</p>
-    <h2 id="difference-title">Serious engineering is a sequence of decisions, not a magic prompt.</h2>
+    <h2 id="difference-title">Repeat complex tasks without writing a new prompt every time.</h2>
     <p>
-      Most agents bury those decisions in a scroll of text. Neo keeps them in the open. The plan
-      stays on screen, changes follow the permission mode you set, and results come back with the
-      test run that proves them.
+      Put your process in a numbered prompt, a skill, or an AGENTS.md file. Neo follows it step by
+      step, uses the access level you set, and shows the commands and test results as it works.
     </p>
   </section>
 
   <section class="neo-principles" aria-label="Neo principles">
     <article>
       <span>01</span>
-      <h3>Visible by default</h3>
-      <p>Every step, tool call, and subagent shows up as it happens. Nothing runs off screen.</p>
+      <h3>Follow every step</h3>
+      <p>See the current step, completed work, tool calls, and delegated tasks in the terminal.</p>
     </article>
     <article>
       <span>02</span>
-      <h3>Control stays yours</h3>
-      <p>Choose ask, trusted, or read-only mode. Ask mode previews file changes before they happen.</p>
+      <h3>Set the access level</h3>
+      <p>Use readonly for inspection, ask to approve changes, or trusted for routine work.</p>
     </article>
     <article>
       <span>03</span>
-      <h3>Bring your model</h3>
-      <p>Neo works the same with Anthropic, OpenAI, Gemini, or OpenRouter. Switch with a config change.</p>
+      <h3>Choose your model</h3>
+      <p>Use Anthropic, OpenAI, Gemini, or OpenRouter. Switch providers without changing your workflow.</p>
     </article>
   </section>
 
   <section class="neo-orchestration" aria-labelledby="orchestration-title">
     <div class="neo-orchestration-copy">
       <p class="neo-label">Orchestration</p>
-      <h2 id="orchestration-title">One plan. Focused agents.</h2>
+      <h2 id="orchestration-title">Split a large task across focused agents.</h2>
       <p>
-        Neo hands well-scoped pieces of a task to fresh subagents, follows their progress, and
-        folds their findings back into the main plan. One coordinator owns the result.
+        A coordinator can give independent work to fresh subagents, collect their results, and keep
+        the main checklist up to date. You can see which agent owns each part.
       </p>
       <a class="neo-text-link" href="/docs/reference/guides/agent-loop/">How the agent loop works <span aria-hidden="true">→</span></a>
     </div>
@@ -127,20 +126,20 @@ const agentWorkflow = {
   <section class="neo-foundation" aria-labelledby="foundation-title">
     <div>
       <p class="neo-label">The foundation</p>
-      <h2 id="foundation-title">Small core.<br />Nothing hidden.</h2>
+      <h2 id="foundation-title">A local tool you can inspect and control.</h2>
     </div>
     <dl>
-      <div><dt>One binary</dt><dd>No runtime to assemble. Install it and work.</dd></div>
-      <div><dt>Local sessions</dt><dd>Sessions live on your disk. Context goes only to the model provider you choose.</dd></div>
-      <div><dt>Open source</dt><dd>Inspect the harness you trust with your code.</dd></div>
-      <div><dt>No telemetry</dt><dd>Neo does not phone home with product analytics.</dd></div>
+      <div><dt>One binary</dt><dd>Install Neo without setting up a separate runtime or plugin system.</dd></div>
+      <div><dt>Local sessions</dt><dd>Resume or search past work from session files stored on your disk.</dd></div>
+      <div><dt>Open source</dt><dd>Read the code that runs commands and edits files in your repository.</dd></div>
+      <div><dt>No telemetry</dt><dd>Neo does not send product analytics from your machine.</dd></div>
     </dl>
   </section>
 
   <section class="neo-final" aria-labelledby="final-title">
     <p class="neo-label">Neo Harness</p>
-    <h2 id="final-title">Put the work in the open.</h2>
-    <p>Start with one binary and the model provider you already use.</p>
+    <h2 id="final-title">Run your next coding task with Neo.</h2>
+    <p>Install the binary, choose a model provider, and start Neo in your repository.</p>
     <div class="neo-actions">
       <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
       <a class="neo-text-link" href="/docs/quick-start/">Read the quick start <span aria-hidden="true">→</span></a>
