@@ -296,7 +296,6 @@ Slash commands keep common actions out of the chat transcript:
 | `/tokens` | Show token usage for the session |
 | `/model` | Pick a provider and model for this session |
 | `/sessions` | Browse saved sessions |
-| `/memory <text>` | Append a project memory entry |
 | `/clear` | Clear the current transcript |
 
 While Neo is working, submit with Enter to steer the active turn after its
@@ -315,7 +314,6 @@ Small examples:
 /model              # open the model picker
 /permissions        # switch between ask, trusted, readonly
 /sessions           # resume a saved session for this workspace
-/memory prefer table-driven tests   # append a project memory entry
 /review staged diff # apply the review skill with arguments
 !git status         # run a shell command through Neo's bash tool
 read @README        # type @ to search workspace files, then tab/enter to insert
@@ -478,7 +476,6 @@ compaction:
 # to false to disable it. The core agent loop is never affected by these.
 features:
   agents_file: true   # load AGENTS.md into the system prompt
-  memory: true        # load and update project-root memory.md
   skills: true        # discover .neo/skills, advertise them, expand $name and /name
   prompt_caching: true # cache the static system prompt prefix
 

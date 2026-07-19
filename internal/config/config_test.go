@@ -416,25 +416,16 @@ func TestOutput_VerboseExplicitFalseStaysOff(t *testing.T) {
 	})
 }
 
-func TestFeatures_MemoryDefaultsOnExplicitFalseDisables(t *testing.T) {
+func TestFeatures_LegacyMemoryKeyIsIgnored(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
-		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\nfeatures:\n  memory: true\n")
 		cfg, err := Load()
 		if err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		if !cfg.MemoryEnabled() {
-			t.Fatal("expected memory to default on when omitted")
-		}
-
-		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\nfeatures:\n  memory: false\n")
-		cfg, err = Load()
-		if err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		if cfg.MemoryEnabled() {
-			t.Fatal("expected memory disabled when set to false")
+		if cfg.Model != "m" {
+			t.Fatalf("model = %q, want m", cfg.Model)
 		}
 	})
 }

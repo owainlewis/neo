@@ -27,8 +27,6 @@ var baseSlashCommands = []slashCommand{
 	{"/tools", "list available tools"},
 }
 
-var memorySlashCommand = slashCommand{"/memory", "append a project memory entry"}
-
 var keyBindings = []struct {
 	key  string
 	desc string
@@ -66,15 +64,9 @@ func (h helpBlock) render(width int, _ *glamour.TermRenderer) string {
 
 func (m *model) slashCommands() []slashCommand {
 	commands := append([]slashCommand(nil), baseSlashCommands...)
-	if m.memoryEnabled {
-		commands = append(commands, memorySlashCommand)
-	}
 	used := map[string]bool{}
 	for _, c := range commands {
 		used[c.cmd] = true
-	}
-	if memorySlashCommand.cmd != "" {
-		used[memorySlashCommand.cmd] = true
 	}
 	for _, s := range m.skills {
 		cmd := "/" + s.Name
@@ -107,7 +99,7 @@ func builtinSlashCommand(cmd string) bool {
 			return true
 		}
 	}
-	return memorySlashCommand.cmd == cmd
+	return false
 }
 
 func skillDescription(s skills.Skill) string {

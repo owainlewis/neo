@@ -13,7 +13,7 @@ func TestArchitecturePageDocumentsProviderAndAuthModules(t *testing.T) {
 		"`internal/llm/openai/` | OpenAI provider adapters",
 		"`internal/llm/google/` | Google Gemini adapter.",
 		"`internal/auth/` | OpenAI ChatGPT/Codex device-code login",
-		"`internal/projectctx/` | AGENTS.md, memory.md, and git-context discovery plus prompt augmentation.",
+		"`internal/projectctx/` | AGENTS.md and git-context discovery plus prompt augmentation.",
 		"`openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials",
 	} {
 		if !strings.Contains(page, want) {
@@ -50,8 +50,6 @@ func TestConfigPageDocumentsOpenAIAuthModesWithoutSecrets(t *testing.T) {
 		"`provider: google`",
 		"`GOOGLE_API_KEY`",
 		"ChatGPT/Codex device-code credentials from `~/.neo/auth.json`",
-		"`memory`",
-		"project-root `memory.md`",
 		"token values are never generated into developer docs",
 	} {
 		if !strings.Contains(page, want) {
@@ -60,13 +58,12 @@ func TestConfigPageDocumentsOpenAIAuthModesWithoutSecrets(t *testing.T) {
 	}
 }
 
-func TestPromptCachingPageDocumentsMemoryAsDynamicTail(t *testing.T) {
+func TestPromptCachingPageDocumentsDynamicTail(t *testing.T) {
 	page := promptCachingPage()
 
 	for _, want := range []string{
 		"Static base instructions plus skill catalog",
 		"Dynamic AGENTS.md project context",
-		"Dynamic `memory.md` project context",
 		"Dynamic git context",
 	} {
 		if !strings.Contains(page, want) {
@@ -108,7 +105,6 @@ func TestTeachingGuidesCoverCoreFeatures(t *testing.T) {
 		"[Providers](providers.md)",
 		"[Sessions](sessions.md)",
 		"[Compaction](compaction.md)",
-		"[Memory](memory.md)",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("guides index missing %q", want)
@@ -127,21 +123,6 @@ func TestPermissionsGuideExplainsModes(t *testing.T) {
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("permissions guide missing %q", want)
-		}
-	}
-}
-
-func TestMemoryGuideSeparatesAgentsAndMemory(t *testing.T) {
-	page := memoryGuidePage()
-
-	for _, want := range []string{
-		"AGENTS.md is instruction",
-		"memory.md is learned context",
-		"`/memory <text>`",
-		"does not expose an autonomous memory-writing tool",
-	} {
-		if !strings.Contains(page, want) {
-			t.Fatalf("memory guide missing %q", want)
 		}
 	}
 }

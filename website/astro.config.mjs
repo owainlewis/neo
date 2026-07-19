@@ -45,7 +45,6 @@ export default defineConfig({
             { label: 'Providers', slug: 'docs/reference/guides/providers' },
             { label: 'Sessions', slug: 'docs/reference/guides/sessions' },
             { label: 'Compaction', slug: 'docs/reference/guides/compaction' },
-            { label: 'Memory', slug: 'docs/reference/guides/memory' },
           ],
         },
       ],

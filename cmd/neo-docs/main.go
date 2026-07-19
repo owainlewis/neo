@@ -73,7 +73,6 @@ func buildPages() ([]page, error) {
 		{Path: filepath.Join("docs", "developer", "guides", "providers.md"), Content: providersGuidePage()},
 		{Path: filepath.Join("docs", "developer", "guides", "sessions.md"), Content: sessionsGuidePage()},
 		{Path: filepath.Join("docs", "developer", "guides", "compaction.md"), Content: compactionGuidePage()},
-		{Path: filepath.Join("docs", "developer", "guides", "memory.md"), Content: memoryGuidePage()},
 	}, nil
 }
 
@@ -175,7 +174,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | ` + "`internal/llm/openrouter/`" + ` | OpenRouter provider setup and defaults. |
 | ` + "`internal/llm/google/`" + ` | Google Gemini adapter. |
 | ` + "`internal/permission/`" + ` | Tool-call permission policy and workspace path boundary checks. |
-| ` + "`internal/projectctx/`" + ` | AGENTS.md, memory.md, and git-context discovery plus prompt augmentation. |
+| ` + "`internal/projectctx/`" + ` | AGENTS.md and git-context discovery plus prompt augmentation. |
 | ` + "`internal/session/`" + ` | File-backed session metadata and transcripts. |
 | ` + "`internal/skills/`" + ` | Skill discovery, catalog rendering, and $name or /name expansion. |
 | ` + "`internal/tools/`" + ` | Built-in tools exposed to the model. |
@@ -187,7 +186,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 1. ` + "`cmd/neo`" + ` loads config.
 2. Provider construction selects Anthropic, OpenAI, OpenRouter, or Google Gemini. OpenAI defaults to API-key auth; ` + "`openai_auth: subscription`" + ` builds the Codex subscription provider from stored device-code credentials.
 3. The CLI creates or loads a session from ` + "`internal/session`" + `.
-4. Skills, AGENTS.md, project memory, and lightweight git context are discovered when enabled.
+4. Skills, AGENTS.md, and lightweight git context are discovered when enabled.
 5. ` + "`chatSystem`" + ` builds both flattened and segmented system prompts.
 6. ` + "`agent.New`" + ` receives provider, tools, permission policy, system prompt, and optional restored messages.
 7. ` + "`tui.Run`" + ` owns user interaction and saves the transcript after each send.
@@ -279,7 +278,6 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | Flag | Default | Effect |
 | --- | --- | --- |
 | ` + "`agents_file`" + ` | ` + "`true`" + ` | Load AGENTS.md into the chat system prompt. |
-| ` + "`memory`" + ` | ` + "`true`" + ` | Load and update project-root ` + "`memory.md`" + `. |
 | ` + "`skills`" + ` | ` + "`true`" + ` | Discover skills and expand $name references or /name slash invocations. |
 | ` + "`prompt_caching`" + ` | ` + "`true`" + ` | Mark the stable system prompt prefix as cacheable when the provider supports it. |
 
@@ -401,8 +399,7 @@ The flattened ` + "`Request.System`" + ` string remains available for providers 
 
 1. Static base instructions plus skill catalog. This block is marked cacheable when ` + "`features.prompt_caching`" + ` is enabled.
 2. Dynamic AGENTS.md project context. This block is not marked cacheable.
-3. Dynamic ` + "`memory.md`" + ` project context. This block is not marked cacheable.
-4. Dynamic git context (` + "`branch`" + `, ` + "`git status --short`" + `, ` + "`git log --oneline -5`" + `). This block is not marked cacheable.
+3. Dynamic git context (` + "`branch`" + `, ` + "`git status --short`" + `, ` + "`git log --oneline -5`" + `). This block is not marked cacheable.
 
 The goal is to cache stable instructions without letting changing project context evict that prefix.
 `
@@ -424,7 +421,6 @@ These guides explain Neo's core features in plain language. The reference docs s
 | [Providers](providers.md) | How Anthropic, OpenAI, OpenRouter, and Google Gemini plug in. |
 | [Sessions](sessions.md) | How Neo saves and resumes conversations. |
 | [Compaction](compaction.md) | Why long chats need context management and what Neo has today. |
-| [Memory](memory.md) | What memory means for a coding agent and what should stay out of scope. |
 
 ## How To Read These
 
@@ -515,7 +511,7 @@ If the user message is the task, the system prompt is the job description.
 
 ## The Problem
 
-A coding agent needs stable instructions, but it also needs local context. Some context is almost always the same, such as "prefer small verified changes." Other context changes by project, such as AGENTS.md files, project memory, or available skills.
+A coding agent needs stable instructions, but it also needs local context. Some context is almost always the same, such as "prefer small verified changes." Other context changes by project, such as AGENTS.md files or available skills.
 
 If all of that is mashed into one giant string, it is harder to understand, harder to cache, and harder to customize.
 
@@ -525,8 +521,7 @@ Neo builds the prompt in ordered blocks:
 
 1. A stable base prompt plus the skill catalog.
 2. Dynamic project instructions from AGENTS.md files.
-3. Dynamic project memory from ` + "`memory.md`" + ` when enabled.
-4. Dynamic git context captured at session start.
+3. Dynamic git context captured at session start.
 
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use ` + "`llm.SystemBlock`" + ` values instead.
 
@@ -537,7 +532,6 @@ The flattened prompt is still available for providers that only accept a string.
 | Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. |
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked with ` + "`$name`" + ` or ` + "`/name args`" + `. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
-| ` + "`memory.md`" + ` | Durable project facts or preferences the user saved for future sessions. |
 | Git context | Branch, working tree status, and recent commits captured when the session starts in a repo. |
 
 ## How To Customize It
@@ -561,7 +555,7 @@ Always-loaded prompt text costs tokens every turn. Keep stable instructions shor
 ## Where To Look
 
 - ` + "`cmd/neo/main.go`" + `: chat startup and prompt assembly.
-- ` + "`internal/projectctx`" + `: AGENTS.md, memory.md, and git-context discovery and rendering.
+- ` + "`internal/projectctx`" + `: AGENTS.md and git-context discovery and rendering.
 - ` + "`internal/skills`" + `: skill catalog and expansion.
 - ` + "`internal/llm/provider.go`" + `: ` + "`SystemBlock`" + `.
 `
@@ -814,10 +808,6 @@ The TUI browser supports search, arrow-key navigation, cwd/all filtering, and en
 
 Tools and permissions are bound to the workspace when the TUI starts. For that reason, the in-TUI browser only resumes sessions from the current cwd. Cross-project sessions should be resumed from the shell with ` + "`neo resume <id>`" + ` so Neo can restore the saved cwd before creating tools.
 
-## Future Memory Connection
-
-Session search is a natural form of episodic memory: "what happened before?" Neo already saves transcripts, so a future memory search can query these sessions.
-
 ## Where To Look
 
 - ` + "`internal/session/session.go`" + `: file-backed session store.
@@ -894,89 +884,6 @@ It can drop:
 
 - ` + "`internal/compact/compact.go`" + `: compactor interface and safe split helper.
 - ` + "`internal/agent/agent.go`" + `: compactor call before provider calls.
-`
-}
-
-func memoryGuidePage() string {
-	return generatedHeader + `# Memory
-
-## The Simple Idea
-
-Memory is what an agent carries across sessions.
-
-For Neo, memory should stay narrow: useful project context for a coding agent, not broad personal-assistant memory.
-
-## The Problem
-
-Coding agents repeatedly rediscover the same project facts:
-
-- generated docs must be updated through a generator,
-- tests run with a specific command,
-- a provider path is experimental,
-- a design decision was made last week.
-
-If those lessons are not saved somewhere, the agent starts cold each time.
-
-## Three Kinds Of Memory
-
-| Type | Meaning | Coding-agent example |
-| --- | --- | --- |
-| Episodic | What happened. | "Last session we decided not to add broad assistant memory." |
-| Semantic | What is true. | "This repo is a Go CLI/TUI project." |
-| Procedural | How to do things. | "Run ` + "`go test ./...`" + ` after Go changes." |
-
-A simple shorthand: episodic is the diary, semantic is the facts, procedural is the playbook.
-
-## What Neo Has Today
-
-Neo now has a narrow, manual memory feature:
-
-- project-local ` + "`memory.md`" + ` at the repo root,
-- a user-entered ` + "`/memory <text>`" + ` slash command,
-- prompt loading when ` + "`features.memory`" + ` is enabled.
-
-Neo still keeps memory intentionally small. It does not expose an autonomous memory-writing tool to the model in this version.
-
-## A Minimal Neo Memory Design
-
-For a coding agent, the smallest useful memory feature is:
-
-- ` + "`memory.md`" + ` at the project root for learned facts and conventions.
-- ` + "`/memory <text>`" + ` to append a memory, with explicit user control.
-- a distinct dynamic system-prompt section so loaded memory stays separate from base instructions and AGENTS.md.
-
-That gives Neo durable project context without inventing automatic memory behavior too early.
-
-## AGENTS.md vs MEMORY.md
-
-AGENTS.md is instruction. It says how the agent should behave in this repo.
-
-memory.md is learned context. It says what the agent or team learned while working.
-
-Examples:
-
-` + "```md" + `
-# AGENTS.md
-- Read docs/developer/index.md before changing Neo.
-- Do not edit generated docs by hand.
-
-# memory.md
-- 2026-06-10: Memory stays project-specific and manual in V1.
-- The /sessions browser only resumes sessions from the current cwd.
-` + "```" + `
-
-## What To Be Careful About
-
-- Memory is prompt text, so it is a security surface.
-- Always-loaded memory costs tokens every turn.
-- Bad memory is worse than no memory.
-- Session search should retrieve history on demand, not stuff every old conversation into context.
-
-## Where To Look
-
-- ` + "`internal/projectctx`" + `: AGENTS.md and memory.md loading.
-- ` + "`internal/session`" + `: saved conversation history.
-- ` + "`internal/skills`" + `: reusable procedural instructions.
 `
 }
 

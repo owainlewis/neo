@@ -162,24 +162,12 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []ll
 	base := skills.Augment(chatSystemPrompt, sk)
 	cache := cfg.PromptCachingEnabled()
 	blocks := []llm.SystemBlock{{Text: base, Cache: cache}}
-	root := ""
-	if cwd != "" {
-		root = workspace.Root(cwd)
-	}
-
 	if cfg.AgentsFileEnabled() && cwd != "" {
 		if docs, err := projectctx.Load(cwd); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: AGENTS.md: %v\n", err)
 		} else if section := projectctx.Augment("", docs); section != "" {
 			// Dynamic tail: kept uncached and after the breakpoint so it never
 			// evicts the cached base.
-			blocks = append(blocks, llm.SystemBlock{Text: section})
-		}
-	}
-	if cfg.MemoryEnabled() && root != "" {
-		if doc, ok, err := projectctx.LoadMemory(root); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: memory.md: %v\n", err)
-		} else if section := projectctx.MemorySection(doc); ok && section != "" {
 			blocks = append(blocks, llm.SystemBlock{Text: section})
 		}
 	}
@@ -331,7 +319,6 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	if err := tui.Run(ctx, ag, model, Version, sk,
 		tui.WithAfterSend(saveSession),
 		tui.WithPermissionMode(cfg.Permissions.Mode),
-		tui.WithProjectMemory(root, cfg.MemoryEnabled()),
 		tui.WithSessions(store, sess, func(resumed *session.Session) error {
 			resumedProvider, resumedModel := sessionBackend(cfg, resumed.Metadata)
 			activeProvider, activeModel := ag.Backend()

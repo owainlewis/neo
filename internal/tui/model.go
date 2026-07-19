@@ -23,7 +23,6 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/permission"
-	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workflow"
@@ -39,8 +38,6 @@ type Options struct {
 	ModelChoices    []ModelChoice
 	Provider        string
 	ModelSwitcher   func(ModelChoice) error
-	ProjectRoot     string
-	MemoryEnabled   bool
 	StepEvents      <-chan factory.Event
 	WorkflowEvents  <-chan workflow.Event
 	Verbose         bool
@@ -76,13 +73,6 @@ func WithModelSwitcher(provider string, choices []ModelChoice, fn func(ModelChoi
 		opts.Provider = provider
 		opts.ModelChoices = choices
 		opts.ModelSwitcher = fn
-	}
-}
-
-func WithProjectMemory(root string, enabled bool) Option {
-	return func(opts *Options) {
-		opts.ProjectRoot = root
-		opts.MemoryEnabled = enabled
 	}
 }
 
@@ -252,8 +242,6 @@ type model struct {
 	onSessionResume   func(*session.Session) error
 	modelChoices      []ModelChoice
 	modelSwitcher     func(ModelChoice) error
-	projectRoot       string
-	memoryEnabled     bool
 	verbose           bool
 }
 
@@ -357,8 +345,6 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		onSessionResume:   opts.OnSessionResume,
 		modelChoices:      normalizeModelChoices(providerTag, modelTag, opts.ModelChoices),
 		modelSwitcher:     opts.ModelSwitcher,
-		projectRoot:       opts.ProjectRoot,
-		memoryEnabled:     opts.MemoryEnabled,
 		verbose:           opts.Verbose,
 		steer:             ag.Steer,
 	}
@@ -654,8 +640,6 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 		m.appendBlock(tokensBlock{usage: m.ag.Usage()})
 	case "/model":
 		m.openModelBrowser()
-	case "/memory":
-		m.appendProjectMemory(strings.TrimSpace(strings.TrimPrefix(line, cmd)))
 	case "/sessions":
 		m.openSessionBrowser()
 	case "/clear":
@@ -686,32 +670,11 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 
 func slashCommandRequiresIdle(cmd string) bool {
 	switch cmd {
-	case "/clear", "/tokens", "/sessions", "/model", "/permissions", "/memory":
+	case "/clear", "/tokens", "/sessions", "/model", "/permissions":
 		return true
 	default:
 		return false
 	}
-}
-
-func (m *model) appendProjectMemory(text string) {
-	if !m.memoryEnabled {
-		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: /memory — try /help")})
-		return
-	}
-	if m.permissionMode == "readonly" {
-		m.appendBlock(errorBlock{err: fmt.Errorf("/memory is unavailable in readonly mode because it writes project files")})
-		return
-	}
-	if m.projectRoot == "" {
-		m.appendBlock(errorBlock{err: fmt.Errorf("/memory is unavailable because the project root could not be determined")})
-		return
-	}
-	path, err := projectctx.AppendMemory(m.projectRoot, text, time.Now())
-	if err != nil {
-		m.appendBlock(errorBlock{err: err})
-		return
-	}
-	m.appendBlock(noticeBlock{text: "saved project memory to " + path})
 }
 
 func (m *model) updateInlinePickers() {

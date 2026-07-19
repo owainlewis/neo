@@ -44,10 +44,6 @@ The TUI browser supports search, arrow-key navigation, cwd/all filtering, and en
 
 Tools and permissions are bound to the workspace when the TUI starts. For that reason, the in-TUI browser only resumes sessions from the current cwd. Cross-project sessions should be resumed from the shell with `neo resume <id>` so Neo can restore the saved cwd before creating tools.
 
-## Future Memory Connection
-
-Session search is a natural form of episodic memory: "what happened before?" Neo already saves transcripts, so a future memory search can query these sessions.
-
 ## Where To Look
 
 - `internal/session/session.go`: file-backed session store.
