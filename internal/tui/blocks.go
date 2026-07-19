@@ -139,6 +139,147 @@ type toolCallBlock struct {
 	verbose bool
 }
 
+type parallelCallState uint8
+
+const (
+	parallelRunning parallelCallState = iota
+	parallelSucceeded
+	parallelFailed
+	parallelCancelled
+)
+
+type parallelCallRow struct {
+	id            string
+	groupID       string
+	name          string
+	args          map[string]any
+	startAt       time.Time
+	elapsed       time.Duration
+	state         parallelCallState
+	detail        string
+	errorShown    bool
+	parentSettled bool
+	nodeID        int
+}
+
+// parallelBlock is allocated at its final height before work begins. Events
+// only mutate rows in place, so completion order cannot reorder the display or
+// make the composer jump.
+type parallelBlock struct {
+	id      string
+	kind    string
+	startAt time.Time
+	rows    []*parallelCallRow
+}
+
+func (b *parallelBlock) running() bool {
+	for _, row := range b.rows {
+		if row.state == parallelRunning {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *parallelBlock) failed() bool {
+	for _, row := range b.rows {
+		if row.state == parallelFailed {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *parallelBlock) cancelled() bool {
+	for _, row := range b.rows {
+		if row.state == parallelCancelled {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *parallelBlock) render(width int, _ *glamour.TermRenderer) string {
+	if width < 1 {
+		width = 1
+	}
+	glyph := styTool.Render("●")
+	if !b.running() {
+		if b.failed() {
+			glyph = styErr.Render("✗")
+		} else if b.cancelled() {
+			glyph = styMuted.Render("-")
+		} else {
+			glyph = styOK.Render("✓")
+		}
+	}
+	elapsed := time.Since(b.startAt)
+	if !b.running() {
+		elapsed = b.maxElapsed()
+	}
+	header := fmt.Sprintf("%s %s", glyph, styLabel.Render(fmt.Sprintf("%d %s in parallel", len(b.rows), b.kind)))
+	if elapsed > 0 {
+		header += styDim.Render("  " + formatElapsed(elapsed))
+	}
+	lines := []string{truncate(header, width)}
+	for i, row := range b.rows {
+		connector := "├─"
+		if i == len(b.rows)-1 {
+			connector = "└─"
+		}
+		rowGlyph := styTool.Render("●")
+		switch row.state {
+		case parallelSucceeded:
+			rowGlyph = styOK.Render("✓")
+		case parallelFailed:
+			rowGlyph = styErr.Render("✗")
+		case parallelCancelled:
+			rowGlyph = styMuted.Render("-")
+		}
+		prefix := styDim.Render(connector) + " " + rowGlyph + " "
+		rowElapsed := row.elapsed
+		if row.state == parallelRunning {
+			rowElapsed = time.Since(row.startAt)
+		}
+		elapsed := ""
+		if rowElapsed > 0 {
+			elapsed = styDim.Render("  " + formatElapsed(rowElapsed))
+		}
+		available := max(width-lipgloss.Width(prefix)-lipgloss.Width(elapsed), 1)
+		label := parallelRowLabel(row)
+		body := label
+		if row.detail != "" && row.state == parallelRunning {
+			detail := styDim.Render("  " + truncate(oneLine(row.detail), 36))
+			if lipgloss.Width(label)+lipgloss.Width(detail) <= available {
+				body += detail
+			}
+		}
+		line := prefix + truncate(body, available) + elapsed
+		lines = append(lines, truncate(line, width))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (b *parallelBlock) maxElapsed() time.Duration {
+	var elapsed time.Duration
+	for _, row := range b.rows {
+		if row.elapsed > elapsed {
+			elapsed = row.elapsed
+		}
+	}
+	return elapsed
+}
+
+func parallelRowLabel(row *parallelCallRow) string {
+	if row.name == "agent" {
+		return styLabel.Render(truncate(oneLine(stringArg(row.args, "prompt")), 52))
+	}
+	if row.state == parallelRunning {
+		return capitalize(toolVerb(row.name, row.args))
+	}
+	return toolReceiptLine(row.name, row.args)
+}
+
 func (b toolCallBlock) render(width int, _ *glamour.TermRenderer) string {
 	if !b.verbose {
 		// Routine successes form an activity trail, not a checklist. Keep them

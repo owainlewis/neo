@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/factory"
+	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -75,6 +76,9 @@ func (m *model) noteWorkflowActivity(detail string) {
 
 // handleStepEvent folds the supervisor's event stream into activity blocks.
 func (m *model) handleStepEvent(ev factory.Event) {
+	if m.handleParallelStepEvent(ev) {
+		return
+	}
 	switch ev.Ev.Kind {
 	case "start":
 		m.startTreeNode(ev)
@@ -102,6 +106,58 @@ func (m *model) handleStepEvent(ev factory.Event) {
 			}
 		}
 	}
+}
+
+func (m *model) handleParallelStepEvent(ev factory.Event) bool {
+	if ev.GroupID == "" || ev.CallID == "" {
+		return false
+	}
+	row := m.parallelCalls[ev.CallID]
+	if row == nil || row.groupID != ev.GroupID {
+		logx.Debug("unknown parallel subagent event ignored", "group_id", ev.GroupID, "call_id", ev.CallID, "node", ev.Node)
+		return true
+	}
+	// The parent tool result is authoritative. Supervisor events arrive on a
+	// separate stream and may be delayed, duplicated, or dropped, so none may
+	// rewrite a row after its parent result has settled it.
+	if row.parentSettled {
+		return true
+	}
+	switch ev.Ev.Kind {
+	case "start":
+		// A retry gets a new supervisor node for the same parent tool call.
+		// Restore the preallocated row and ignore late terminal events from the
+		// previous attempt by remembering the current node.
+		if row.state == parallelFailed {
+			row.state = parallelRunning
+			row.startAt = time.Now()
+			row.elapsed = 0
+			row.detail = ""
+		}
+		row.nodeID = ev.Node
+		if strings.TrimSpace(ev.Task) != "" {
+			row.args = map[string]any{"prompt": ev.Task}
+		}
+	case "done", "fail":
+		if row.nodeID != 0 && row.nodeID != ev.Node {
+			return true
+		}
+		if row.state == parallelRunning {
+			row.elapsed = time.Since(row.startAt)
+			if ev.Ev.Kind == "done" {
+				row.state = parallelSucceeded
+			} else {
+				row.state = parallelFailed
+			}
+			row.detail = ""
+		}
+	case "tool", "text", "error":
+		if row.state == parallelRunning {
+			row.detail = strings.TrimSpace(ev.Ev.Body)
+		}
+	}
+	m.refreshViewport()
+	return true
 }
 
 // startTreeNode places a started agent in the current activity block.

@@ -183,6 +183,8 @@ type model struct {
 	busy            bool
 	busySince       time.Time
 	currentTool     *toolCallBlock
+	parallelGroups  map[string]*parallelBlock
+	parallelCalls   map[string]*parallelCallRow
 	workflow        *workflowBlock
 	workflowVisible bool
 	turn            turnStats
@@ -348,7 +350,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentEventMsg:
 		m.handleEvent(msg.ev)
 		// Tie the dot's color to whether a tool is currently running.
-		if m.currentTool != nil {
+		if m.currentTool != nil || m.activeParallelGroup("") != nil {
 			m.setDotColor(colDotTool)
 		} else if m.busy {
 			m.setDotColor(colDotThinking)
@@ -370,6 +372,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		elapsed := time.Since(m.busySince)
 		m.busy = false
 		m.currentTool = nil
+		m.settleParallel(msg.err)
 		m.layout()
 		if m.sendCancel != nil {
 			m.sendCancel()
@@ -414,7 +417,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		// Live subagent activity shows elapsed time; repaint on
 		// the spinner's cadence so the counters don't freeze between events.
-		if m.activeTree != nil && m.activeTree.running() {
+		if (m.activeTree != nil && m.activeTree.running()) || m.activeParallelGroup("") != nil {
 			m.refreshViewport()
 		}
 
@@ -544,6 +547,8 @@ func (m *model) restoreInput(texts ...string) {
 
 func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, images []string, expandSkillRefs bool) tea.Cmd {
 	m.clearTerminalWorkflow()
+	m.parallelGroups = map[string]*parallelBlock{}
+	m.parallelCalls = map[string]*parallelCallRow{}
 	m.appendBlock(userBlock{text: displayText})
 	if len(images) > 0 {
 		m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
@@ -580,6 +585,8 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 	case "/clear":
 		m.ag.Clear()
 		m.blocks = nil
+		m.parallelGroups = nil
+		m.parallelCalls = nil
 		m.refreshViewport()
 		if m.afterSend != nil {
 			if err := m.afterSend(); err != nil {
@@ -759,7 +766,11 @@ func (m *model) statusLine() string {
 	activity := m.statusActivity()
 	prefix := " " + m.spin.View() + " "
 	timing := " · " + formatElapsedCompact(elapsed)
-	hint := statusHintForWidth(m.width-lipgloss.Width(prefix)-lipgloss.Width(timing), fullHint, compactHint)
+	minimumActivityWidth := 28
+	if m.approval != nil {
+		minimumActivityWidth = 16
+	}
+	hint := statusHintForWidth(m.width-lipgloss.Width(prefix)-lipgloss.Width(timing), fullHint, compactHint, minimumActivityWidth)
 	suffix := timing
 	if hint != "" {
 		suffix += "   " + hint
@@ -769,8 +780,9 @@ func (m *model) statusLine() string {
 	return truncate(line, max(m.width, 1))
 }
 
-func statusHintForWidth(available int, full, compact string) string {
-	const minimumActivityWidth = 16
+func statusHintForWidth(available int, full, compact string, minimumActivityWidth int) string {
+	// Keep enough room for primary states such as "3 subagents in parallel".
+	// Controls degrade from full to compact before useful activity disappears.
 	if lipgloss.Width(full)+3+minimumActivityWidth <= available {
 		return full
 	}
@@ -787,6 +799,11 @@ func (m *model) statusActivity() string {
 	parts := []string{}
 	if workflow := m.workflowProgress(); workflow != "" {
 		parts = append(parts, workflow)
+	}
+	if group := m.activeParallelGroup("subagents"); group != nil {
+		parts = append(parts, fmt.Sprintf("%d subagents in parallel", len(group.rows)))
+	} else if group := m.activeParallelGroup(""); group != nil {
+		parts = append(parts, fmt.Sprintf("%d %s in parallel", len(group.rows), group.kind))
 	}
 	if m.currentTool != nil {
 		parts = append(parts, capitalize(toolVerb(m.currentTool.name, m.currentTool.args)))
@@ -1040,6 +1057,8 @@ func blockSeparator(previous, next block) string {
 
 func (m *model) handleEvent(e agent.Event) {
 	switch e.Kind {
+	case agent.EventParallelStart:
+		m.startParallelGroup(e)
 	case agent.EventAssistantText:
 		m.activeTree = nil // assistant commentary splits subagent activity
 		if strings.TrimSpace(e.Text) != "" {
@@ -1063,6 +1082,9 @@ func (m *model) handleEvent(e agent.Event) {
 		}
 		m.turn.tools++
 		m.noteWorkflowActivity(capitalize(toolVerb(e.Name, e.Args)))
+		if e.GroupID != "" {
+			break
+		}
 		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now(), verbose: m.verbose}
 		m.currentTool = &tc
 		if e.Name == "agent" {
@@ -1082,6 +1104,10 @@ func (m *model) handleEvent(e agent.Event) {
 				m.turn.errors++
 				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true})
 			}
+			break
+		}
+		if e.GroupID != "" {
+			m.settleParallelCall(e)
 			break
 		}
 		elapsed := time.Duration(0)
@@ -1122,8 +1148,125 @@ func (m *model) handleEvent(e agent.Event) {
 	case agent.EventMaxTurnsReached:
 		m.appendBlock(maxTurnsBlock{limit: e.MaxTurns})
 	case agent.EventDone:
-		// handled when sendResultMsg arrives
+		m.settleParallel(nil)
 	}
+}
+
+func (m *model) startParallelGroup(e agent.Event) {
+	if e.GroupID == "" || len(e.Calls) < 2 {
+		return
+	}
+	if m.parallelGroups == nil {
+		m.parallelGroups = map[string]*parallelBlock{}
+		m.parallelCalls = map[string]*parallelCallRow{}
+	}
+	if _, exists := m.parallelGroups[e.GroupID]; exists {
+		logx.Debug("duplicate parallel group ignored", "group_id", e.GroupID)
+		return
+	}
+	kind := "tools"
+	agents := 0
+	for _, call := range e.Calls {
+		if call.Name == "agent" {
+			agents++
+		}
+	}
+	if agents == len(e.Calls) {
+		kind = "subagents"
+	} else if agents > 0 {
+		kind = "tasks"
+	}
+	now := time.Now()
+	group := &parallelBlock{id: e.GroupID, kind: kind, startAt: now}
+	seen := map[string]bool{}
+	for _, call := range e.Calls {
+		if call.ID == "" {
+			continue
+		}
+		if seen[call.ID] || m.parallelCalls[call.ID] != nil {
+			logx.Debug("duplicate parallel call ignored", "group_id", e.GroupID, "call_id", call.ID)
+			continue
+		}
+		seen[call.ID] = true
+		row := &parallelCallRow{id: call.ID, groupID: e.GroupID, name: call.Name, args: call.Args, startAt: now}
+		group.rows = append(group.rows, row)
+	}
+	if len(group.rows) < 2 {
+		logx.Debug("invalid parallel group ignored", "group_id", e.GroupID, "calls", len(group.rows))
+		return
+	}
+	for _, row := range group.rows {
+		m.parallelCalls[row.id] = row
+	}
+	m.parallelGroups[e.GroupID] = group
+	m.activeTree = nil
+	m.appendBlock(group)
+}
+
+func (m *model) settleParallelCall(e agent.Event) {
+	row := m.parallelCalls[e.ToolUseID]
+	group := m.parallelGroups[e.GroupID]
+	if row == nil || group == nil || row.groupID != e.GroupID {
+		logx.Debug("unknown parallel result ignored", "group_id", e.GroupID, "call_id", e.ToolUseID)
+		return
+	}
+	if row.parentSettled {
+		logx.Debug("duplicate parallel result ignored", "group_id", e.GroupID, "call_id", e.ToolUseID)
+		return
+	}
+	row.parentSettled = true
+	failed := e.IsError || (row.name == "agent" && !runStepOK(e.Text))
+	if failed && isCancelledResult(e.Text) {
+		row.state = parallelCancelled
+	} else if failed {
+		row.state = parallelFailed
+	} else {
+		row.state = parallelSucceeded
+	}
+	if row.elapsed == 0 {
+		row.elapsed = time.Since(row.startAt)
+	}
+	if failed && row.state == parallelFailed && !row.errorShown {
+		row.errorShown = true
+		m.turn.errors++
+		m.appendBlock(toolResultBlock{name: row.name, text: e.Text, isError: true, elapsed: row.elapsed})
+	}
+	row.detail = ""
+	m.refreshViewport()
+}
+
+func isCancelledResult(text string) bool {
+	text = strings.ToLower(text)
+	return strings.Contains(text, "canceled") || strings.Contains(text, "cancelled") || strings.Contains(text, "steered")
+}
+
+func (m *model) settleParallel(err error) {
+	for _, group := range m.parallelGroups {
+		for _, row := range group.rows {
+			if row.state != parallelRunning {
+				continue
+			}
+			row.elapsed = time.Since(row.startAt)
+			if errors.Is(err, context.Canceled) {
+				row.state = parallelCancelled
+			} else if err != nil {
+				row.state = parallelFailed
+			} else {
+				row.state = parallelCancelled
+			}
+			row.detail = ""
+		}
+	}
+}
+
+func (m *model) activeParallelGroup(kind string) *parallelBlock {
+	for i := len(m.blocks) - 1; i >= 0; i-- {
+		group, ok := m.blocks[i].(*parallelBlock)
+		if ok && group.running() && (kind == "" || group.kind == kind) {
+			return group
+		}
+	}
+	return nil
 }
 
 func (m *model) appendTranscript(messages []llm.Message) {
