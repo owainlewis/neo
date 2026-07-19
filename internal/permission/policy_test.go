@@ -44,6 +44,18 @@ func TestWorkspacePolicyModes(t *testing.T) {
 	}
 }
 
+func TestWorkspacePolicyAllowsRuntimeClassifiedReadOnlyCall(t *testing.T) {
+	policy := New(string(ModeReadonly), t.TempDir())
+	allowed := policy.Decide(context.Background(), Request{ToolName: "agent", ReadOnly: true})
+	if allowed.Decision != Allow {
+		t.Fatalf("read-only capability decision=%+v", allowed)
+	}
+	denied := policy.Decide(context.Background(), Request{ToolName: "agent"})
+	if denied.Decision != Deny {
+		t.Fatalf("unclassified agent decision=%+v", denied)
+	}
+}
+
 func TestWorkspacePolicyDangerousBashRequiresApprovalInTrustedMode(t *testing.T) {
 	root := t.TempDir()
 	tests := []string{
