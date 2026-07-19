@@ -31,7 +31,6 @@ import (
 
 type Options struct {
 	AfterSend       func() error
-	PermissionMode  string
 	SessionStore    *session.Store
 	CurrentSession  *session.Session
 	OnSessionResume func(*session.Session) error
@@ -47,10 +46,6 @@ type Option func(*Options)
 
 func WithAfterSend(fn func() error) Option {
 	return func(opts *Options) { opts.AfterSend = fn }
-}
-
-func WithPermissionMode(mode string) Option {
-	return func(opts *Options) { opts.PermissionMode = mode }
 }
 
 func WithSessions(store *session.Store, current *session.Session, onResume func(*session.Session) error) Option {
@@ -194,7 +189,6 @@ type model struct {
 	files    filePicker
 	sessions sessionBrowser
 	models   modelBrowser
-	perms    permissionPicker
 
 	// lastInputHeight is the textarea height the current layout was computed
 	// for. When the textarea grows/shrinks (DynamicHeight), this lets us
@@ -235,7 +229,6 @@ type model struct {
 	skills []skills.Skill
 
 	afterSend         func() error
-	permissionMode    string
 	sessionStore      *session.Store
 	currentSessionID  string
 	currentSessionCWD string
@@ -337,7 +330,6 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		md:                md,
 		skills:            sk,
 		afterSend:         opts.AfterSend,
-		permissionMode:    opts.PermissionMode,
 		sessionStore:      opts.SessionStore,
 		currentSessionID:  currentSessionID,
 		currentSessionCWD: currentSessionCWD,
@@ -374,9 +366,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 
 	case tea.KeyMsg:
-		if m.perms.visible {
-			return m.handlePermissionPickerKey(msg)
-		}
 		if m.models.visible {
 			return m.handleModelBrowserKey(msg)
 		}
@@ -389,7 +378,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleKey(msg))
 
 	case tea.PasteMsg:
-		if m.perms.visible || m.models.visible || m.sessions.visible || m.approval != nil {
+		if m.models.visible || m.sessions.visible || m.approval != nil {
 			break
 		}
 		cmds = append(cmds, m.updateInput(msg))
@@ -500,10 +489,6 @@ func (m *model) View() tea.View {
 	if m.models.visible {
 		return makeView(m.modelBrowserView())
 	}
-	if m.perms.visible {
-		return makeView(m.permissionPickerView())
-	}
-
 	status := m.statusLine()
 	footer := m.footerLine()
 	picker := m.inlinePickerView()
@@ -631,10 +616,6 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 	switch cmd {
 	case "/help":
 		m.appendBlock(helpBlock{commands: m.slashCommands()})
-	case "/tools":
-		m.appendBlock(toolsBlock{specs: m.ag.ToolSpecs()})
-	case "/permissions":
-		m.openPermissionPicker()
 	case "/tokens":
 		m.appendBlock(tokensBlock{usage: m.ag.Usage()})
 	case "/model":
@@ -669,7 +650,7 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 
 func slashCommandRequiresIdle(cmd string) bool {
 	switch cmd {
-	case "/clear", "/tokens", "/sessions", "/model", "/permissions":
+	case "/clear", "/tokens", "/sessions", "/model":
 		return true
 	default:
 		return false

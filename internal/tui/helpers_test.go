@@ -44,17 +44,16 @@ func makeTestModel() *model {
 	ta.SetWidth(78)
 	sp := spinner.New(spinner.WithSpinner(statusSpinner))
 	return &model{
-		ctx:            context.Background(),
-		width:          80,
-		height:         24,
-		ag:             agent.New(agent.Config{Model: "test", Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(tools.ReadFile{}), Policy: permission.New("ask", ".")}),
-		input:          ta,
-		viewport:       viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
-		spin:           sp,
-		modelTag:       "test",
-		cwd:            "~",
-		branch:         "main",
-		permissionMode: "ask",
+		ctx:      context.Background(),
+		width:    80,
+		height:   24,
+		ag:       agent.New(agent.Config{Model: "test", Provider: &llmtest.FakeProvider{}, Tools: tools.NewRegistry(tools.ReadFile{}), Policy: permission.New("ask", ".")}),
+		input:    ta,
+		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
+		spin:     sp,
+		modelTag: "test",
+		cwd:      "~",
+		branch:   "main",
 	}
 }
 

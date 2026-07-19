@@ -169,24 +169,6 @@ func (a *Agent) backend() (llm.Provider, string, compact.Compactor) {
 	return a.cfg.Provider, a.cfg.Model, a.cfg.Compactor
 }
 
-func (a *Agent) SetPermissionMode(mode string) error {
-	switch permission.Mode(mode) {
-	case permission.ModeAsk, permission.ModeTrusted, permission.ModeReadonly:
-	default:
-		return fmt.Errorf("unknown permission mode: %s", mode)
-	}
-	switch p := a.cfg.Policy.(type) {
-	case permission.WorkspacePolicy:
-		p.Mode = permission.Mode(mode)
-		a.cfg.Policy = p
-	case *permission.WorkspacePolicy:
-		p.Mode = permission.Mode(mode)
-	default:
-		return fmt.Errorf("permission policy does not support runtime mode changes")
-	}
-	return nil
-}
-
 func (a *Agent) ReplaceTranscript(messages []llm.Message) {
 	a.messages = cloneMessages(messages)
 	a.usage = llm.Usage{}
@@ -199,10 +181,6 @@ func (a *Agent) SetUsage(usage llm.Usage) {
 func (a *Agent) Clear() {
 	a.messages = nil
 	a.usage = llm.Usage{}
-}
-
-func (a *Agent) ToolSpecs() []llm.ToolSpec {
-	return a.cfg.Tools.Specs()
 }
 
 func (a *Agent) Usage() llm.Usage {

@@ -353,19 +353,6 @@ func (b maxTurnsBlock) render(width int, _ *glamour.TermRenderer) string {
 	return accentCard(styMuted.Render(msg), colWarn)
 }
 
-type toolsBlock struct {
-	specs []llm.ToolSpec
-}
-
-func (b toolsBlock) render(width int, _ *glamour.TermRenderer) string {
-	var sb strings.Builder
-	sb.WriteString(styAccent.Render("tools") + "\n")
-	for _, spec := range b.specs {
-		sb.WriteString(fmt.Sprintf("  %s  %s\n", styTool.Render(padRight(spec.Name, 12)), styMuted.Render(spec.Description)))
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
-
 type tokensBlock struct {
 	usage llm.Usage
 }
