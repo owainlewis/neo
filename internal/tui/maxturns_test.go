@@ -101,8 +101,8 @@ func TestModel_SendResultShowsCancellationNoticeAndClearsBusy(t *testing.T) {
 	if !canceled {
 		t.Fatal("send cancel cleanup was not called")
 	}
-	if got := m.viewport.Height(); got != busyViewportHeight+1 {
-		t.Fatalf("idle viewport height = %d, want %d after two-row status cleared", got, busyViewportHeight+1)
+	if got := m.viewport.Height(); got != busyViewportHeight {
+		t.Fatalf("idle viewport height = %d, want unchanged %d with one-row status", got, busyViewportHeight)
 	}
 	if len(m.blocks) != 1 {
 		t.Fatalf("blocks = %d, want cancellation notice", len(m.blocks))

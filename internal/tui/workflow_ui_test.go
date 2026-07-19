@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -46,6 +47,35 @@ func TestWorkflowPanel_TabTogglesVisibility(t *testing.T) {
 	}
 }
 
+func TestWorkflowStartsCollapsedWithProgressInStatus(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	m.busySince = time.Now()
+	m.handleWorkflowEvent(workflow.Event{
+		Action: "create",
+		State: workflow.State{Title: "Code change", Items: []workflow.Item{
+			{ID: "1", Text: "Inspect", Status: workflow.Pending},
+			{ID: "2", Text: "Implement", Status: workflow.Pending},
+		}},
+	})
+	m.handleWorkflowEvent(workflow.Event{Action: "start", ID: "1"})
+
+	if m.workflowVisible {
+		t.Fatal("new workflow should not expand over the transcript")
+	}
+	if got := m.workflowPanelView(); got != "" {
+		t.Fatalf("collapsed workflow panel = %q, want empty", got)
+	}
+	if got := plain(m.statusLine()); !strings.Contains(got, "1/2 Inspect") || !strings.Contains(got, "tab plan") {
+		t.Fatalf("status should carry compact workflow progress: %q", got)
+	}
+
+	m.Update(keyPress(tea.KeyTab))
+	if got := plain(m.workflowPanelView()); !strings.Contains(got, "Code change") || !strings.Contains(got, "● Inspect") {
+		t.Fatalf("Tab should expand the full workflow: %q", got)
+	}
+}
+
 func TestWorkflowPanel_TabDoesNotStealPickerAcceptance(t *testing.T) {
 	withSlashCommands(t, []slashCommand{
 		{"/help", "show this list"},
@@ -68,8 +98,9 @@ func TestWorkflowPanel_TabDoesNotStealPickerAcceptance(t *testing.T) {
 	}
 }
 
-func TestWorkflowPanel_HidesWhenCompletedTurnFinishes(t *testing.T) {
+func TestWorkflowPanel_UserExpansionSurvivesTurnCompletion(t *testing.T) {
 	m := makeTestModel()
+	m.height = 24
 	m.busy = true
 	m.busySince = time.Now()
 	m.turn = turnStats{workflow: true}
@@ -78,14 +109,19 @@ func TestWorkflowPanel_HidesWhenCompletedTurnFinishes(t *testing.T) {
 		{ID: "2", Text: "test", Status: workflow.Done},
 	}}
 	m.workflowVisible = true
+	m.layout()
+	before := m.viewport.Height()
 
 	m.Update(sendResultMsg{})
 
 	if m.workflow == nil {
 		t.Fatal("completed workflow should remain available for inspection")
 	}
-	if m.workflowVisible {
-		t.Fatal("completed workflow should hide after the turn finishes")
+	if !m.workflowVisible {
+		t.Fatal("completed workflow should remain expanded until the user closes it")
+	}
+	if got := m.viewport.Height(); got != before {
+		t.Fatalf("turn completion changed viewport height from %d to %d", before, got)
 	}
 }
 
@@ -131,7 +167,7 @@ func TestWorkflowToolPreservesStepsAndAttachesActivity(t *testing.T) {
 		},
 	})
 	m.handleWorkflowEvent(workflow.Event{Action: "start", ID: "1"})
-	m.noteWorkflowActivity("read_file AGENTS.md")
+	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "read_file", Args: map[string]any{"path": "AGENTS.md"}})
 
 	if m.workflow == nil || len(m.workflow.items) != 2 {
 		t.Fatalf("workflow = %+v, want two items", m.workflow)
@@ -142,7 +178,7 @@ func TestWorkflowToolPreservesStepsAndAttachesActivity(t *testing.T) {
 	if got := m.workflow.items[1].Text; got != "Implement the change" {
 		t.Fatalf("second step = %q, want preserved text", got)
 	}
-	if got := m.workflow.items[0].Detail; got != "read_file AGENTS.md" {
+	if got := m.workflow.items[0].Detail; got != "Reading AGENTS.md" {
 		t.Fatalf("active step detail = %q, want attached activity", got)
 	}
 }

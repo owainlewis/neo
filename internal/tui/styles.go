@@ -28,11 +28,12 @@ var (
 
 	styMuted    = lipgloss.NewStyle().Foreground(colMuted)
 	styDim      = lipgloss.NewStyle().Foreground(colDim)
+	styLabel    = lipgloss.NewStyle().Bold(true)
 	styAccent   = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
 	styTool     = lipgloss.NewStyle().Foreground(colTool).Bold(true)
 	styOK       = lipgloss.NewStyle().Foreground(colOK)
 	styErr      = lipgloss.NewStyle().Foreground(colErr)
-	styThinking = lipgloss.NewStyle().Foreground(colMuted).Italic(true)
+	styThinking = lipgloss.NewStyle().Foreground(colMuted)
 
 	styCardTool = lipgloss.NewStyle().
 			Background(colToolBg).
