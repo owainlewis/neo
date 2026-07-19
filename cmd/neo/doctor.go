@@ -41,16 +41,23 @@ func runDoctor(ctx context.Context) int {
 }
 
 func doctorChecks() []doctorCheck {
+	var checks []doctorCheck
 	cfg, err := config.Load()
 	if err != nil {
-		return []doctorCheck{{Status: doctorFail, Name: "config", Detail: err.Error()}}
+		// Config-dependent checks are skipped, but the session store and git
+		// diagnostics still run so a broken config doesn't hide other problems.
+		checks = append(checks,
+			doctorCheck{Status: doctorFail, Name: "config", Detail: err.Error()},
+			doctorCheck{Status: doctorWarn, Name: "provider", Detail: "skipped: config failed to load"},
+			doctorCheck{Status: doctorWarn, Name: "credentials", Detail: "skipped: config failed to load"},
+			doctorCheck{Status: doctorWarn, Name: "model", Detail: "skipped: config failed to load"},
+		)
+	} else {
+		checks = append(checks, doctorCheck{Status: doctorPass, Name: "config", Detail: "loaded " + cfg.Source()})
+		checks = append(checks, doctorProviderCheck(cfg))
+		checks = append(checks, doctorCredentialCheck(cfg))
+		checks = append(checks, doctorModelCheck(cfg))
 	}
-	checks := []doctorCheck{
-		{Status: doctorPass, Name: "config", Detail: "loaded " + cfg.Source()},
-	}
-	checks = append(checks, doctorProviderCheck(cfg))
-	checks = append(checks, doctorCredentialCheck(cfg))
-	checks = append(checks, doctorModelCheck(cfg))
 	checks = append(checks, doctorSessionStoreCheck())
 	checks = append(checks, doctorGitChecks()...)
 	return checks
