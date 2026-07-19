@@ -20,6 +20,8 @@ type ReadFile struct{}
 
 func (ReadFile) Name() string { return "read_file" }
 
+func (ReadFile) ParallelSafe(map[string]any) bool { return true }
+
 func (ReadFile) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "read_file",
@@ -45,12 +47,15 @@ func (ReadFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	limit := optInt(input, "limit")
 
 	if offset <= 0 && limit <= 0 {
-		return readWholeFileCapped(path)
+		return readWholeFileCapped(ctx, path)
 	}
 	return readFileWindow(ctx, path, offset, limit)
 }
 
-func readWholeFileCapped(path string) (string, error) {
+func readWholeFileCapped(ctx context.Context, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -64,6 +69,9 @@ func readWholeFileCapped(path string) (string, error) {
 	if info.Size() > MaxReadBytes {
 		return "", fmt.Errorf("read_file: file exceeds %d bytes; use offset/limit to read a smaller selection", MaxReadBytes)
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 
 	b, err := io.ReadAll(io.LimitReader(f, MaxReadBytes+1))
 	if err != nil {
@@ -71,6 +79,9 @@ func readWholeFileCapped(path string) (string, error) {
 	}
 	if len(b) > MaxReadBytes {
 		return "", fmt.Errorf("read_file: file exceeds %d bytes; use offset/limit to read a smaller selection", MaxReadBytes)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	return string(b), nil
 }

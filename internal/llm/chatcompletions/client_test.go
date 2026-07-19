@@ -94,6 +94,32 @@ func TestToLLMResponse_TextUsageAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestParallelToolCallsAndResultsPreserveOrder(t *testing.T) {
+	resp, err := ToLLMResponse(Response{Choices: []Choice{{
+		FinishReason: "tool_calls",
+		Message: Message{ToolCalls: []ToolCall{
+			{ID: "call_a", Type: "function", Function: FunctionCall{Name: "read", Arguments: `{"path":"a"}`}},
+			{ID: "call_b", Type: "function", Function: FunctionCall{Name: "read", Arguments: `{"path":"b"}`}},
+		}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Content) != 2 || resp.Content[0].ID != "call_a" || resp.Content[1].ID != "call_b" {
+		t.Fatalf("parallel calls = %#v", resp.Content)
+	}
+	wire := BuildRequest(llm.Request{Messages: []llm.Message{
+		{Role: llm.RoleAssistant, Content: resp.Content},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call_a", Content: "A"},
+			{Type: "tool_result", ToolUseID: "call_b", Content: "B"},
+		}},
+	}}, "m")
+	if len(wire.Messages) != 3 || wire.Messages[1].ToolCallID != "call_a" || wire.Messages[2].ToolCallID != "call_b" {
+		t.Fatalf("parallel wire results = %#v", wire.Messages)
+	}
+}
+
 func TestClientComplete_SurfaceProviderErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"tools are not supported by this model"}}`, http.StatusBadRequest)

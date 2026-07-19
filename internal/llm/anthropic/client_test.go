@@ -43,6 +43,40 @@ func TestComplete_HappyPath(t *testing.T) {
 	}
 }
 
+func TestComplete_PreservesParallelCallsAndOrderedResults(t *testing.T) {
+	var got apiRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"content":[{"type":"tool_use","id":"call_a","name":"read","input":{"path":"a"}},{"type":"tool_use","id":"call_b","name":"read","input":{"path":"b"}}],"stop_reason":"tool_use"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	first, err := client.Complete(context.Background(), llm.Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Content) != 2 || first.Content[0].ID != "call_a" || first.Content[1].ID != "call_b" {
+		t.Fatalf("parallel calls = %#v", first.Content)
+	}
+	_, err = client.Complete(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{
+		{Role: llm.RoleAssistant, Content: first.Content},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call_a", Content: "A"},
+			{Type: "tool_result", ToolUseID: "call_b", Content: "B"},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := got.Messages[1].Content
+	if len(results) != 2 || results[0].ToolUseID != "call_a" || results[1].ToolUseID != "call_b" {
+		t.Fatalf("parallel results = %#v", results)
+	}
+}
+
 func TestComplete_RetriesOn5xxThenSucceeds(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
