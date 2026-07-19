@@ -1,0 +1,115 @@
+---
+type WorkflowItem = {
+  label: string;
+  detail: string;
+  status?: 'complete' | 'active' | 'done';
+};
+
+type AgentRow = {
+  number: string;
+  label: string;
+  status: string;
+  statusClass?: string;
+};
+
+type Props = {
+  variant: 'hero' | 'product' | 'agents';
+  project?: string;
+  title?: string;
+  progress?: string;
+  mode?: string;
+  request?: string;
+  items?: WorkflowItem[];
+  agent?: {
+    label: string;
+    detail: string;
+    elapsed?: string;
+  };
+  proof?: {
+    command: string;
+    elapsed: string;
+  };
+  footer?: string[];
+  coordinator?: {
+    owner: string;
+    task: string;
+    status: string;
+  };
+  rows?: AgentRow[];
+  note?: string;
+};
+
+const props = Astro.props as Props;
+---
+
+{props.variant === 'hero' && (
+  <div class="neo-hero-preview neo-card" role="group" aria-label="Neo working through an example task">
+    <div class="neo-preview-bar">
+      <span>{props.project}</span>
+      <span><i class="neo-status-dot"></i> working</span>
+    </div>
+    <div class="neo-preview-body">
+      <div class="neo-preview-title">
+        <div><span>Active workflow</span><strong>{props.title}</strong></div>
+        <small>{props.progress}</small>
+      </div>
+      <ol class="neo-preview-list">
+        {props.items?.map((item) => (
+          <li class={item.status === 'complete' ? 'complete' : item.status === 'active' ? 'active' : undefined}>
+            <span>{item.status === 'complete' ? '✓' : item.status === 'active' ? <i class="neo-status-dot"></i> : ''}</span>
+            <div><strong>{item.label}</strong><small>{item.detail}</small></div>
+          </li>
+        ))}
+      </ol>
+      {props.agent && (
+        <div class="neo-preview-agent">
+          <span>{props.agent.label}</span>
+          <strong>{props.agent.detail}</strong>
+          <small>{props.agent.elapsed}</small>
+        </div>
+      )}
+    </div>
+    <div class="neo-preview-footer">{props.footer?.map((item) => <span>{item}</span>)}</div>
+  </div>
+)}
+
+{props.variant === 'product' && (
+  <div class="neo-workflow neo-card" role="group" aria-label="Example Neo workflow">
+    <div class="neo-workflow-top">
+      <span>{props.project}</span>
+      <span class="neo-mode"><i class="neo-status-dot"></i> {props.mode}</span>
+    </div>
+    <div class="neo-request">
+      <span aria-hidden="true">›</span>
+      <p>{props.request}</p>
+    </div>
+    <div class="neo-plan">
+      <div class="neo-plan-meta">
+        <span>Plan</span>
+        <span>{props.progress}</span>
+      </div>
+      <ol>
+        {props.items?.map((item) => (
+          <li class={item.status === 'done' ? 'done' : item.status === 'active' ? 'active' : undefined}>
+            <span class="neo-check">{item.status === 'done' ? '✓' : item.status === 'active' ? <i class="neo-status-dot"></i> : ''}</span>
+            <div>
+              <strong>{item.label}</strong><small>{item.detail}</small>
+              {item.status === 'active' && props.agent && (
+                <div class="neo-agent"><span>{props.agent.label}</span><span>{props.agent.detail}</span></div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+    {props.proof && <div class="neo-proof"><span>✓</span><code>{props.proof.command}</code><small>{props.proof.elapsed}</small></div>}
+  </div>
+)}
+
+{props.variant === 'agents' && (
+  <div class="neo-agents" aria-label="Example delegated work">
+    {props.coordinator && <div class="neo-coordinator-row"><span>{props.coordinator.owner}</span><strong>{props.coordinator.task}</strong><small>{props.coordinator.status}</small></div>}
+    {props.rows?.map((row) => <div class="neo-agent-row"><span>{row.number}</span><strong>{row.label}</strong><small class={row.statusClass}>{row.status}</small></div>)}
+    {props.note && <p>{props.note}</p>}
+  </div>
+)}

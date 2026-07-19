@@ -1,5 +1,49 @@
 ---
+import DemoWorkflow from './DemoWorkflow.astro';
+
 const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/neo/main/install.sh | bash';
+
+const heroWorkflow = {
+  variant: 'hero' as const,
+  project: 'neo / billing-api',
+  title: 'Fix duplicate invoice retries',
+  progress: '3 / 4',
+  items: [
+    { label: 'Trace retry path', detail: '9 files read', status: 'complete' as const },
+    { label: 'Add idempotency guard', detail: '2 files changed', status: 'complete' as const },
+    { label: 'Test concurrent delivery', detail: 'go test ./internal/billing/...', status: 'active' as const },
+    { label: 'Review the diff', detail: 'waiting' },
+  ],
+  agent: { label: 'review agent', detail: 'Checking race conditions', elapsed: '12s' },
+  footer: ['2 agents', 'claude-opus-4-8'],
+};
+
+const productWorkflow = {
+  variant: 'product' as const,
+  project: 'payments-api',
+  mode: 'ask mode',
+  request: 'Harden webhook verification and prove it works',
+  progress: '3 of 4 complete',
+  items: [
+    { label: 'Trace the request path', detail: 'Read 8 files', status: 'done' as const },
+    { label: 'Implement signature validation', detail: 'Edited 3 files', status: 'done' as const },
+    { label: 'Test failure modes', detail: 'Running go test ./internal/webhook/...', status: 'active' as const },
+    { label: 'Review the final diff', detail: 'Waiting on tests' },
+  ],
+  agent: { label: 'review agent', detail: 'checking replay protection' },
+  proof: { command: 'ok github.com/acme/payments/internal/webhook', elapsed: '0.84s' },
+};
+
+const agentWorkflow = {
+  variant: 'agents' as const,
+  coordinator: { owner: 'Neo', task: 'Harden webhook verification', status: 'coordinator' },
+  rows: [
+    { number: '01', label: 'Trace request path', status: 'complete', statusClass: 'complete' },
+    { number: '02', label: 'Implement validation', status: 'working', statusClass: 'working' },
+    { number: '03', label: 'Review failure modes', status: 'queued' },
+  ],
+  note: 'Depth, fan-out, runtime, and agent count are all capped.',
+};
 ---
 
 <div class="neo-home not-content">
@@ -7,8 +51,8 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
     <div class="neo-hero-copy">
       <h1 id="neo-title">A coding agent you can trust.</h1>
       <p class="neo-hero-lede">
-        Neo turns long engineering tasks into a visible workflow. It keeps the plan, tool activity,
-        agents, and results in view while it works.
+        Neo runs long engineering tasks in the open: the plan, the permissions, and the proof stay
+        in front of you. Built for engineers who answer for what ships.
       </p>
       <div class="neo-actions">
         <a class="neo-button neo-button-primary" href="/docs/install/">Install Neo</a>
@@ -24,30 +68,7 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
       </div>
     </div>
 
-    <div class="neo-hero-preview" role="group" aria-label="Neo working through an example task">
-      <div class="neo-preview-bar">
-        <span>neo / billing-api</span>
-        <span><i></i> working</span>
-      </div>
-      <div class="neo-preview-body">
-        <div class="neo-preview-title">
-          <div><span>Active workflow</span><strong>Fix duplicate invoice retries</strong></div>
-          <small>3 / 4</small>
-        </div>
-        <ol class="neo-preview-list">
-          <li class="complete"><span>✓</span><div><strong>Trace retry path</strong><small>9 files read</small></div></li>
-          <li class="complete"><span>✓</span><div><strong>Add idempotency guard</strong><small>2 files changed</small></div></li>
-          <li class="active"><span><i></i></span><div><strong>Test concurrent delivery</strong><small>go test ./internal/billing/...</small></div></li>
-          <li><span></span><div><strong>Review the diff</strong><small>waiting</small></div></li>
-        </ol>
-        <div class="neo-preview-agent">
-          <span>review agent</span>
-          <strong>Checking race conditions</strong>
-          <small>12s</small>
-        </div>
-      </div>
-      <div class="neo-preview-footer"><span>2 agents</span><span>claude-opus-4-8</span></div>
-    </div>
+    <DemoWorkflow {...heroWorkflow} />
   </section>
 
   <section class="neo-product" aria-labelledby="workflow-title">
@@ -59,52 +80,16 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
       <p>A live checklist makes a long-running task easy to follow, question, and review.</p>
     </div>
 
-    <div class="neo-workflow" role="group" aria-label="Example Neo workflow">
-      <div class="neo-workflow-top">
-        <span>payments-api</span>
-        <span class="neo-mode"><i></i> ask mode</span>
-      </div>
-      <div class="neo-request">
-        <span aria-hidden="true">›</span>
-        <p>Harden webhook verification and prove it works</p>
-      </div>
-      <div class="neo-plan">
-        <div class="neo-plan-meta">
-          <span>Plan</span>
-          <span>3 of 4 complete</span>
-        </div>
-        <ol>
-          <li class="done">
-            <span class="neo-check">✓</span>
-            <div><strong>Trace the request path</strong><small>Read 8 files</small></div>
-          </li>
-          <li class="done">
-            <span class="neo-check">✓</span>
-            <div><strong>Implement signature validation</strong><small>Edited 3 files</small></div>
-          </li>
-          <li class="active">
-            <span class="neo-check"><i></i></span>
-            <div>
-              <strong>Test failure modes</strong><small>Running go test ./internal/webhook/...</small>
-              <div class="neo-agent"><span>review agent</span><span>checking replay protection</span></div>
-            </div>
-          </li>
-          <li>
-            <span class="neo-check"></span>
-            <div><strong>Review the final diff</strong><small>Waiting on tests</small></div>
-          </li>
-        </ol>
-      </div>
-      <div class="neo-proof"><span>✓</span><code>ok github.com/acme/payments/internal/webhook</code><small>0.84s</small></div>
-    </div>
+    <DemoWorkflow {...productWorkflow} />
   </section>
 
   <section class="neo-intro" aria-labelledby="difference-title">
     <p class="neo-label">Why Neo</p>
     <h2 id="difference-title">Serious engineering is a sequence of decisions, not a magic prompt.</h2>
     <p>
-      Most agents collapse that sequence into a stream of text. Neo gives it structure. Plans stay
-      visible, risky changes require the permission mode you choose, and results come back with evidence.
+      Most agents bury those decisions in a scroll of text. Neo keeps them in the open. The plan
+      stays on screen, changes follow the permission mode you set, and results come back with the
+      test run that proves them.
     </p>
   </section>
 
@@ -112,7 +97,7 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
     <article>
       <span>01</span>
       <h3>Visible by default</h3>
-      <p>The checklist, tool activity, subagents, and results stay in view while Neo works.</p>
+      <p>Every step, tool call, and subagent shows up as it happens. Nothing runs off screen.</p>
     </article>
     <article>
       <span>02</span>
@@ -122,7 +107,7 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
     <article>
       <span>03</span>
       <h3>Bring your model</h3>
-      <p>Use Anthropic, OpenAI, OpenRouter, or Gemini without changing the way you work.</p>
+      <p>Neo works the same with Anthropic, OpenAI, Gemini, or OpenRouter. Switch with a config change.</p>
     </article>
   </section>
 
@@ -131,28 +116,22 @@ const installCommand = 'curl -fsSL https://raw.githubusercontent.com/owainlewis/
       <p class="neo-label">Orchestration</p>
       <h2 id="orchestration-title">One plan. Focused agents.</h2>
       <p>
-        Neo can give bounded pieces of work to fresh subagents, follow their progress, and bring
-        their findings back to the main task. The coordinator remains responsible for the result.
+        Neo hands well-scoped pieces of a task to fresh subagents, follows their progress, and
+        folds their findings back into the main plan. One coordinator owns the result.
       </p>
       <a class="neo-text-link" href="/docs/reference/guides/agent-loop/">How the agent loop works <span aria-hidden="true">→</span></a>
     </div>
-    <div class="neo-agents" aria-label="Example delegated work">
-      <div class="neo-coordinator-row"><span>Neo</span><strong>Harden webhook verification</strong><small>coordinator</small></div>
-      <div class="neo-agent-row"><span>01</span><strong>Trace request path</strong><small class="complete">complete</small></div>
-      <div class="neo-agent-row"><span>02</span><strong>Implement validation</strong><small class="working">working</small></div>
-      <div class="neo-agent-row"><span>03</span><strong>Review failure modes</strong><small>queued</small></div>
-      <p>Bounded depth, fan-out, runtime, and agent count.</p>
-    </div>
+    <DemoWorkflow {...agentWorkflow} />
   </section>
 
   <section class="neo-foundation" aria-labelledby="foundation-title">
     <div>
       <p class="neo-label">The foundation</p>
-      <h2 id="foundation-title">Small core.<br />Serious capability.</h2>
+      <h2 id="foundation-title">Small core.<br />Nothing hidden.</h2>
     </div>
     <dl>
       <div><dt>One binary</dt><dd>No runtime to assemble. Install it and work.</dd></div>
-      <div><dt>Local sessions</dt><dd>Session files are stored locally. Context goes to your chosen model provider.</dd></div>
+      <div><dt>Local sessions</dt><dd>Sessions live on your disk. Context goes only to the model provider you choose.</dd></div>
       <div><dt>Open source</dt><dd>Inspect the harness you trust with your code.</dd></div>
       <div><dt>No telemetry</dt><dd>Neo does not phone home with product analytics.</dd></div>
     </dl>

@@ -149,107 +149,53 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 		"payload", logx.PayloadValue(string(body)),
 	)
 
-	maxRetries := c.MaxRetries
-	if maxRetries < 0 {
-		maxRetries = 0
-	}
-	baseDelay := c.BaseDelay
-	if baseDelay <= 0 {
-		baseDelay = 500 * time.Millisecond
-	}
-
-	var lastErr error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		logx.Debug("provider attempt", "provider", c.Name(), "attempt", attempt+1, "max_attempts", maxRetries+1)
+	result, err := retry.Do(ctx, retry.Options{
+		Provider:       c.Name(),
+		ErrorLabel:     "anthropic",
+		MaxRetries:     c.MaxRetries,
+		BaseDelay:      c.BaseDelay,
+		RetryAfterBody: parseRetryAfterBody,
+	}, func(ctx context.Context) (retry.AttemptResult, error) {
 		raw, status, retryAfter, err := c.doRequest(ctx, body)
-		if err != nil {
-			// Network errors: retry unless the context is done.
-			lastErr = err
-			if ctx.Err() != nil {
-				logx.Debug("provider request canceled", "provider", c.Name(), "error", ctx.Err().Error())
-				return nil, ctx.Err()
-			}
-			if attempt == maxRetries {
-				logx.Debug("provider transport failed", "provider", c.Name(), "attempt", attempt+1, "error", err.Error())
-				return nil, err
-			}
-			delay := retry.Delay(baseDelay, attempt, retry.Absent())
-			logx.Debug("provider retry scheduled",
-				"provider", c.Name(),
-				"attempt", attempt+1,
-				"reason", "transport_error",
-				"delay", delay.String(),
-				"error", err.Error(),
-			)
-			if err := sleep(ctx, delay); err != nil {
-				return nil, err
-			}
-			continue
-		}
-
-		if status == 429 || status >= 500 {
-			lastErr = fmt.Errorf("anthropic %d: %s", status, string(raw))
-			if attempt == maxRetries {
-				logx.Debug("provider retries exhausted",
-					"provider", c.Name(),
-					"status", status,
-					"body", logx.PayloadValue(string(raw)),
-				)
-				return nil, lastErr
-			}
-			if !retryAfter.Present {
-				retryAfter = parseRetryAfterBody(raw)
-			}
-			delay := retry.Delay(baseDelay, attempt, retryAfter)
-			logx.Debug("provider retry scheduled",
-				"provider", c.Name(),
-				"attempt", attempt+1,
-				"reason", "http_retryable",
-				"status", status,
-				"delay", delay.String(),
-				"retry_after_present", retryAfter.Present,
-				"body", logx.PayloadValue(string(raw)),
-			)
-			if err := sleep(ctx, delay); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if status >= 400 {
-			logx.Debug("provider client error",
-				"provider", c.Name(),
-				"status", status,
-				"body", logx.PayloadValue(string(raw)),
-			)
-			return nil, fmt.Errorf("anthropic %d: %s", status, string(raw))
-		}
-
-		var out apiResponse
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil, fmt.Errorf("decode: %w (body: %s)", err, string(raw))
-		}
-		if out.Error != nil {
-			return nil, fmt.Errorf("anthropic: %s", out.Error.Message)
-		}
-		logx.Debug("provider response",
+		return retry.AttemptResult{Body: raw, Status: status, RetryAfter: retryAfter}, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw, status := result.Body, result.Status
+	if status >= 400 {
+		logx.Debug("provider client error",
 			"provider", c.Name(),
 			"status", status,
-			"response", logx.PayloadValue(string(raw)),
-			"items", len(out.Content),
-			"stop_reason", out.StopReason,
+			"body", logx.PayloadValue(string(raw)),
 		)
-		resp := &llm.Response{Content: out.Content, StopReason: out.StopReason}
-		if out.Usage != nil {
-			resp.Usage = llm.Usage{
-				InputTokens:         out.Usage.InputTokens,
-				OutputTokens:        out.Usage.OutputTokens,
-				CacheCreationTokens: out.Usage.CacheCreationInputTokens,
-				CacheReadTokens:     out.Usage.CacheReadInputTokens,
-			}
-		}
-		return resp, nil
+		return nil, fmt.Errorf("anthropic %d: %s", status, string(raw))
 	}
-	return nil, lastErr
+
+	var out apiResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode: %w (body: %s)", err, string(raw))
+	}
+	if out.Error != nil {
+		return nil, fmt.Errorf("anthropic: %s", out.Error.Message)
+	}
+	logx.Debug("provider response",
+		"provider", c.Name(),
+		"status", status,
+		"response", logx.PayloadValue(string(raw)),
+		"items", len(out.Content),
+		"stop_reason", out.StopReason,
+	)
+	resp := &llm.Response{Content: out.Content, StopReason: out.StopReason}
+	if out.Usage != nil {
+		resp.Usage = llm.Usage{
+			InputTokens:         out.Usage.InputTokens,
+			OutputTokens:        out.Usage.OutputTokens,
+			CacheCreationTokens: out.Usage.CacheCreationInputTokens,
+			CacheReadTokens:     out.Usage.CacheReadInputTokens,
+		}
+	}
+	return resp, nil
 }
 
 // doRequest issues one POST and returns the body, status, and any Retry-After
@@ -295,13 +241,4 @@ func parseRetryAfterBody(body []byte) retry.RetryAfter {
 	return retry.Absent()
 }
 
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}
+func sleep(ctx context.Context, d time.Duration) error { return retry.Sleep(ctx, d) }

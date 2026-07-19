@@ -61,90 +61,34 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 		"payload", logx.PayloadValue(string(body)),
 	)
 
-	maxRetries := c.MaxRetries
-	if maxRetries < 0 {
-		maxRetries = 0
-	}
-	baseDelay := c.BaseDelay
-	if baseDelay <= 0 {
-		baseDelay = 500 * time.Millisecond
-	}
-
-	var lastErr error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		logx.Debug("provider attempt", "provider", c.Name(), "attempt", attempt+1, "max_attempts", maxRetries+1)
+	result, err := retry.Do(ctx, retry.Options{Provider: c.Name(), ErrorLabel: "openai", MaxRetries: c.MaxRetries, BaseDelay: c.BaseDelay}, func(ctx context.Context) (retry.AttemptResult, error) {
 		raw, status, retryAfter, err := c.doRequest(ctx, body)
-		if err != nil {
-			lastErr = err
-			if ctx.Err() != nil {
-				logx.Debug("provider request canceled", "provider", c.Name(), "error", ctx.Err().Error())
-				return nil, ctx.Err()
-			}
-			if attempt == maxRetries {
-				logx.Debug("provider transport failed", "provider", c.Name(), "attempt", attempt+1, "error", err.Error())
-				return nil, err
-			}
-			delay := retry.Delay(baseDelay, attempt, retry.Absent())
-			logx.Debug("provider retry scheduled",
-				"provider", c.Name(),
-				"attempt", attempt+1,
-				"reason", "transport_error",
-				"delay", delay.String(),
-				"error", err.Error(),
-			)
-			if err := sleep(ctx, delay); err != nil {
-				return nil, err
-			}
-			continue
-		}
-
-		if status == 429 || status >= 500 {
-			lastErr = fmt.Errorf("openai %d: %s", status, string(raw))
-			if attempt == maxRetries {
-				logx.Debug("provider retries exhausted",
-					"provider", c.Name(),
-					"status", status,
-					"body", logx.PayloadValue(string(raw)),
-				)
-				return nil, lastErr
-			}
-			delay := retry.Delay(baseDelay, attempt, retryAfter)
-			logx.Debug("provider retry scheduled",
-				"provider", c.Name(),
-				"attempt", attempt+1,
-				"reason", "http_retryable",
-				"status", status,
-				"delay", delay.String(),
-				"retry_after_present", retryAfter.Present,
-				"body", logx.PayloadValue(string(raw)),
-			)
-			if err := sleep(ctx, delay); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if status >= 400 {
-			logx.Debug("provider client error",
-				"provider", c.Name(),
-				"status", status,
-				"body", logx.PayloadValue(string(raw)),
-			)
-			return nil, fmt.Errorf("openai %d: %s", status, string(raw))
-		}
-
-		var out apiResponse
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil, fmt.Errorf("decode: %w (body: %s)", err, string(raw))
-		}
-		logx.Debug("provider response",
+		return retry.AttemptResult{Body: raw, Status: status, RetryAfter: retryAfter}, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw, status := result.Body, result.Status
+	if status >= 400 {
+		logx.Debug("provider client error",
 			"provider", c.Name(),
 			"status", status,
-			"response", logx.PayloadValue(string(raw)),
-			"items", len(out.Output),
+			"body", logx.PayloadValue(string(raw)),
 		)
-		return toResponse(out)
+		return nil, fmt.Errorf("openai %d: %s", status, string(raw))
 	}
-	return nil, lastErr
+
+	var out apiResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode: %w (body: %s)", err, string(raw))
+	}
+	logx.Debug("provider response",
+		"provider", c.Name(),
+		"status", status,
+		"response", logx.PayloadValue(string(raw)),
+		"items", len(out.Output),
+	)
+	return toResponse(out)
 }
 
 // doRequest issues one POST and returns the body, status, and any Retry-After

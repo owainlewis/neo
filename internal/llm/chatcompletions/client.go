@@ -40,51 +40,22 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 		return nil, err
 	}
 
-	maxRetries := c.MaxRetries
-	if maxRetries < 0 {
-		maxRetries = 0
-	}
-	baseDelay := c.BaseDelay
-	if baseDelay <= 0 {
-		baseDelay = 500 * time.Millisecond
-	}
-
-	var lastErr error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
+	result, err := retry.Do(ctx, retry.Options{Provider: c.Name(), ErrorLabel: c.ProviderName, MaxRetries: c.MaxRetries, BaseDelay: c.BaseDelay}, func(ctx context.Context) (retry.AttemptResult, error) {
 		raw, status, retryAfter, err := c.doRequest(ctx, body)
-		if err != nil {
-			lastErr = err
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			if attempt == maxRetries {
-				return nil, err
-			}
-			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retry.Absent())); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if status == 429 || status >= 500 {
-			lastErr = fmt.Errorf("%s %d: %s", c.ProviderName, status, string(raw))
-			if attempt == maxRetries {
-				return nil, lastErr
-			}
-			if err := sleep(ctx, retry.Delay(baseDelay, attempt, retryAfter)); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if status >= 400 {
-			return nil, fmt.Errorf("%s %d: %s", c.ProviderName, status, string(raw))
-		}
-		var out Response
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil, fmt.Errorf("decode: %w (body: %s)", err, string(raw))
-		}
-		return ToLLMResponse(out)
+		return retry.AttemptResult{Body: raw, Status: status, RetryAfter: retryAfter}, err
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, lastErr
+	raw, status := result.Body, result.Status
+	if status >= 400 {
+		return nil, fmt.Errorf("%s %d: %s", c.ProviderName, status, string(raw))
+	}
+	var out Response
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode: %w (body: %s)", err, string(raw))
+	}
+	return ToLLMResponse(out)
 }
 
 func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
@@ -328,13 +299,4 @@ func toUsage(u *Usage) llm.Usage {
 	return llm.Usage{InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens}
 }
 
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}
+func sleep(ctx context.Context, d time.Duration) error { return retry.Sleep(ctx, d) }

@@ -74,7 +74,7 @@
   font-weight: 700;
 }
 
-.sl-markdown-content :not(h1, h2, h3, h4, h5, h6) + :is(h2, h3) {
+.sl-markdown-content :not(h1, h2, h3, h4, h5, h6) + :is(h2, h3):not(:where(.not-content *)) {
   margin-block-start: 2.5em;
 }
 
@@ -97,6 +97,7 @@ body:has(.neo-home) .content-panel:not(:has(.neo-home)) {
   padding: 0;
   overflow: hidden;
   background: #f7f6f2;
+  border-top: 0;
 }
 
 .content-panel:has(.neo-home) .sl-container,
@@ -110,10 +111,22 @@ body:has(.neo-home) .content-panel:not(:has(.neo-home)) {
   display: none;
 }
 
+html:has(.neo-home),
+body:has(.neo-home) {
+  background: #f7f6f2;
+}
+
 body:has(.neo-home) .header {
+  position: absolute;
   color: #262723;
-  background: rgba(247, 246, 242, 0.9);
+  background: #f7f6f2;
   border-bottom-color: #dfded8;
+  backdrop-filter: none;
+}
+
+body:has(.neo-home) .header .social-icons::after {
+  border: 0;
+  margin: 0;
 }
 
 body:has(.neo-home) .header a,
@@ -169,6 +182,12 @@ body:has(.neo-home) .site-title::after {
   font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
   font-weight: 400;
   letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+.neo-home ::selection {
+  color: #f7f6f2;
+  background: var(--neo-moss);
 }
 
 .neo-home h3 {
@@ -188,32 +207,37 @@ body:has(.neo-home) .site-title::after {
 }
 
 .neo-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(31rem, 5fr);
-  gap: var(--neo-space-5);
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   width: min(100% - 3rem, 70rem);
   margin: 0 auto;
-  padding: var(--neo-space-3) 0 var(--neo-space-4);
-  text-align: left;
+  padding: var(--neo-space-5) 0 var(--neo-space-6);
+  text-align: center;
 }
 
 .neo-hero h1 {
-  max-width: 35rem;
-  margin: 0 0 1.15rem;
-  font-size: clamp(3.35rem, 5vw, 4.6rem);
+  max-width: 20ch;
+  margin: 0 auto 1.25rem;
+  font-size: clamp(3.4rem, 6vw, 5.5rem);
   line-height: 1;
 }
 
 .neo-hero-copy {
   min-width: 0;
+  width: 100%;
 }
 
-.neo-hero-lede {
-  max-width: 34rem;
+.neo-hero .neo-hero-lede {
+  max-width: 36rem;
+  margin-inline: auto;
   color: var(--neo-muted);
   font-size: clamp(1rem, 1.35vw, 1.12rem);
   line-height: 1.5;
+}
+
+.neo-hero .neo-actions {
+  justify-content: center;
 }
 
 .neo-actions {
@@ -267,10 +291,10 @@ body:has(.neo-home) .site-title::after {
 .neo-install {
   display: flex;
   align-items: center;
-  width: min(100%, 39rem);
+  width: min(100%, 43rem);
   max-width: 100%;
   min-height: 3.25rem;
-  margin: 2rem 0 0;
+  margin: 1.5rem auto 0;
   padding-left: 1rem;
   overflow: hidden;
   color: #50524d;
@@ -346,14 +370,28 @@ body:has(.neo-home) .site-title::after {
   clip-path: inset(50%);
 }
 
-.neo-hero-preview {
-  width: 100%;
-  min-width: 0;
+.neo-card {
   overflow: hidden;
   background: var(--neo-white);
   border: 1px solid var(--neo-line-dark);
   border-radius: 0.65rem;
   box-shadow: 0 1.5rem 4rem rgba(41, 42, 37, 0.07);
+}
+
+.neo-status-dot {
+  display: block;
+  width: 0.4rem;
+  height: 0.4rem;
+  background: var(--neo-moss);
+  border-radius: 50%;
+}
+
+.neo-hero-preview {
+  width: 100%;
+  max-width: 56rem;
+  min-width: 0;
+  margin-top: var(--neo-space-5);
+  text-align: left;
 }
 
 .neo-preview-bar,
@@ -387,10 +425,24 @@ body:has(.neo-home) .site-title::after {
 .neo-preview-bar i,
 .neo-preview-list .active > span i {
   display: block;
-  width: 0.4rem;
-  height: 0.4rem;
-  background: var(--neo-moss);
-  border-radius: 50%;
+}
+
+@keyframes neo-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.neo-preview-bar i,
+.neo-preview-list .active > span i,
+.neo-mode i,
+.neo-plan .active .neo-check i,
+.neo-agent-row small.working::before {
+  animation: neo-pulse 2.2s ease-in-out infinite;
 }
 
 .neo-preview-body {
@@ -535,11 +587,6 @@ body:has(.neo-home) .site-title::after {
 .neo-workflow {
   max-width: 61rem;
   margin-inline: auto;
-  overflow: hidden;
-  background: var(--neo-white);
-  border: 1px solid var(--neo-line-dark);
-  border-radius: 0.65rem;
-  box-shadow: 0 1.5rem 4rem rgba(41, 42, 37, 0.07);
 }
 
 .neo-workflow-top,
@@ -566,10 +613,7 @@ body:has(.neo-home) .site-title::after {
 }
 
 .neo-mode i {
-  width: 0.4rem;
-  height: 0.4rem;
-  background: var(--neo-moss);
-  border-radius: 50%;
+  flex: none;
 }
 
 .neo-request {
@@ -637,8 +681,6 @@ body:has(.neo-home) .site-title::after {
 .neo-plan .active .neo-check i {
   width: 0.38rem;
   height: 0.38rem;
-  background: var(--neo-moss);
-  border-radius: 50%;
 }
 
 .neo-plan strong,
@@ -897,22 +939,15 @@ body:has(.neo-home) .site-title::after {
   color: var(--neo-muted);
 }
 
+.neo-final .neo-actions {
+  justify-content: center;
+}
+
 @media (max-width: 64rem) {
-  .neo-hero,
   .neo-product-heading,
   .neo-orchestration,
   .neo-foundation {
     grid-template-columns: 1fr;
-  }
-
-  .neo-hero {
-    max-width: 44rem;
-    gap: var(--neo-space-4);
-  }
-
-  .neo-hero h1,
-  .neo-hero-lede {
-    max-width: 39rem;
   }
 
   .neo-product-heading {
@@ -962,18 +997,22 @@ body:has(.neo-home) .site-title::after {
   }
 
   .neo-hero {
-    gap: var(--neo-space-4);
-    padding-top: 2rem;
+    padding-top: 2.5rem;
   }
 
   .neo-hero h1 {
-    font-size: clamp(2.9rem, 14vw, 4rem);
+    font-size: clamp(2.9rem, 13vw, 4rem);
   }
 
   .neo-actions {
     align-items: flex-start;
     flex-direction: column;
     gap: 1rem;
+  }
+
+  .neo-hero .neo-actions,
+  .neo-final .neo-actions {
+    align-items: center;
   }
 
   .neo-actions .neo-button {
@@ -1042,5 +1081,7 @@ body:has(.neo-home) .site-title::after {
   .neo-home *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
