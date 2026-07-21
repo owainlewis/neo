@@ -13,7 +13,7 @@ import (
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
-func TestNewModelLeavesMouseWheelToTerminal(t *testing.T) {
+func TestNewModelEnablesMouseWheel(t *testing.T) {
 	t.Parallel()
 
 	base := makeTestModel()
@@ -21,24 +21,35 @@ func TestNewModelLeavesMouseWheelToTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new model: %v", err)
 	}
-	if m.viewport.MouseWheelEnabled {
-		t.Fatal("MouseWheelEnabled = true, want native terminal text selection")
+	if !m.viewport.MouseWheelEnabled {
+		t.Fatal("MouseWheelEnabled = false, want transcript wheel scrolling")
+	}
+	m.viewport.SetWidth(10)
+	m.viewport.SetContent(strings.Repeat("x", 40))
+	for _, msg := range []tea.MouseWheelMsg{
+		tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight}),
+		tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift}),
+	} {
+		m.Update(msg)
+		if got := m.viewport.XOffset(); got != 0 {
+			t.Fatalf("horizontal wheel changed X offset to %d, want 0", got)
+		}
 	}
 }
 
-func TestMakeViewLeavesMouseToTerminalForTextSelection(t *testing.T) {
+func TestMakeViewEnablesTranscriptMouseScrolling(t *testing.T) {
 	t.Parallel()
 
 	v := makeView("visible output")
-	if v.MouseMode != tea.MouseModeNone {
-		t.Fatalf("MouseMode = %v, want MouseModeNone for native text selection", v.MouseMode)
+	if v.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("MouseMode = %v, want MouseModeCellMotion for wheel events", v.MouseMode)
 	}
 	if !v.AltScreen {
 		t.Fatal("AltScreen = false, want true")
 	}
 }
 
-func TestPageKeysScrollTranscript(t *testing.T) {
+func TestPageKeysAndMouseWheelScrollTranscript(t *testing.T) {
 	t.Parallel()
 
 	v := viewport.New(viewport.WithWidth(20), viewport.WithHeight(3))
@@ -55,6 +66,15 @@ func TestPageKeysScrollTranscript(t *testing.T) {
 	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
 	if got := m.viewport.YOffset(); got != before {
 		t.Fatalf("page down offset = %d, want %d", got, before)
+	}
+
+	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp}))
+	if got := m.viewport.YOffset(); got >= before {
+		t.Fatalf("wheel up offset = %d, want less than %d", got, before)
+	}
+	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	if got := m.viewport.YOffset(); got != before {
+		t.Fatalf("wheel down offset = %d, want %d", got, before)
 	}
 }
 
