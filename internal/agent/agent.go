@@ -421,6 +421,9 @@ type preparedToolCall struct {
 	tool      tools.Tool
 	decision  permission.Result
 	lookupErr string
+	groupID   string
+	groupSize int
+	groupPos  int
 }
 
 type toolOutcome struct {
@@ -554,6 +557,9 @@ func (a *Agent) executePreparedGroup(ctx context.Context, calls []preparedToolCa
 	sem := make(chan struct{}, a.cfg.MaxParallelTools)
 	var wg sync.WaitGroup
 	for i, call := range calls {
+		call.groupID = groupID
+		call.groupSize = len(calls)
+		call.groupPos = i
 		if call.tool == nil || call.lookupErr != "" || call.decision.Decision != permission.Allow {
 			outcomes[i] = a.runPreparedTool(ctx, call)
 			continue
@@ -595,6 +601,7 @@ func (a *Agent) executeSerialBlock(ctx context.Context, block llm.ContentBlock) 
 }
 
 func (a *Agent) executePreparedSerial(ctx context.Context, call preparedToolCall) llm.ContentBlock {
+	call.groupSize = 1
 	a.emit(toolEvent(EventToolCall, call.block, "", 1, 0, "", false))
 	outcome := a.runPreparedTool(ctx, call)
 	outcome.text = capToolResultContent(outcome.text)
@@ -656,13 +663,23 @@ func (a *Agent) prepareTool(ctx context.Context, block llm.ContentBlock) prepare
 	}
 	call.tool = t
 	if a.cfg.Policy != nil {
-		call.decision = a.cfg.Policy.Decide(ctx, permission.Request{ToolName: block.Name, Args: block.Input})
+		call.decision = a.cfg.Policy.Decide(ctx, permission.Request{
+			ToolName: block.Name,
+			Args:     block.Input,
+			ReadOnly: a.cfg.Tools.ReadOnly(block.Name, block.Input),
+		})
 	}
 	return call
 }
 
 func (a *Agent) runPreparedTool(ctx context.Context, call preparedToolCall) toolOutcome {
 	name, input := call.block.Name, call.block.Input
+	ctx = tools.WithCallMetadata(ctx, tools.CallMetadata{
+		ToolUseID: call.block.ID,
+		GroupID:   call.groupID,
+		GroupSize: call.groupSize,
+		GroupPos:  call.groupPos,
+	})
 	logx.Debug("tool call", "name", name, "args", logx.SafeAny(input))
 	if call.lookupErr != "" {
 		logx.Debug("tool lookup failed", "name", name)

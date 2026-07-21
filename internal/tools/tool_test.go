@@ -49,6 +49,27 @@ func TestRegistryParallelSafeFailsClosed(t *testing.T) {
 	}
 }
 
+type conditionalReadOnlyTestTool struct{ serialTestTool }
+
+func (conditionalReadOnlyTestTool) Name() string { return "read_only" }
+func (conditionalReadOnlyTestTool) ReadOnly(input map[string]any) bool {
+	readOnly, _ := input["read_only"].(bool)
+	return readOnly
+}
+
+func TestRegistryReadOnlyFailsClosed(t *testing.T) {
+	r := NewRegistry(serialTestTool{}, conditionalReadOnlyTestTool{})
+	if r.ReadOnly("missing", nil) || r.ReadOnly("serial", nil) {
+		t.Fatal("unknown or unclassified tools must fail closed")
+	}
+	if r.ReadOnly("read_only", map[string]any{"read_only": false}) {
+		t.Fatal("false dynamic classification ignored")
+	}
+	if !r.ReadOnly("read_only", map[string]any{"read_only": true}) {
+		t.Fatal("read-only capability was not honored")
+	}
+}
+
 func TestReadSearchToolsAreParallelSafe(t *testing.T) {
 	for name, tool := range map[string]Tool{
 		"read_file": ReadFile{},

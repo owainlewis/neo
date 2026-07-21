@@ -29,9 +29,8 @@ type AgentRunner struct {
 
 	// Mode is the permission mode child agents run under. They execute
 	// autonomously (there is no approver inside a subagent), so "ask" cannot be
-	// honored during a run; but "readonly" must propagate — a readonly session
-	// delegating must not gain write access through the side door.
-	// Empty defaults to trusted.
+	// honored during a run; but "readonly" must propagate. Empty defaults to
+	// trusted.
 	Mode permission.Mode
 }
 
@@ -59,9 +58,18 @@ func (r *AgentRunner) backend() (llm.Provider, string) {
 }
 
 func (r *AgentRunner) RunAgent(ctx context.Context, dir, input string, events chan<- AgentEvent) (string, error) {
+	return r.RunAgentWithOptions(ctx, dir, input, events, RunOptions{})
+}
+
+// RunAgentWithOptions applies immutable per-run capabilities without mutating
+// the shared runner used by concurrent inspect children.
+func (r *AgentRunner) RunAgentWithOptions(ctx context.Context, dir, input string, events chan<- AgentEvent, opts RunOptions) (string, error) {
 	provider, model := r.backend()
 
 	mode := r.Mode
+	if opts.PermissionMode != "" {
+		mode = opts.PermissionMode
+	}
 	if mode == "" || mode == permission.ModeAsk {
 		mode = permission.ModeTrusted
 	}
@@ -69,7 +77,7 @@ func (r *AgentRunner) RunAgent(ctx context.Context, dir, input string, events ch
 		Model:     model,
 		System:    dynamicAgentSystemPrompt,
 		Provider:  provider,
-		Tools:     r.registry(dir),
+		Tools:     r.registryWithOptions(dir, opts),
 		Policy:    permission.New(string(mode), r.Root),
 		Compactor: compact.NewSummarizer(provider, model),
 		MaxTurns:  agent.DefaultMaxTurns,
@@ -85,19 +93,26 @@ func (r *AgentRunner) RunAgent(ctx context.Context, dir, input string, events ch
 
 	out, err := ag.Send(ctx, input)
 	u := ag.Usage()
-	events <- AgentEvent{
+	select {
+	case events <- AgentEvent{
 		Kind: "usage",
 		Body: fmt.Sprintf("tokens in=%d out=%d cached=%d", u.InputTokens, u.OutputTokens, u.CacheReadTokens),
+	}:
+	case <-ctx.Done():
 	}
 	return out, err
 }
 
 func (r *AgentRunner) registry(dir string) *tools.Registry {
+	return r.registryWithOptions(dir, RunOptions{})
+}
+
+func (r *AgentRunner) registryWithOptions(dir string, opts RunOptions) *tools.Registry {
 	bashTimeout := r.BashTimeout
 	if bashTimeout <= 0 {
 		bashTimeout = 2 * time.Minute
 	}
-	return tools.NewRegistry(
+	all := tools.NewRegistry(
 		tools.Bash{Timeout: bashTimeout, CWD: dir},
 		tools.ReadFile{},
 		tools.WriteFile{},
@@ -105,12 +120,13 @@ func (r *AgentRunner) registry(dir string) *tools.Registry {
 		tools.Grep{Root: r.Root},
 		tools.Glob{Root: r.Root},
 	)
+	if len(opts.Tools) == 0 {
+		return all
+	}
+	return all.Filter(opts.Tools)
 }
 
 // translate maps core agent loop events onto the factory event stream.
-// Tool results are dropped unless they errored — the call line is the
-// interesting signal for a status display. agent calls are dropped too:
-// the child subagent's own start event renders it.
 func translate(e agent.Event) (AgentEvent, bool) {
 	switch e.Kind {
 	case agent.EventAssistantText, agent.EventAssistantCommentary:
@@ -136,9 +152,6 @@ func translate(e agent.Event) (AgentEvent, bool) {
 	}
 }
 
-// summarize renders a tool call as a one-line status: what the step is
-// doing right now. (agent.Preview is the approval diff, not a summary —
-// it's empty for most tools.)
 func summarize(name string, args map[string]any) string {
 	arg := func(key string) string { s, _ := args[key].(string); return s }
 	switch name {

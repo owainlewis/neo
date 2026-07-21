@@ -21,6 +21,7 @@ const (
 type Request struct {
 	ToolName string
 	Args     map[string]any
+	ReadOnly bool
 }
 
 type Result struct {
@@ -73,14 +74,14 @@ func (p WorkspacePolicy) Decide(_ context.Context, req Request) Result {
 	}
 	switch p.Mode {
 	case ModeReadonly:
-		if isReadTool(req.ToolName) {
+		if req.ReadOnly || isReadTool(req.ToolName) {
 			return Result{Decision: Allow}
 		}
 		return Result{Decision: Deny, Reason: fmt.Sprintf("permission mode readonly denied %s", req.ToolName)}
 	case ModeTrusted:
 		return Result{Decision: Allow}
 	default:
-		if isReadTool(req.ToolName) {
+		if req.ReadOnly || isReadTool(req.ToolName) {
 			return Result{Decision: Allow}
 		}
 		return Result{Decision: Ask}

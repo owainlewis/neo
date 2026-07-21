@@ -14,7 +14,23 @@ package factory
 import (
 	"strings"
 	"time"
+
+	"github.com/owainlewis/neo/internal/permission"
+	"github.com/owainlewis/neo/internal/tools"
 )
+
+// RunOptions are immutable capabilities for one child run.
+type RunOptions struct {
+	PermissionMode permission.Mode
+	Tools          []string
+}
+
+// PromptOptions configure one chat-spawned child and carry parent call
+// attribution without exposing scheduler metadata to the model.
+type PromptOptions struct {
+	Mode AgentMode
+	Call tools.CallMetadata
+}
 
 // Budget is enforced by the runtime regardless of what an agent asks for.
 type Budget struct {
@@ -41,16 +57,21 @@ type AgentEvent struct {
 
 // Event tags an agent event with the execution that produced it.
 type Event struct {
-	At   time.Time  `json:"at"`
-	Node int        `json:"node"`
-	Task string     `json:"task,omitempty"`
-	Ev   AgentEvent `json:"ev"`
+	At        time.Time  `json:"at"`
+	Node      int        `json:"node"`
+	Task      string     `json:"task,omitempty"`
+	CallID    string     `json:"call_id,omitempty"`
+	GroupID   string     `json:"group_id,omitempty"`
+	GroupSize int        `json:"group_size,omitempty"`
+	GroupPos  int        `json:"group_pos,omitempty"`
+	Ev        AgentEvent `json:"ev"`
 }
 
 // Node is one subagent execution.
 type Node struct {
 	ID   int
 	Task string // clipped, for the UI
+	Call tools.CallMetadata
 }
 
 // clip returns the first line of s, truncated to at most n runes.

@@ -17,13 +17,21 @@ import (
 func TestRegistryHasCodingToolsWithoutNestedAgent(t *testing.T) {
 	r := &AgentRunner{Root: t.TempDir()}
 	names := r.registry(t.TempDir()).Names()
-	for _, want := range []string{"bash", "read_file", "write_file", "edit_file", "grep", "glob"} {
+	for _, want := range dynamicAgentTools {
 		if !slices.Contains(names, want) {
 			t.Fatalf("registry %v missing %s", names, want)
 		}
 	}
 	if slices.Contains(names, "agent") {
 		t.Fatalf("subagents must not receive nested delegation: %v", names)
+	}
+}
+
+func TestInspectRegistryHasOnlyReadTools(t *testing.T) {
+	r := &AgentRunner{Root: t.TempDir()}
+	names := r.registryWithOptions(t.TempDir(), RunOptions{Tools: inspectAgentTools}).Names()
+	if !slices.Equal(names, []string{"glob", "grep", "read_file"}) {
+		t.Fatalf("inspect registry=%v", names)
 	}
 }
 

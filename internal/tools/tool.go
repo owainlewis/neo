@@ -22,6 +22,13 @@ type ParallelTool interface {
 	ParallelSafe(input map[string]any) bool
 }
 
+// ReadOnlyTool is an optional runtime-owned capability for calls that cannot
+// mutate external state. Permission policies may allow these calls in
+// read-only sessions after tool-specific input validation.
+type ReadOnlyTool interface {
+	ReadOnly(input map[string]any) bool
+}
+
 type Registry struct {
 	tools map[string]Tool
 }
@@ -48,6 +55,17 @@ func (r *Registry) ParallelSafe(name string, input map[string]any) bool {
 	}
 	p, ok := t.(ParallelTool)
 	return ok && p.ParallelSafe(input)
+}
+
+// ReadOnly reports whether a concrete call is safe under a read-only policy.
+// Unknown and unclassified tools fail closed.
+func (r *Registry) ReadOnly(name string, input map[string]any) bool {
+	t, ok := r.Get(name)
+	if !ok {
+		return false
+	}
+	readOnly, ok := t.(ReadOnlyTool)
+	return ok && readOnly.ReadOnly(input)
 }
 
 func (r *Registry) Specs() []llm.ToolSpec {
