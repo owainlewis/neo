@@ -220,6 +220,31 @@ func TestToResponse_PreservesReasoningItems(t *testing.T) {
 	}
 }
 
+func TestParallelToolCallsAndResultsPreserveOrder(t *testing.T) {
+	raw := []byte(`{"status":"completed","output":[{"type":"function_call","call_id":"call_a","name":"read","arguments":"{\"path\":\"a\"}"},{"type":"function_call","call_id":"call_b","name":"read","arguments":"{\"path\":\"b\"}"}]}`)
+	var out apiResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := toResponse(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Content) != 2 || resp.Content[0].ID != "call_a" || resp.Content[1].ID != "call_b" {
+		t.Fatalf("parallel calls = %#v", resp.Content)
+	}
+	items := toInput(llm.Request{Messages: []llm.Message{
+		{Role: llm.RoleAssistant, Content: resp.Content},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call_a", Content: "A"},
+			{Type: "tool_result", ToolUseID: "call_b", Content: "B"},
+		}},
+	}})
+	if len(items) != 4 || items[0].CallID != "call_a" || items[1].CallID != "call_b" || items[2].CallID != "call_a" || items[3].CallID != "call_b" {
+		t.Fatalf("parallel wire items = %#v", items)
+	}
+}
+
 func TestToInput_ToolUseAndResult(t *testing.T) {
 	req := llm.Request{
 		Messages: []llm.Message{

@@ -38,6 +38,7 @@ you change code. When you finish a task, briefly summarize what changed.
 
 Before tool calls, write one short sentence explaining what you are checking or
 changing and why. Do not narrate obvious individual calls or expose private reasoning.
+Issue independent reads, searches, or inspections together in one response.
 
 For multi-step tasks, or when workflow instructions are provided, create a
 visible workflow checklist with the workflow tool before doing the work.

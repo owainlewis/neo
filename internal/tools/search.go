@@ -49,6 +49,8 @@ type Grep struct {
 
 func (Grep) Name() string { return "grep" }
 
+func (Grep) ParallelSafe(map[string]any) bool { return true }
+
 func (Grep) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "grep",
@@ -106,11 +108,27 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 			}
 			return out, err
 		}
-		lines, err := readTextLines(file)
+		lines, err := readTextLines(ctx, file)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				result.Count = len(result.Matches)
+				out, encodeErr := encodeSearchResult(result)
+				if encodeErr != nil {
+					return "", encodeErr
+				}
+				return out, ctxErr
+			}
 			continue
 		}
 		for i, line := range lines {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				result.Count = len(result.Matches)
+				out, encodeErr := encodeSearchResult(result)
+				if encodeErr != nil {
+					return "", encodeErr
+				}
+				return out, ctxErr
+			}
 			if !re.MatchString(line) {
 				continue
 			}
@@ -135,6 +153,14 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 			result.Matches = append(result.Matches, match)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		result.Count = len(result.Matches)
+		out, encodeErr := encodeSearchResult(result)
+		if encodeErr != nil {
+			return "", encodeErr
+		}
+		return out, err
+	}
 	result.Count = len(result.Matches)
 	return encodeSearchResult(result)
 }
@@ -144,6 +170,8 @@ type Glob struct {
 }
 
 func (Glob) Name() string { return "glob" }
+
+func (Glob) ParallelSafe(map[string]any) bool { return true }
 
 func (Glob) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
@@ -270,7 +298,10 @@ func filesUnder(ctx context.Context, path string) ([]string, error) {
 	return files, err
 }
 
-func readTextLines(path string) ([]string, error) {
+func readTextLines(ctx context.Context, path string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -280,6 +311,9 @@ func readTextLines(path string) ([]string, error) {
 	sc.Buffer(make([]byte, 1024), MaxReadBytes)
 	var lines []string
 	for sc.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		line := sc.Text()
 		if strings.ContainsRune(line, 0) {
 			return nil, fmt.Errorf("binary file")

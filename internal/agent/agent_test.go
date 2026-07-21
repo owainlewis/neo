@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
@@ -163,6 +164,95 @@ type recordingTool struct {
 	called *bool
 }
 
+type parallelProbeTool struct {
+	started chan struct{}
+	release chan struct{}
+	once    *sync.Once
+	mu      *sync.Mutex
+	running *int
+	max     *int
+}
+
+func (parallelProbeTool) Name() string { return "parallel_probe" }
+func (parallelProbeTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: "parallel_probe", Description: "probe", InputSchema: map[string]any{"type": "object"}}
+}
+func (parallelProbeTool) ParallelSafe(map[string]any) bool { return true }
+func (t parallelProbeTool) Run(ctx context.Context, input map[string]any) (string, error) {
+	t.mu.Lock()
+	*t.running++
+	if *t.running > *t.max {
+		*t.max = *t.running
+	}
+	if *t.running >= 2 {
+		t.once.Do(func() { close(t.started) })
+	}
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		*t.running--
+		t.mu.Unlock()
+	}()
+	select {
+	case <-t.release:
+		id, _ := input["id"].(string)
+		return id, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+type askPolicy struct{}
+
+func (askPolicy) Decide(context.Context, permission.Request) permission.Result {
+	return permission.Result{Decision: permission.Ask, Reason: "test approval"}
+}
+
+type approvalProbeTool struct {
+	mu      *sync.Mutex
+	running *int
+	max     *int
+}
+
+type cancelQueueTool struct {
+	started chan struct{}
+	once    *sync.Once
+	mu      *sync.Mutex
+	calls   *int
+}
+
+func (cancelQueueTool) Name() string { return "cancel_queue" }
+func (cancelQueueTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: "cancel_queue", Description: "probe", InputSchema: map[string]any{"type": "object"}}
+}
+func (cancelQueueTool) ParallelSafe(map[string]any) bool { return true }
+func (t cancelQueueTool) Run(ctx context.Context, _ map[string]any) (string, error) {
+	t.mu.Lock()
+	(*t.calls)++
+	t.once.Do(func() { close(t.started) })
+	t.mu.Unlock()
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func (approvalProbeTool) Name() string { return "approval_probe" }
+func (approvalProbeTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: "approval_probe", Description: "probe", InputSchema: map[string]any{"type": "object"}}
+}
+func (approvalProbeTool) ParallelSafe(map[string]any) bool { return true }
+func (t approvalProbeTool) Run(context.Context, map[string]any) (string, error) {
+	t.mu.Lock()
+	*t.running++
+	if *t.running > *t.max {
+		*t.max = *t.running
+	}
+	t.mu.Unlock()
+	t.mu.Lock()
+	*t.running--
+	t.mu.Unlock()
+	return "ok", nil
+}
+
 func (t recordingTool) Name() string { return t.name }
 func (t recordingTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{Name: t.name, Description: t.name, InputSchema: map[string]any{"type": "object"}}
@@ -297,6 +387,230 @@ func TestAgent_SteeringSkipsStaleSiblingTools(t *testing.T) {
 	}
 	if content[2].Type != "text" || content[2].Text != "stop before mutating" {
 		t.Fatalf("steering block = %#v", content[2])
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_ParallelSafeCallsOverlapAndKeepSourceOrder(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	running, maxRunning := 0, 0
+	tool := parallelProbeTool{started: started, release: release, once: &once, mu: &mu, running: &running, max: &maxRunning}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{Content: []llm.ContentBlock{
+			{Type: "tool_use", ID: "call_a", Name: tool.Name(), Input: map[string]any{"id": "A"}},
+			{Type: "tool_use", ID: "call_b", Name: tool.Name(), Input: map[string]any{"id": "B"}},
+		}, StopReason: "tool_use"},
+		llmtest.Text("done"),
+	}}
+	var events []Event
+	ag := New(Config{Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), OnEvent: func(e Event) {
+		events = append(events, e)
+	}})
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(context.Background(), "inspect")
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("parallel calls did not overlap")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if maxRunning != 2 {
+		t.Fatalf("max concurrent calls = %d, want 2", maxRunning)
+	}
+	results := prov.Calls[1].Messages[2].Content
+	if len(results) != 2 || results[0].ToolUseID != "call_a" || results[0].Content != "A" || results[1].ToolUseID != "call_b" || results[1].Content != "B" {
+		t.Fatalf("ordered results = %#v", results)
+	}
+	if len(events) < 5 || events[0].Kind != EventParallelStart || events[0].GroupSize != 2 {
+		t.Fatalf("parallel events = %#v", events)
+	}
+	if events[1].Kind != EventToolCall || events[1].ToolUseID != "call_a" || events[2].Kind != EventToolCall || events[2].ToolUseID != "call_b" {
+		t.Fatalf("call events lost source order: %#v", events[:3])
+	}
+	if events[3].Kind != EventToolResult || events[3].ToolUseID != "call_a" || events[4].Kind != EventToolResult || events[4].ToolUseID != "call_b" {
+		t.Fatalf("result events lost source order: %#v", events[3:5])
+	}
+}
+
+func TestAgent_ApprovalTurnsParallelSafeCallsIntoSerialBarriers(t *testing.T) {
+	var mu sync.Mutex
+	running, maxRunning := 0, 0
+	tool := approvalProbeTool{mu: &mu, running: &running, max: &maxRunning}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{Content: []llm.ContentBlock{
+			{Type: "tool_use", ID: "call_a", Name: tool.Name()},
+			{Type: "tool_use", ID: "call_b", Name: tool.Name()},
+		}, StopReason: "tool_use"},
+		llmtest.Text("done"),
+	}}
+	var events []Event
+	ag := New(Config{
+		Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), Policy: askPolicy{},
+		Approve: func(context.Context, ApprovalRequest) (bool, error) { return true, nil },
+		OnEvent: func(e Event) { events = append(events, e) },
+	})
+	if _, err := ag.Send(context.Background(), "inspect"); err != nil {
+		t.Fatal(err)
+	}
+	if maxRunning != 1 {
+		t.Fatalf("approval-requiring calls overlapped: max=%d", maxRunning)
+	}
+	for _, event := range events {
+		if event.Kind == EventParallelStart {
+			t.Fatalf("approval-requiring calls formed a parallel group: %#v", event)
+		}
+	}
+}
+
+func TestAgent_ParallelConcurrencyIsBounded(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	running, maxRunning := 0, 0
+	tool := parallelProbeTool{started: started, release: release, once: &once, mu: &mu, running: &running, max: &maxRunning}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{Content: []llm.ContentBlock{
+			{Type: "tool_use", ID: "call_a", Name: tool.Name()},
+			{Type: "tool_use", ID: "call_b", Name: tool.Name()},
+			{Type: "tool_use", ID: "call_c", Name: tool.Name()},
+		}, StopReason: "tool_use"},
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), MaxParallelTools: 2})
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(context.Background(), "inspect")
+		done <- err
+	}()
+	<-started
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if maxRunning != 2 {
+		t.Fatalf("max concurrent calls = %d, want cap 2", maxRunning)
+	}
+}
+
+func TestAgent_SteeringAfterParallelGroupSkipsWriteBarrier(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	running, maxRunning := 0, 0
+	probe := parallelProbeTool{started: started, release: release, once: &once, mu: &mu, running: &running, max: &maxRunning}
+	mutated := false
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{Content: []llm.ContentBlock{
+			{Type: "tool_use", ID: "call_a", Name: probe.Name(), Input: map[string]any{"id": "A"}},
+			{Type: "tool_use", ID: "call_b", Name: probe.Name(), Input: map[string]any{"id": "B"}},
+			{Type: "tool_use", ID: "call_write", Name: "mutate"},
+		}, StopReason: "tool_use"},
+		llmtest.Text("redirected"),
+	}}
+	ag := newTestAgent(t, prov, probe, recordingTool{name: "mutate", called: &mutated})
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(context.Background(), "start")
+		done <- err
+	}()
+	<-started
+	if !ag.Steer("do not write") {
+		t.Fatal("steering rejected")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if mutated {
+		t.Fatal("write barrier ran after steering")
+	}
+	resultBlocks := prov.Calls[1].Messages[2].Content
+	if len(resultBlocks) != 4 || resultBlocks[2].ToolUseID != "call_write" || !resultBlocks[2].IsError || !strings.Contains(resultBlocks[2].Content, "steered") {
+		t.Fatalf("steered results = %#v", resultBlocks)
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_CancellationPairsParallelAndUnstartedCalls(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	running, maxRunning := 0, 0
+	probe := parallelProbeTool{started: started, release: release, once: &once, mu: &mu, running: &running, max: &maxRunning}
+	mutated := false
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{{
+		Content: []llm.ContentBlock{
+			{Type: "tool_use", ID: "call_a", Name: probe.Name()},
+			{Type: "tool_use", ID: "call_b", Name: probe.Name()},
+			{Type: "tool_use", ID: "call_write", Name: "mutate"},
+		},
+		StopReason: "tool_use",
+	}}}
+	ag := newTestAgent(t, prov, probe, recordingTool{name: "mutate", called: &mutated})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(ctx, "start")
+		done <- err
+	}()
+	<-started
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("send error = %v, want context canceled", err)
+	}
+	if mutated {
+		t.Fatal("unstarted write ran after cancellation")
+	}
+	transcript := ag.Transcript()
+	assertToolUseResultsPaired(t, transcript)
+	results := transcript[2].Content
+	if len(results) != 3 || results[2].ToolUseID != "call_write" || !results[2].IsError || !strings.Contains(results[2].Content, "canceled") {
+		t.Fatalf("canceled results = %#v", results)
+	}
+}
+
+func TestAgent_CancellationDoesNotStartCallsWaitingForParallelSlot(t *testing.T) {
+	started := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	calls := 0
+	tool := cancelQueueTool{started: started, once: &once, mu: &mu, calls: &calls}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{{
+		Content: []llm.ContentBlock{
+			{Type: "tool_use", ID: "call_a", Name: tool.Name()},
+			{Type: "tool_use", ID: "call_b", Name: tool.Name()},
+		},
+		StopReason: "tool_use",
+	}}}
+	ag := New(Config{Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), MaxParallelTools: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(ctx, "start")
+		done <- err
+	}()
+	<-started
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("send error = %v, want context canceled", err)
+	}
+	mu.Lock()
+	gotCalls := calls
+	mu.Unlock()
+	if gotCalls != 1 {
+		t.Fatalf("tool Run calls = %d, want only active call", gotCalls)
 	}
 	assertToolUseResultsPaired(t, ag.Transcript())
 }

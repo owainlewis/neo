@@ -19,6 +19,7 @@ type EventKind string
 const (
 	EventAssistantText       EventKind = "assistant_text"
 	EventAssistantCommentary EventKind = "assistant_commentary"
+	EventParallelStart       EventKind = "parallel_start"
 	EventToolCall            EventKind = "tool_call"
 	EventToolResult          EventKind = "tool_result"
 	EventSteeringApplied     EventKind = "steering_applied"
@@ -35,13 +36,26 @@ var ErrMaxTurns = errors.New("max turns reached")
 var ErrMaxOutputTokens = errors.New("response truncated: model hit its max output tokens limit")
 
 type Event struct {
-	Kind     EventKind
-	Text     string
-	Name     string
-	Args     map[string]any
-	MaxTurns int
-	IsError  bool // set on EventToolResult when the tool returned an error
-	Err      error
+	Kind      EventKind
+	Text      string
+	Name      string
+	Args      map[string]any
+	ToolUseID string
+	GroupID   string
+	GroupSize int
+	GroupPos  int
+	Calls     []ToolCallRef
+	MaxTurns  int
+	IsError   bool // set on EventToolResult when the tool returned an error
+	Err       error
+}
+
+// ToolCallRef is the ordered, immutable summary announced before a parallel
+// group starts. IDs are provider tool-use IDs and are opaque to consumers.
+type ToolCallRef struct {
+	ID   string
+	Name string
+	Args map[string]any
 }
 
 type ApprovalRequest struct {
@@ -56,17 +70,18 @@ type Config struct {
 	// System is the flattened system prompt. SystemBlocks, when set, carries the
 	// same prompt as ordered segments so the provider can place cache breakpoints;
 	// the loop passes both so providers can use whichever they support.
-	System       string
-	SystemBlocks []llm.SystemBlock
-	Provider     llm.Provider
-	Tools        *tools.Registry
-	Policy       permission.Policy
-	Compactor    compact.Compactor
-	Approve      func(context.Context, ApprovalRequest) (bool, error)
-	MaxTurns     int
-	OnEvent      func(Event)
-	Messages     []llm.Message
-	Usage        llm.Usage
+	System           string
+	SystemBlocks     []llm.SystemBlock
+	Provider         llm.Provider
+	Tools            *tools.Registry
+	Policy           permission.Policy
+	Compactor        compact.Compactor
+	Approve          func(context.Context, ApprovalRequest) (bool, error)
+	MaxTurns         int
+	MaxParallelTools int
+	OnEvent          func(Event)
+	Messages         []llm.Message
+	Usage            llm.Usage
 }
 
 type Agent struct {
@@ -79,6 +94,8 @@ type Agent struct {
 	steerMu      sync.Mutex
 	steerActive  bool
 	steerPending []string
+
+	groupSeq uint64
 }
 
 // DefaultMaxTurns is a high safety fuse for runaway tool loops, not a normal
@@ -86,9 +103,14 @@ type Agent struct {
 // model should usually stop because it is done, not because Neo reached this.
 const DefaultMaxTurns = 500
 
+const DefaultMaxParallelTools = 8
+
 func New(cfg Config) *Agent {
 	if cfg.MaxTurns == 0 {
 		cfg.MaxTurns = DefaultMaxTurns
+	}
+	if cfg.MaxParallelTools <= 0 {
+		cfg.MaxParallelTools = DefaultMaxParallelTools
 	}
 	if cfg.Tools == nil {
 		cfg.Tools = tools.NewRegistry()
@@ -333,42 +355,7 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 		// the transcript never contains a tool_use without its tool_result, even
 		// if a tool panics or an early return is added later.
 		assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: resp.Content}
-		var toolResults []llm.ContentBlock
-		var steering []string
-		hasTools := hasToolUse(resp.Content)
-	toolLoop:
-		for i, block := range resp.Content {
-			switch block.Type {
-			case "text":
-				if block.Text != "" {
-					kind := EventAssistantText
-					if hasTools {
-						kind = EventAssistantCommentary
-					}
-					a.emit(Event{Kind: kind, Text: block.Text})
-					finalText.WriteString(block.Text)
-					finalText.WriteString("\n")
-				}
-			case "tool_use":
-				a.emit(Event{Kind: EventToolCall, Name: block.Name, Args: block.Input})
-				out, isErr := a.runTool(ctx, block.Name, block.Input)
-				out = capToolResultContent(out)
-				a.emit(Event{Kind: EventToolResult, Name: block.Name, Text: out, IsError: isErr})
-				toolResults = append(toolResults, llm.ContentBlock{
-					Type:      "tool_result",
-					ToolUseID: block.ID,
-					Content:   out,
-					IsError:   isErr,
-				})
-				if ctx.Err() == nil {
-					if pending, _ := a.takeSteering(false); len(pending) > 0 {
-						steering = pending
-						toolResults = append(toolResults, skippedToolResults(resp.Content[i+1:])...)
-						break toolLoop
-					}
-				}
-			}
-		}
+		toolResults, steering := a.processResponseContent(ctx, resp.Content, &finalText)
 
 		a.messages = append(a.messages, assistantMsg)
 		if len(toolResults) > 0 {
@@ -413,7 +400,7 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 	return strings.TrimSpace(finalText.String()), ErrMaxTurns
 }
 
-func skippedToolResults(content []llm.ContentBlock) []llm.ContentBlock {
+func skippedToolResults(content []llm.ContentBlock, reason string) []llm.ContentBlock {
 	var results []llm.ContentBlock
 	for _, block := range content {
 		if block.Type != "tool_use" {
@@ -422,11 +409,216 @@ func skippedToolResults(content []llm.ContentBlock) []llm.ContentBlock {
 		results = append(results, llm.ContentBlock{
 			Type:      "tool_result",
 			ToolUseID: block.ID,
-			Content:   "skipped because the user steered the active turn",
+			Content:   reason,
 			IsError:   true,
 		})
 	}
 	return results
+}
+
+type preparedToolCall struct {
+	block     llm.ContentBlock
+	tool      tools.Tool
+	decision  permission.Result
+	lookupErr string
+}
+
+type toolOutcome struct {
+	text    string
+	isError bool
+}
+
+func (a *Agent) processResponseContent(ctx context.Context, content []llm.ContentBlock, finalText *strings.Builder) ([]llm.ContentBlock, []string) {
+	var results []llm.ContentBlock
+	hasTools := hasToolUse(content)
+	for i := 0; i < len(content); {
+		block := content[i]
+		if block.Type == "text" {
+			if block.Text != "" {
+				kind := EventAssistantText
+				if hasTools {
+					kind = EventAssistantCommentary
+				}
+				a.emit(Event{Kind: kind, Text: block.Text})
+				finalText.WriteString(block.Text)
+				finalText.WriteString("\n")
+			}
+			i++
+			continue
+		}
+		if block.Type != "tool_use" {
+			i++
+			continue
+		}
+
+		if reason, steering := a.executionStop(ctx); reason != "" {
+			results = append(results, skippedToolResults(content[i:], reason)...)
+			return results, steering
+		}
+
+		if !a.cfg.Tools.ParallelSafe(block.Name, block.Input) {
+			result := a.executeSerialBlock(ctx, block)
+			results = append(results, result)
+			i++
+			if reason, steering := a.executionStop(ctx); reason != "" {
+				results = append(results, skippedToolResults(content[i:], reason)...)
+				return results, steering
+			}
+			continue
+		}
+
+		j := i
+		for j < len(content) && content[j].Type == "tool_use" && a.cfg.Tools.ParallelSafe(content[j].Name, content[j].Input) {
+			j++
+		}
+		prepared := make([]preparedToolCall, 0, j-i)
+		for _, candidate := range content[i:j] {
+			prepared = append(prepared, a.prepareTool(ctx, candidate))
+		}
+		processed, batchResults, steering := a.executePreparedCalls(ctx, prepared)
+		results = append(results, batchResults...)
+		if processed < len(prepared) || len(steering) > 0 || ctx.Err() != nil {
+			reason := "skipped because the user steered the active turn"
+			if ctx.Err() != nil {
+				reason = "skipped because the active turn was canceled"
+			}
+			results = append(results, skippedToolResults(content[i+processed:], reason)...)
+			return results, steering
+		}
+		i = j
+	}
+	return results, nil
+}
+
+// executePreparedCalls splits a run of parallel-safe calls around approval
+// barriers. Permission decisions were made serially by prepareTool.
+func (a *Agent) executePreparedCalls(ctx context.Context, calls []preparedToolCall) (int, []llm.ContentBlock, []string) {
+	var results []llm.ContentBlock
+	processed := 0
+	for processed < len(calls) {
+		if reason, steering := a.executionStop(ctx); reason != "" {
+			return processed, results, steering
+		}
+		barrier := processed
+		for barrier < len(calls) && calls[barrier].decision.Decision != permission.Ask {
+			barrier++
+		}
+		if barrier > processed {
+			segment := calls[processed:barrier]
+			segmentResults := a.executePreparedGroup(ctx, segment)
+			results = append(results, segmentResults...)
+			processed = barrier
+			if reason, steering := a.executionStop(ctx); reason != "" {
+				return processed, results, steering
+			}
+		}
+		if processed < len(calls) {
+			call := calls[processed]
+			results = append(results, a.executePreparedSerial(ctx, call))
+			processed++
+			if reason, steering := a.executionStop(ctx); reason != "" {
+				return processed, results, steering
+			}
+		}
+	}
+	return processed, results, nil
+}
+
+func (a *Agent) executePreparedGroup(ctx context.Context, calls []preparedToolCall) []llm.ContentBlock {
+	runnable := 0
+	for _, call := range calls {
+		if call.tool != nil && call.lookupErr == "" && call.decision.Decision == permission.Allow {
+			runnable++
+		}
+	}
+	if len(calls) < 2 || runnable < 2 {
+		results := make([]llm.ContentBlock, 0, len(calls))
+		for _, call := range calls {
+			results = append(results, a.executePreparedSerial(ctx, call))
+		}
+		return results
+	}
+
+	a.groupSeq++
+	groupID := fmt.Sprintf("parallel-%d", a.groupSeq)
+	refs := make([]ToolCallRef, len(calls))
+	for i, call := range calls {
+		refs[i] = ToolCallRef{ID: call.block.ID, Name: call.block.Name, Args: cloneInput(call.block.Input)}
+	}
+	a.emit(Event{Kind: EventParallelStart, GroupID: groupID, GroupSize: len(calls), Calls: refs})
+	for i, call := range calls {
+		a.emit(toolEvent(EventToolCall, call.block, groupID, len(calls), i, "", false))
+	}
+
+	outcomes := make([]toolOutcome, len(calls))
+	sem := make(chan struct{}, a.cfg.MaxParallelTools)
+	var wg sync.WaitGroup
+	for i, call := range calls {
+		if call.tool == nil || call.lookupErr != "" || call.decision.Decision != permission.Allow {
+			outcomes[i] = a.runPreparedTool(ctx, call)
+			continue
+		}
+		wg.Add(1)
+		go func(i int, call preparedToolCall) {
+			defer wg.Done()
+			if ctx.Err() != nil {
+				outcomes[i] = toolOutcome{text: "skipped because the active turn was canceled", isError: true}
+				return
+			}
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+				if ctx.Err() != nil {
+					outcomes[i] = toolOutcome{text: "skipped because the active turn was canceled", isError: true}
+					return
+				}
+				outcomes[i] = a.runPreparedTool(ctx, call)
+			case <-ctx.Done():
+				outcomes[i] = toolOutcome{text: "skipped because the active turn was canceled", isError: true}
+			}
+		}(i, call)
+	}
+	wg.Wait()
+
+	results := make([]llm.ContentBlock, len(calls))
+	for i, call := range calls {
+		outcome := outcomes[i]
+		outcome.text = capToolResultContent(outcome.text)
+		a.emit(toolEvent(EventToolResult, call.block, groupID, len(calls), i, outcome.text, outcome.isError))
+		results[i] = toolResult(call.block.ID, outcome)
+	}
+	return results
+}
+
+func (a *Agent) executeSerialBlock(ctx context.Context, block llm.ContentBlock) llm.ContentBlock {
+	return a.executePreparedSerial(ctx, a.prepareTool(ctx, block))
+}
+
+func (a *Agent) executePreparedSerial(ctx context.Context, call preparedToolCall) llm.ContentBlock {
+	a.emit(toolEvent(EventToolCall, call.block, "", 1, 0, "", false))
+	outcome := a.runPreparedTool(ctx, call)
+	outcome.text = capToolResultContent(outcome.text)
+	a.emit(toolEvent(EventToolResult, call.block, "", 1, 0, outcome.text, outcome.isError))
+	return toolResult(call.block.ID, outcome)
+}
+
+func toolEvent(kind EventKind, block llm.ContentBlock, groupID string, groupSize, groupPos int, text string, isError bool) Event {
+	return Event{Kind: kind, Name: block.Name, Args: cloneInput(block.Input), ToolUseID: block.ID,
+		GroupID: groupID, GroupSize: groupSize, GroupPos: groupPos, Text: text, IsError: isError}
+}
+
+func toolResult(id string, outcome toolOutcome) llm.ContentBlock {
+	return llm.ContentBlock{Type: "tool_result", ToolUseID: id, Content: outcome.text, IsError: outcome.isError}
+}
+
+func (a *Agent) executionStop(ctx context.Context) (string, []string) {
+	if ctx.Err() != nil {
+		return "skipped because the active turn was canceled", nil
+	}
+	if pending, _ := a.takeSteering(false); len(pending) > 0 {
+		return "skipped because the user steered the active turn", pending
+	}
+	return "", nil
 }
 
 func (a *Agent) appendSteering(content []llm.ContentBlock, steering []string) []llm.ContentBlock {
@@ -447,25 +639,48 @@ func hasToolUse(content []llm.ContentBlock) bool {
 }
 
 func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) (string, bool) {
-	logx.Debug("tool call", "name", name, "args", logx.SafeAny(input))
-	t, ok := a.cfg.Tools.Get(name)
+	call := a.prepareTool(ctx, llm.ContentBlock{Type: "tool_use", Name: name, Input: input})
+	outcome := a.runPreparedTool(ctx, call)
+	return outcome.text, outcome.isError
+}
+
+// prepareTool performs lookup and the permission decision on the coordinator
+// goroutine. Approval itself remains deferred so it can act as a serial
+// execution barrier.
+func (a *Agent) prepareTool(ctx context.Context, block llm.ContentBlock) preparedToolCall {
+	call := preparedToolCall{block: block, decision: permission.Result{Decision: permission.Allow}}
+	t, ok := a.cfg.Tools.Get(block.Name)
 	if !ok {
+		call.lookupErr = fmt.Sprintf("unknown tool: %s", block.Name)
+		return call
+	}
+	call.tool = t
+	if a.cfg.Policy != nil {
+		call.decision = a.cfg.Policy.Decide(ctx, permission.Request{ToolName: block.Name, Args: block.Input})
+	}
+	return call
+}
+
+func (a *Agent) runPreparedTool(ctx context.Context, call preparedToolCall) toolOutcome {
+	name, input := call.block.Name, call.block.Input
+	logx.Debug("tool call", "name", name, "args", logx.SafeAny(input))
+	if call.lookupErr != "" {
 		logx.Debug("tool lookup failed", "name", name)
-		return fmt.Sprintf("unknown tool: %s", name), true
+		return toolOutcome{text: call.lookupErr, isError: true}
 	}
 	if a.cfg.Policy != nil {
-		decision := a.cfg.Policy.Decide(ctx, permission.Request{ToolName: name, Args: input})
+		decision := call.decision
 		switch decision.Decision {
 		case permission.Deny:
 			if decision.Reason == "" {
 				decision.Reason = "permission policy denied this tool call"
 			}
 			logx.Debug("tool denied", "name", name, "reason", decision.Reason)
-			return decision.Reason, true
+			return toolOutcome{text: decision.Reason, isError: true}
 		case permission.Ask:
 			if a.cfg.Approve == nil {
 				logx.Debug("tool approval missing approver", "name", name)
-				return "permission approval required but no approver is configured", true
+				return toolOutcome{text: "permission approval required but no approver is configured", isError: true}
 			}
 			approved, err := a.cfg.Approve(ctx, ApprovalRequest{
 				ToolName: name,
@@ -475,26 +690,26 @@ func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) 
 			})
 			if err != nil {
 				logx.Debug("tool approval error", "name", name, "error", err.Error())
-				return fmt.Sprintf("approval error: %v", err), true
+				return toolOutcome{text: fmt.Sprintf("approval error: %v", err), isError: true}
 			}
 			if !approved {
 				logx.Debug("tool denied by user", "name", name)
-				return "user denied this tool call", true
+				return toolOutcome{text: "user denied this tool call", isError: true}
 			}
 			logx.Debug("tool approved", "name", name)
 		}
 	}
-	out, err := t.Run(ctx, input)
+	out, err := call.tool.Run(ctx, input)
 	if err != nil {
 		logx.Debug("tool error",
 			"name", name,
 			"error", err.Error(),
 			"output", logx.PayloadValue(out),
 		)
-		return fmt.Sprintf("error: %v\n%s", err, out), true
+		return toolOutcome{text: fmt.Sprintf("error: %v\n%s", err, out), isError: true}
 	}
 	logx.Debug("tool result", "name", name, "output", logx.PayloadValue(out))
-	return out, false
+	return toolOutcome{text: out}
 }
 
 func addUsage(a, b llm.Usage) llm.Usage {

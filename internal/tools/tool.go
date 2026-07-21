@@ -14,6 +14,14 @@ type Tool interface {
 	Run(ctx context.Context, input map[string]any) (string, error)
 }
 
+// ParallelTool is an optional capability for tools that are safe to execute
+// alongside other parallel-safe calls from the same model response. Tools
+// that do not implement it are always serial. The model never controls this
+// decision.
+type ParallelTool interface {
+	ParallelSafe(input map[string]any) bool
+}
+
 type Registry struct {
 	tools map[string]Tool
 }
@@ -29,6 +37,17 @@ func NewRegistry(ts ...Tool) *Registry {
 func (r *Registry) Get(name string) (Tool, bool) {
 	t, ok := r.tools[name]
 	return t, ok
+}
+
+// ParallelSafe reports the tool's runtime-owned concurrency classification.
+// Unknown and unclassified tools fail closed to serial execution.
+func (r *Registry) ParallelSafe(name string, input map[string]any) bool {
+	t, ok := r.Get(name)
+	if !ok {
+		return false
+	}
+	p, ok := t.(ParallelTool)
+	return ok && p.ParallelSafe(input)
 }
 
 func (r *Registry) Specs() []llm.ToolSpec {
