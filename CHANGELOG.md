@@ -2,6 +2,23 @@
 
 All notable changes to Neo will be documented in this file.
 
+## [v0.4.0] - 2026-07-23
+
+### Added
+
+- Headless mode for running Neo non-interactively from the CLI.
+- Parallel execution for safe tool calls and factory inspect subagents, with visible parallel execution groups in the TUI.
+
+### Changed
+
+- Trusted mode now skips approval prompts for dangerous bash commands too, so it auto-allows all bash; path-shaped file tools still cannot escape the workspace root.
+- Simplified the release process to use the verified installer only.
+- Removed low-value product complexity and unused tools/permissions commands from the TUI.
+
+### Fixed
+
+- Restored chat history scrolling in the TUI.
+
 ## [v0.3.0] - 2026-07-19
 
 ### Highlights
