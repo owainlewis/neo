@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -75,6 +78,8 @@ func main() {
 	switch os.Args[1] {
 	case "chat":
 		runChat(ctx)
+	case "run":
+		runHeadless(ctx, os.Args[2:])
 	case "sessions":
 		runSessions(ctx, os.Args[2:])
 	case "doctor":
@@ -104,6 +109,8 @@ const usageText = `neo — a Go coding agent
 USAGE:
   neo                Interactive chat mode (default)
   neo chat           Interactive chat mode (explicit)
+  neo run [options] <prompt>
+                     Run one headless prompt and exit (readonly by default)
   neo sessions       List saved chat sessions
   neo sessions search <query>
                      Search saved session transcripts
@@ -125,7 +132,13 @@ CONFIG:
   To use a ChatGPT subscription instead of an API key, set in neo.yaml:
     provider: openai
     openai_auth: subscription
-  then run "neo login".`
+  then run "neo login".
+
+HEADLESS RUN:
+  neo run --json --timeout 10m "Review this repo without changing files"
+  cat prompt.md | neo run --json --permission readonly
+
+  Options: --permission readonly|ask|trusted (default readonly), --timeout <duration>, --json`
 
 func printUsage() {
 	fmt.Println(usageText)
@@ -183,6 +196,145 @@ func mustConfig() *config.Config {
 func runChat(ctx context.Context) {
 	store := mustSessionStore()
 	runChatSession(ctx, store, nil)
+}
+
+type headlessOptions struct {
+	permission string
+	timeout    time.Duration
+	json       bool
+}
+
+type headlessResult struct {
+	OK         bool   `json:"ok"`
+	ElapsedMS  int64  `json:"elapsed_ms"`
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	Permission string `json:"permission"`
+	ToolCalls  int    `json:"tool_calls"`
+	ToolErrors int    `json:"tool_errors"`
+	Final      string `json:"final,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+func runHeadless(ctx context.Context, args []string) {
+	opts, prompt, err := parseHeadlessArgs(args, os.Stdin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "usage: neo run [--json] [--permission readonly|ask|trusted] [--timeout 10m] <prompt>")
+		os.Exit(2)
+	}
+	if opts.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.timeout)
+		defer cancel()
+	}
+	started := time.Now()
+	cfg := mustConfig()
+	providerName, model := cfg.Provider, cfg.Model
+	prov, err := checkedProvider(ctx, cfg, providerName)
+	if err != nil {
+		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Permission: opts.permission, Error: err.Error()})
+		os.Exit(1)
+	}
+	cwd, _ := os.Getwd()
+	root := workspace.Root(cwd)
+	sk := loadSkills(cfg, cwd)
+	system, systemBlocks := chatSystem(cfg, cwd, sk)
+
+	var toolCalls, toolErrors int
+	reg := newRegistry(cwd, root)
+	if permission.Mode(opts.permission) == permission.ModeReadonly {
+		reg = reg.Filter([]string{"read_file", "grep", "glob"})
+	}
+	ag := agent.New(agent.Config{
+		Model:        model,
+		System:       system,
+		SystemBlocks: systemBlocks,
+		Provider:     prov,
+		Tools:        reg,
+		Policy:       permission.New(opts.permission, root),
+		Compactor:    chatCompactor(prov, model, cfg),
+		OnEvent: func(e agent.Event) {
+			switch e.Kind {
+			case agent.EventToolCall:
+				toolCalls++
+			case agent.EventToolResult:
+				if e.IsError {
+					toolErrors++
+				}
+			}
+		},
+	})
+	out, err := ag.Send(ctx, prompt)
+	result := headlessResult{
+		OK:         err == nil,
+		ElapsedMS:  time.Since(started).Milliseconds(),
+		Provider:   prov.Name(),
+		Model:      model,
+		Permission: opts.permission,
+		ToolCalls:  toolCalls,
+		ToolErrors: toolErrors,
+		Final:      out,
+	}
+	if err != nil {
+		result.Error = err.Error()
+	}
+	finishHeadless(opts, result)
+	if err != nil {
+		os.Exit(1)
+	}
+}
+
+func parseHeadlessArgs(args []string, stdin *os.File) (headlessOptions, string, error) {
+	opts := headlessOptions{permission: string(permission.ModeReadonly), timeout: 10 * time.Minute}
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&opts.permission, "permission", opts.permission, "permission mode: readonly, ask, or trusted")
+	fs.DurationVar(&opts.timeout, "timeout", opts.timeout, "maximum wall-clock duration")
+	fs.BoolVar(&opts.json, "json", false, "print a JSON summary instead of plain text")
+	if err := fs.Parse(args); err != nil {
+		return opts, "", err
+	}
+	switch permission.Mode(opts.permission) {
+	case permission.ModeReadonly, permission.ModeAsk, permission.ModeTrusted:
+	default:
+		return opts, "", fmt.Errorf("invalid --permission %q", opts.permission)
+	}
+	parts := fs.Args()
+	if stdin != nil {
+		if info, err := stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice == 0 {
+			b, err := io.ReadAll(stdin)
+			if err != nil {
+				return opts, "", fmt.Errorf("read stdin: %w", err)
+			}
+			if s := strings.TrimSpace(string(b)); s != "" {
+				parts = append([]string{s}, parts...)
+			}
+		}
+	}
+	prompt := strings.TrimSpace(strings.Join(parts, " "))
+	if prompt == "" {
+		return opts, "", fmt.Errorf("neo run: missing prompt")
+	}
+	return opts, prompt, nil
+}
+
+func finishHeadless(opts headlessOptions, result headlessResult) {
+	if opts.json {
+		b, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "encode result: %v\n", err)
+			return
+		}
+		fmt.Println(string(b))
+		return
+	}
+	if result.Final != "" {
+		fmt.Println(result.Final)
+	}
+	if result.Error != "" {
+		fmt.Fprintln(os.Stderr, result.Error)
+	}
 }
 
 func resumeSession(ctx context.Context, id string) {

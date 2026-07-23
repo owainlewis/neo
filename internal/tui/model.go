@@ -481,9 +481,8 @@ func (m *model) View() tea.View {
 }
 
 // makeView wraps a rendered string with the v2 View settings we want for
-// every frame: alt screen, cell-motion mouse reporting, and a request for
-// keyboard enhancements. Mouse reporting enables wheel and trackpad scrolling;
-// common terminals keep text selection available with shift+drag.
+// every frame: alt screen and a request for keyboard enhancements. Neo leaves
+// mouse reporting disabled so normal terminal drag selection/copy keeps working.
 // ReportAlternateKeys asks terminals that speak the Kitty
 // keyboard protocol (Kitty, Ghostty, WezTerm, recent iTerm2) to disambiguate
 // shift+enter from a bare enter, which is what lets shift+enter insert a
@@ -492,7 +491,7 @@ func (m *model) View() tea.View {
 func makeView(content string) tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	v.MouseMode = tea.MouseModeNone
 	v.KeyboardEnhancements.ReportAlternateKeys = true
 	return v
 }

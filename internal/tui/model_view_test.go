@@ -13,7 +13,7 @@ import (
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
-func TestNewModelEnablesMouseWheel(t *testing.T) {
+func TestNewModelKeepsTranscriptMouseWheelStateStable(t *testing.T) {
 	t.Parallel()
 
 	base := makeTestModel()
@@ -37,12 +37,12 @@ func TestNewModelEnablesMouseWheel(t *testing.T) {
 	}
 }
 
-func TestMakeViewEnablesTranscriptMouseScrolling(t *testing.T) {
+func TestMakeViewDisablesMouseReportingSoTextIsCopyable(t *testing.T) {
 	t.Parallel()
 
 	v := makeView("visible output")
-	if v.MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("MouseMode = %v, want MouseModeCellMotion for wheel events", v.MouseMode)
+	if v.MouseMode != tea.MouseModeNone {
+		t.Fatalf("MouseMode = %v, want MouseModeNone so terminal selection/copy works", v.MouseMode)
 	}
 	if !v.AltScreen {
 		t.Fatal("AltScreen = false, want true")

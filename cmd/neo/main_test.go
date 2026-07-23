@@ -290,3 +290,33 @@ func TestPrintSessionSearchResultsIncludesMetadataAndExcerpt(t *testing.T) {
 		}
 	}
 }
+
+func TestParseHeadlessArgsDefaultsReadonly(t *testing.T) {
+	opts, prompt, err := parseHeadlessArgs([]string{"Review", "the", "repo"}, nil)
+	if err != nil {
+		t.Fatalf("parseHeadlessArgs returned error: %v", err)
+	}
+	if prompt != "Review the repo" {
+		t.Fatalf("prompt = %q", prompt)
+	}
+	if opts.permission != "readonly" {
+		t.Fatalf("permission = %q, want readonly", opts.permission)
+	}
+	if opts.timeout != 10*time.Minute {
+		t.Fatalf("timeout = %v, want 10m", opts.timeout)
+	}
+}
+
+func TestParseHeadlessArgsRejectsInvalidPermission(t *testing.T) {
+	_, _, err := parseHeadlessArgs([]string{"--permission", "root", "prompt"}, nil)
+	if err == nil {
+		t.Fatal("expected invalid permission error")
+	}
+}
+
+func TestParseHeadlessArgsRequiresPrompt(t *testing.T) {
+	_, _, err := parseHeadlessArgs([]string{"--json"}, nil)
+	if err == nil {
+		t.Fatal("expected missing prompt error")
+	}
+}
