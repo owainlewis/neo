@@ -22,8 +22,8 @@ func TestWorkspacePolicyModes(t *testing.T) {
 		{"ask asks bash", "ask", Request{ToolName: "bash", Args: map[string]any{"command": "go test ./..."}}, Ask},
 		{"ask asks write", "ask", Request{ToolName: "write_file", Args: map[string]any{"path": inside}}, Ask},
 		{"trusted allows bash", "trusted", Request{ToolName: "bash", Args: map[string]any{"command": "go test ./..."}}, Allow},
-		{"trusted asks rm rf", "trusted", Request{ToolName: "bash", Args: map[string]any{"command": "rm -rf build"}}, Ask},
-		{"trusted asks sudo", "trusted", Request{ToolName: "bash", Args: map[string]any{"command": "sudo make install"}}, Ask},
+		{"trusted allows rm rf", "trusted", Request{ToolName: "bash", Args: map[string]any{"command": "rm -rf build"}}, Allow},
+		{"trusted allows sudo", "trusted", Request{ToolName: "bash", Args: map[string]any{"command": "sudo make install"}}, Allow},
 		{"trusted allows write", "trusted", Request{ToolName: "write_file", Args: map[string]any{"path": inside}}, Allow},
 		{"readonly denies bash", "readonly", Request{ToolName: "bash", Args: map[string]any{"command": "date"}}, Deny},
 		{"readonly denies write", "readonly", Request{ToolName: "write_file", Args: map[string]any{"path": inside}}, Deny},
@@ -56,7 +56,7 @@ func TestWorkspacePolicyAllowsRuntimeClassifiedReadOnlyCall(t *testing.T) {
 	}
 }
 
-func TestWorkspacePolicyDangerousBashRequiresApprovalInTrustedMode(t *testing.T) {
+func TestWorkspacePolicyDangerousBashAllowedInTrustedMode(t *testing.T) {
 	root := t.TempDir()
 	tests := []string{
 		"rm -rf build",
@@ -74,6 +74,26 @@ func TestWorkspacePolicyDangerousBashRequiresApprovalInTrustedMode(t *testing.T)
 	for _, cmd := range tests {
 		t.Run(cmd, func(t *testing.T) {
 			got := New("trusted", root).Decide(context.Background(), Request{
+				ToolName: "bash",
+				Args:     map[string]any{"command": cmd},
+			})
+			if got.Decision != Allow {
+				t.Fatalf("decision = %v, want Allow (reason %q)", got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+func TestWorkspacePolicyDangerousBashRequiresApprovalInAskMode(t *testing.T) {
+	root := t.TempDir()
+	tests := []string{
+		"rm -rf build",
+		"sudo make install",
+		"git reset --hard HEAD~1",
+	}
+	for _, cmd := range tests {
+		t.Run(cmd, func(t *testing.T) {
+			got := New("ask", root).Decide(context.Background(), Request{
 				ToolName: "bash",
 				Args:     map[string]any{"command": cmd},
 			})
@@ -185,7 +205,38 @@ func TestWorkspacePolicyDeniesMutationSymlinkEscape(t *testing.T) {
 	}
 }
 
-func TestWorkspacePolicyBashOutsideWorkspaceRequiresApproval(t *testing.T) {
+func TestWorkspacePolicyBashOutsideWorkspaceAllowedInTrustedMode(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "README.md")
+	if err := os.WriteFile(inside, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []string{
+		"cat " + inside,
+		"cat /etc/passwd",
+		"cat ~/.ssh/id_rsa",
+		"cat ../secret.txt",
+		"cat </etc/passwd",
+		"cat</etc/passwd",
+		"echo hi 2>/tmp/neo.err",
+		"grep --file=/etc/passwd needle",
+	}
+
+	for _, cmd := range tests {
+		t.Run(cmd, func(t *testing.T) {
+			got := New("trusted", root).Decide(context.Background(), Request{
+				ToolName: "bash",
+				Args:     map[string]any{"command": cmd},
+			})
+			if got.Decision != Allow {
+				t.Fatalf("decision = %v, want Allow (reason %q)", got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+func TestWorkspacePolicyBashOutsideWorkspaceRequiresApprovalInAskMode(t *testing.T) {
 	root := t.TempDir()
 	inside := filepath.Join(root, "README.md")
 	if err := os.WriteFile(inside, []byte("ok"), 0o644); err != nil {
@@ -197,19 +248,15 @@ func TestWorkspacePolicyBashOutsideWorkspaceRequiresApproval(t *testing.T) {
 		cmd  string
 		want Decision
 	}{
-		{"absolute inside allowed", "cat " + inside, Allow},
+		{"absolute inside allowed", "cat " + inside, Ask},
 		{"absolute outside asks", "cat /etc/passwd", Ask},
 		{"home path asks", "cat ~/.ssh/id_rsa", Ask},
 		{"parent escape asks", "cat ../secret.txt", Ask},
-		{"redirect outside asks", "cat </etc/passwd", Ask},
-		{"attached redirect outside asks", "cat</etc/passwd", Ask},
-		{"fd redirect outside asks", "echo hi 2>/tmp/neo.err", Ask},
-		{"flag value outside asks", "grep --file=/etc/passwd needle", Ask},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := New("trusted", root).Decide(context.Background(), Request{
+			got := New("ask", root).Decide(context.Background(), Request{
 				ToolName: "bash",
 				Args:     map[string]any{"command": tt.cmd},
 			})

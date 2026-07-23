@@ -66,8 +66,9 @@ func (p WorkspacePolicy) Decide(_ context.Context, req Request) Result {
 	}
 	if reason := p.explicitApprovalReason(req); reason != "" {
 		switch p.Mode {
-		case ModeReadonly:
+		case ModeReadonly, ModeTrusted:
 			// Readonly denies mutating tools outright below.
+			// Trusted skips explicit approval; it allows everything below.
 		default:
 			return Result{Decision: Ask, Reason: reason}
 		}

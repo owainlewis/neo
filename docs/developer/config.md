@@ -85,6 +85,6 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 
 | Mode | Effect |
 | --- | --- |
-| `trusted` | Allow built-in tools; ask before high-risk bash commands; deny path-shaped file tools outside the repo root. |
+| `trusted` | Allow built-in tools, including bash, with no approval prompts; deny path-shaped file tools outside the repo root. |
 | `ask` | Allow read/search tools inside the repo root; ask before bash and file mutations. |
 | `readonly` | Allow read/search tools only; deny bash and file mutations. |

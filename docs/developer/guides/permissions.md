@@ -18,11 +18,11 @@ Neo has three permission modes:
 
 | Mode | What happens |
 | --- | --- |
-| `trusted` | Built-in tools run automatically, except high-risk bash commands ask first. Workspace path checks still apply. |
-| `ask` | Read/search tools run automatically. Bash and file mutations ask first. |
+| `trusted` | Built-in tools, including bash, run automatically with no approval prompts. Path-shaped tools (`read_file`, `write_file`, `edit_file`, `grep`, `glob`) still must stay inside the workspace root. |
+| `ask` | Read/search tools run automatically. Bash and file mutations ask first, and high-risk bash commands (`rm -rf`, `sudo`, recursive ownership/permission changes, `git clean -fd`, `git reset --hard`, paths outside the workspace) always ask. |
 | `readonly` | Read/search tools run. Bash and file mutations are denied. |
 
-By default, Neo uses `trusted` to avoid prompting for routine coding work while still pausing before commands such as `rm -rf`, `sudo`, recursive ownership/permission changes, `git clean -fd`, and `git reset --hard`.
+By default, Neo uses `trusted` to avoid prompting at all for routine coding work. This includes high-risk bash commands like `rm -rf` and `sudo` — trusted mode does not pause for those. Use `ask` mode if you want that safety net back.
 
 Configure it in `neo.yaml`:
 
@@ -40,9 +40,9 @@ permissions:
 
 ## Workspace Boundaries
 
-For path-shaped tools, Neo checks that paths stay inside the workspace root. This still matters in `trusted` mode.
+For path-shaped tools (`read_file`, `write_file`, `edit_file`, `grep`, `glob`), Neo checks that paths stay inside the workspace root. This still matters in `trusted` mode and cannot be disabled by permission mode.
 
-The point of `trusted` is to stop asking for every mutation, not to let the agent write anywhere on the machine.
+Bash commands are not path-checked this way: in `trusted` mode a bash command can read or write anywhere the OS user can, including outside the workspace.
 
 ## Approval Previews
 
