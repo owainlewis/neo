@@ -190,7 +190,10 @@ func providerModelChoices(ctx context.Context, cfg *config.Config, provider stri
 			}
 		}
 		return []tui.ModelChoice{
-			{ID: "gpt-5.2", Name: "GPT-5.2", Description: "Recommended flagship model for coding and agentic tasks"},
+			{ID: "gpt-5.6-sol", Name: "GPT-5.6 Sol", Description: "Recommended flagship model for coding and agentic tasks"},
+			{ID: "gpt-5.6-terra", Name: "GPT-5.6 Terra", Description: "Balance of intelligence and cost, competitive with GPT-5.5"},
+			{ID: "gpt-5.6-luna", Name: "GPT-5.6 Luna", Description: "Fastest, most affordable GPT-5.6 model"},
+			{ID: "gpt-5.2", Name: "GPT-5.2", Description: "Previous-generation flagship model"},
 			{ID: "gpt-5.1", Name: "GPT-5.1", Description: "Coding and agentic model with configurable reasoning"},
 			{ID: "gpt-5", Name: "GPT-5", Description: "Previous GPT-5 reasoning model"},
 			{ID: "gpt-5-mini", Name: "GPT-5 mini", Description: "Faster, lower-cost GPT-5 model"},
@@ -209,7 +212,10 @@ func providerModelChoices(ctx context.Context, cfg *config.Config, provider stri
 		}
 	default:
 		return []tui.ModelChoice{
-			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Description: "Default Anthropic model"},
+			{ID: "claude-opus-5", Name: "Claude Opus 5", Description: "Default Anthropic model, flagship reasoning and coding"},
+			{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", Description: "Faster, lower-cost frontier Anthropic model"},
+			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Description: "Smallest, fastest Anthropic model"},
+			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Description: "Previous-generation Anthropic model"},
 		}
 	}
 }

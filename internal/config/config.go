@@ -17,10 +17,10 @@ const (
 	userConfigDir     = ".neo"
 	userConfigName    = "config.yaml"
 
-	defaultModel           = "claude-opus-4-8"
-	defaultOpenAIModel     = "gpt-4o"
+	defaultModel           = "claude-opus-5"
+	defaultOpenAIModel     = "gpt-5.6-sol"
 	defaultCodexModel      = "gpt-5-codex"
-	defaultOpenRouterModel = "anthropic/claude-sonnet-4.5"
+	defaultOpenRouterModel = "anthropic/claude-sonnet-5"
 	defaultGoogleModel     = "gemini-3.5-flash"
 	defaultProvider        = "anthropic"
 

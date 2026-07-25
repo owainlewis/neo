@@ -16,7 +16,7 @@ import (
 
 const (
 	DefaultEndpoint = "https://openrouter.ai/api/v1/chat/completions"
-	DefaultModel    = "anthropic/claude-sonnet-4.5"
+	DefaultModel    = "anthropic/claude-sonnet-5"
 )
 
 // ModelsEndpoint returns OpenRouter's live model catalogue. It is public
