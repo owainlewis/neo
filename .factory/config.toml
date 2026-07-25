@@ -1,0 +1,45 @@
+version = 1
+poll_every = "30s"
+
+[worker]
+runtime = "codex"
+sandbox = "worktree"
+timeout = "2h"
+maximum_timeout = "8h"
+max_concurrent = 1
+
+[source]
+command = [".factory/sources/github"]
+
+[trigger]
+
+[trigger.triage]
+type = "source"
+state = "open"
+labels = ["factory:ready-for-spec"]
+workflow = ".factory/workflows/triage.md"
+
+[trigger.implement]
+type = "source"
+state = "open"
+labels = ["factory:ready-to-implement"]
+workflow = ".factory/workflows/implement.md"
+timeout = "4h"
+
+[trigger.code-quality-audit]
+type = "schedule"
+schedule = "0 9 * * 1"
+timezone = "Europe/London"
+workflow = ".factory/workflows/code-quality-audit.md"
+
+[trigger.cleanup-branches]
+type = "schedule"
+schedule = "0 9 * * 2"
+timezone = "Europe/London"
+workflow = ".factory/workflows/cleanup-branches.md"
+
+[trigger.dependency-audit]
+type = "schedule"
+schedule = "0 9 * * 4"
+timezone = "Europe/London"
+workflow = ".factory/workflows/dependency-audit.md"
