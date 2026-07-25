@@ -2,6 +2,16 @@
 
 All notable changes to Neo will be documented in this file.
 
+## [v0.4.1] - 2026-07-25
+
+### Changed
+
+- Default models updated to current generations: Anthropic now defaults to Claude Opus 5, OpenAI to GPT-5.6 Sol, and the OpenRouter fallback to Claude Sonnet 5. The `/model` picker lists the GPT-5.6 and Claude 5 families.
+
+### Fixed
+
+- Transcript scrolling in the TUI. The alt screen hides the terminal's own scrollback and mouse reporting was disabled, so the mouse wheel did nothing and history was unreachable. Wheel scrolling now works, with `shift+↑/↓` and `shift+home/end` as keyboard alternatives. Drag selection still works with shift held.
+
 ## [v0.4.0] - 2026-07-23
 
 ### Added
