@@ -33,6 +33,7 @@ var keyBindings = []struct {
 	{"⌥↩", "newline"},
 	{"!cmd", "run shell command"},
 	{"wheel/pgup/pgdn", "scroll transcript"},
+	{"shift+↑/↓", "scroll transcript one line"},
 	{"shift+drag", "select terminal text"},
 	{"tab", "toggle workflow panel (accepts picker selection first)"},
 	{"ctrl+o", "expand/collapse latest truncated tool output"},
