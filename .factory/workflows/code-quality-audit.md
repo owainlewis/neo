@@ -1,76 +1,35 @@
 # Code quality audit: bugs and outdated docs
 
-Your goal is to find real, material problems in this repository — logical
-bugs, security vulnerabilities, and documentation that no longer matches the
-code — and open one GitHub issue per problem so it can be triaged and
-implemented. Do not change code or documentation, or open a pull request, in
-this workflow.
+Find real bugs, security vulnerabilities, and documentation that contradicts the code in this repository. Open one GitHub issue per problem. Do not change code or docs, and do not open pull requests.
 
-Only open an issue for something a maintainer would actually want fixed. Do
-not open issues for style preferences, minor nits, hypothetical edge cases
-with no real trigger, or documentation wording you merely find awkward.
-Finding nothing real is a valid and common outcome. Never create an issue
-just to have something to show for the run.
+High bar: only report what a maintainer would actually fix. No style nits, no hypothetical edge cases, no missing features, no awkward wording. Finding nothing is a normal outcome. Never invent a finding to fill the run. Cap: 5 issues per run, highest severity first.
 
-## Inspect recent and risky code
+## Investigate
 
-Use authenticated `git` and `gh` commands to inspect the repository, recent
-changes, open issues, and open pull requests. Read repository instructions
-before investigating.
+Use authenticated `git` and `gh`. Read repository instructions (`AGENTS.md`, `CONTRIBUTING.md`) first, then recent commits and open and closed issues and PRs.
 
-Prioritize code that recently changed, handles errors or untrusted input,
-crosses process or persistence boundaries, manages concurrency or cleanup, or
-has weak test coverage. Trace real execution paths and compare behavior with
-tests, documentation, and call-site expectations. Run focused tests or small
-reproductions when practical.
+Prioritize: recently changed code, error handling, untrusted input, process and persistence boundaries, concurrency and cleanup, weak test coverage.
 
-Treat security vulnerabilities (injection, unsafe deserialization, path
-traversal, secrets in logs or code, missing authz checks, unsafe use of
-untrusted input) as a category of bug in scope here, not a separate concern.
+Trace real execution paths. Compare behavior against tests, docs, and call sites. Run focused tests or minimal reproductions where practical.
 
-## Compare docs against code
+Security issues count as bugs here: injection, unsafe deserialization, path traversal, secrets in code or logs, missing authz, unvalidated input.
 
-Use `git` and `gh` to inspect `README.md`, `AGENTS.md`, files under `docs/`,
-and other checked-in documentation. Look for documentation that:
+For docs (`README.md`, `AGENTS.md`, `docs/`, other checked-in files), look for: commands, flags, config keys, env vars, or paths that no longer exist; removed or renamed features; setup steps that no longer work; broken links; claims that contradict current behavior. Verify against current code, and run documented commands where practical.
 
-- describes commands, flags, config keys, or file paths that no longer exist
-  or have changed;
-- references removed or renamed features, packages, or environment
-  variables;
-- contains setup or usage instructions that no longer work as written;
-- links to files, sections, or URLs that are broken or moved;
-- contradicts current behavior in the code it describes.
+## Report
 
-Verify each finding against the current code, not against assumptions. Run
-documented commands where practical to confirm they fail or behave
-differently than described.
+Skip anything already covered by an open or closed issue or PR, including your own prior runs. One root cause equals one issue, even if it spans several files.
 
-## Prove each problem before reporting it
+Each issue must contain, and is only worth filing if you can supply:
 
-A useful finding must include:
+- concise title;
+- observable wrong behavior or false doc claim;
+- exact file, line, and triggering conditions;
+- why it is wrong, not a preference;
+- reproduction steps or equivalent hard evidence;
+- correct expected behavior or correct documentation;
+- bounded acceptance criteria and how the fixer verifies.
 
-- the observable incorrect behavior or documentation gap;
-- the exact code path, conditions, or file and line involved;
-- why it is actually wrong, not a style preference;
-- a focused reproduction or other strong evidence;
-- the expected behavior or correct documentation;
-- a practical verification approach for whoever implements the fix.
+Apply an existing bug or documentation label if one exists. Do not create labels. Do not apply `factory:ready-for-spec` or `factory:ready-to-implement`; a human triages.
 
-Do not report speculative risks, broad code-quality concerns, missing
-features, or duplicates. Search open and closed issues and pull requests
-before creating anything. If an existing item covers the same root cause,
-leave it unchanged and continue searching.
-
-## Create issues
-
-For each real, new, material problem, create one GitHub issue with a concise
-title, evidence, reproduction steps (for bugs) or the outdated claim and
-correct current behavior (for docs), expected outcome, bounded acceptance
-criteria, and a verification plan. Apply an existing bug or documentation
-label when the repository has one, but do not create new labels. Do not add
-`factory:ready-for-spec` or `factory:ready-to-implement` — a human decides
-which findings are worth pursuing and moves the ticket into the pipeline.
-
-If no defensible problem is found, make no external changes. Finish with a
-concise summary of the areas inspected, checks run, and why no issue was
-created.
+If nothing qualifies, make no external changes and end with a short summary of areas inspected, checks run, and why nothing was filed.
