@@ -37,12 +37,15 @@ func TestNewModelKeepsTranscriptMouseWheelStateStable(t *testing.T) {
 	}
 }
 
-func TestMakeViewDisablesMouseReportingSoTextIsCopyable(t *testing.T) {
+// The alt screen hides the terminal's own scrollback, so wheel events are the
+// only way most users reach transcript history. Mouse reporting must stay on;
+// terminals keep drag selection available behind shift.
+func TestMakeViewEnablesMouseReportingSoTheWheelScrolls(t *testing.T) {
 	t.Parallel()
 
 	v := makeView("visible output")
-	if v.MouseMode != tea.MouseModeNone {
-		t.Fatalf("MouseMode = %v, want MouseModeNone so terminal selection/copy works", v.MouseMode)
+	if v.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("MouseMode = %v, want MouseModeCellMotion so the wheel scrolls the transcript", v.MouseMode)
 	}
 	if !v.AltScreen {
 		t.Fatal("AltScreen = false, want true")
@@ -75,6 +78,26 @@ func TestPageKeysAndMouseWheelScrollTranscript(t *testing.T) {
 	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
 	if got := m.viewport.YOffset(); got != before {
 		t.Fatalf("wheel down offset = %d, want %d", got, before)
+	}
+}
+
+func TestShiftArrowsScrollTranscriptOneLine(t *testing.T) {
+	t.Parallel()
+
+	v := viewport.New(viewport.WithWidth(20), viewport.WithHeight(3))
+	v.SetContent(strings.Join([]string{"one", "two", "three", "four", "five", "six"}, "\n"))
+	v.GotoBottom()
+	m := model{viewport: v}
+
+	before := m.viewport.YOffset()
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp, Mod: tea.ModShift}))
+	if got := m.viewport.YOffset(); got != before-1 {
+		t.Fatalf("shift+up offset = %d, want %d", got, before-1)
+	}
+
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown, Mod: tea.ModShift}))
+	if got := m.viewport.YOffset(); got != before {
+		t.Fatalf("shift+down offset = %d, want %d", got, before)
 	}
 }
 

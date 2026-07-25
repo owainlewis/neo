@@ -44,6 +44,16 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.viewport.PageUp()
 	case "pgdown":
 		m.viewport.PageDown()
+	// Line-at-a-time scrolling for terminals (or users) without a wheel. The
+	// bare arrows belong to the composer and its pickers.
+	case "shift+up":
+		m.viewport.ScrollUp(1)
+	case "shift+down":
+		m.viewport.ScrollDown(1)
+	case "shift+home":
+		m.viewport.GotoTop()
+	case "shift+end":
+		m.viewport.GotoBottom()
 	case "tab":
 		if m.acceptInlinePicker(true) {
 			break
@@ -89,6 +99,10 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) tea.Cmd {
 		m.viewport.PageUp()
 	case "pgdown":
 		m.viewport.PageDown()
+	case "shift+up":
+		m.viewport.ScrollUp(1)
+	case "shift+down":
+		m.viewport.ScrollDown(1)
 	case "n", "N", "esc":
 		m.finishApproval(false)
 	}
