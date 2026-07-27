@@ -75,6 +75,27 @@ func TestUsageDocumentsGoogleProvider(t *testing.T) {
 	}
 }
 
+func TestPrintVersion(t *testing.T) {
+	oldVersion := Version
+	Version = "v1.2.3-test"
+	t.Cleanup(func() { Version = oldVersion })
+
+	var out bytes.Buffer
+	printVersion(&out)
+
+	if got, want := out.String(), "neo version v1.2.3-test\n"; got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
+	}
+}
+
+func TestUsageDocumentsVersionAliases(t *testing.T) {
+	for _, want := range []string{"neo version", "-v", "--version"} {
+		if !strings.Contains(usageText, want) {
+			t.Fatalf("usage does not contain %q", want)
+		}
+	}
+}
+
 func TestModelChoices_OpenRouterFallsBackWhenCatalogueUnavailable(t *testing.T) {
 	clearAdditionalProviderCredentials(t)
 	// Point the picker at an unroutable network so the live fetch fails fast;

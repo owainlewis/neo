@@ -94,6 +94,8 @@ func main() {
 		runLogin(ctx)
 	case "logout":
 		runLogout()
+	case "-v", "--version", "version":
+		printVersion(os.Stdout)
 	case "-h", "--help", "help":
 		printUsage()
 	default:
@@ -118,6 +120,7 @@ USAGE:
   neo resume <id>    Resume a saved chat session
   neo login          Log in to an OpenAI ChatGPT/Codex subscription (device code)
   neo logout         Remove stored subscription credentials
+  neo version        Show the Neo version (also -v, --version)
   neo help           Show this help
 
 CONFIG:
@@ -142,6 +145,10 @@ HEADLESS RUN:
 
 func printUsage() {
 	fmt.Println(usageText)
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "neo version %s\n", Version)
 }
 
 func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
