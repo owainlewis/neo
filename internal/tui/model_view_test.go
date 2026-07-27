@@ -79,6 +79,15 @@ func TestPageKeysAndMouseWheelScrollTranscript(t *testing.T) {
 	if got := m.viewport.YOffset(); got != before {
 		t.Fatalf("wheel down offset = %d, want %d", got, before)
 	}
+
+	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift}))
+	if got := m.viewport.YOffset(); got >= before {
+		t.Fatalf("shift+wheel up offset = %d, want less than %d", got, before)
+	}
+	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift}))
+	if got := m.viewport.YOffset(); got != before {
+		t.Fatalf("shift+wheel down offset = %d, want %d", got, before)
+	}
 }
 
 func TestShiftArrowsScrollTranscriptOneLine(t *testing.T) {

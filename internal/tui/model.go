@@ -348,6 +348,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.updateInput(msg))
 
+	case tea.MouseWheelMsg:
+		// Some terminals and multiplexers report vertical trackpad gestures
+		// with Shift set. The viewport interprets those as horizontal wheel
+		// events, but Neo intentionally disables horizontal transcript scrolling,
+		// turning the gesture into a no-op. Vertical wheel buttons should always
+		// move through transcript history regardless of that modifier.
+		if msg.Button == tea.MouseWheelUp || msg.Button == tea.MouseWheelDown {
+			msg.Mod &^= tea.ModShift
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		cmds = append(cmds, cmd)
+
 	case agentEventMsg:
 		m.handleEvent(msg.ev)
 		// Tie the dot's color to whether a tool is currently running.
