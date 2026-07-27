@@ -13,6 +13,7 @@
 | `neo resume <id>` | Resume a saved chat session. |
 | `neo login` | Log in to an OpenAI ChatGPT/Codex subscription with device-code auth. |
 | `neo logout` | Remove stored OpenAI subscription credentials. |
+| `neo version` | Print the build-time Neo version. Also available as `neo -v` and `neo --version`. |
 | `neo help` | Print usage. |
 
 ## Environment
