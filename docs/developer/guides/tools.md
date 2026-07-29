@@ -8,7 +8,9 @@ Tools are the agent's hands. The model can think and write text, but tools let i
 
 A model cannot directly read your filesystem or run tests. Without tools, it has to guess. With tools, it can inspect reality before acting.
 
-The danger is that tools have side effects. A shell command or file write can change the machine, so tools must be small, inspectable, and permissioned.
+Tools have side effects. A shell command or file write can change its
+environment, so tools must be small and inspectable, while the VM or sandbox
+contains their capabilities.
 
 ## How Neo Solves It
 
@@ -50,7 +52,7 @@ That makes failures useful: the model can inspect again and try a safer edit.
 ## What To Be Careful About
 
 - Treat errors as data. Return useful output when a tool fails.
-- Keep file tools inside the workspace boundary.
+- Run Neo inside a sandbox with the intended filesystem and network boundary.
 - Prefer structured tools over shell commands for common operations.
 - Do not make one giant tool that does everything.
 

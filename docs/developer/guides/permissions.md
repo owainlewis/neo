@@ -1,70 +1,84 @@
-# Permissions
+# Sandbox and Tool Approvals
 
 ## The Simple Idea
 
-Permissions decide whether a tool call runs immediately, asks the user, or is denied.
+Neo trusts its execution environment for security. A VM or sandbox decides
+which files, processes, networks, credentials, and external services an agent
+can reach.
 
-Think of it as the safety latch between "the model wants to do this" and "Neo actually does it."
+Interactive users can add confirmation prompts for selected tools or Bash
+command prefixes. These prompts help prevent accidental execution. They are not
+a security boundary.
 
-## The Problem
+## Why Neo Does Not Classify Risk
 
-Coding agents need powerful tools. They may run shell commands or edit files. That is useful, but it also means a bad tool call can make a mess.
+Shell commands can be expressed through wrappers, scripts, aliases, variables,
+substitutions, or indirect tools. A command classifier can look reassuring
+without reliably containing an agent.
 
-Approvals keep the user in control, especially for side effects.
+Neo therefore does not maintain trusted, ask, or read-only permission modes. It
+does not classify destructive commands or infer paths from shell text. The
+runtime environment owns containment.
 
-## How Neo Solves It
+Filesystem isolation alone may not be enough. A sandbox that exposes Git
+credentials, cloud credentials, unrestricted network access, or authenticated
+external services still allows changes outside its filesystem.
 
-Neo has three permission modes:
+## Optional Interactive Confirmations
 
-| Mode | What happens |
-| --- | --- |
-| `trusted` | Built-in tools, including bash, run automatically with no approval prompts. Path-shaped tools (`read_file`, `write_file`, `edit_file`, `grep`, `glob`) still must stay inside the workspace root. |
-| `ask` | Read/search tools run automatically. Bash and file mutations ask first, and high-risk bash commands (`rm -rf`, `sudo`, recursive ownership/permission changes, `git clean -fd`, `git reset --hard`, paths outside the workspace) always ask. |
-| `readonly` | Read/search tools run. Bash and file mutations are denied. |
-
-By default, Neo uses `trusted` to avoid prompting at all for routine coding work. This includes high-risk bash commands like `rm -rf` and `sudo` — trusted mode does not pause for those. Use `ask` mode if you want that safety net back.
-
-Configure it in `neo.yaml`:
-
-```yaml
-permissions:
-  mode: trusted
-```
-
-For stricter approval prompts:
+Configure a default-empty list in `neo.yaml`:
 
 ```yaml
-permissions:
-  mode: ask
+tool_approvals:
+  - git
+  - rm -rf
+  - write_file
 ```
 
-## Workspace Boundaries
+Each entry has two independent meanings:
 
-For path-shaped tools (`read_file`, `write_file`, `edit_file`, `grep`, `glob`), Neo checks that paths stay inside the workspace root. This still matters in `trusted` mode and cannot be disabled by permission mode.
+- An exact tool-name match confirms every call to that tool.
+- A Bash-prefix match confirms a command that starts with that literal text.
 
-Bash commands are not path-checked this way: in `trusted` mode a bash command can read or write anywhere the OS user can, including outside the workspace.
+The next Bash character must be whitespace or the end of the command. `git`
+matches `git status`, but not `github`. Matching is case-sensitive.
 
-## Approval Previews
+Neo trims entries when loading configuration, rejects empty entries, and keeps
+the first exact duplicate. It does not parse command chains or attempt to find
+equivalent commands.
 
-When a write or edit asks for approval, Neo shows a preview. Long previews are truncated in the TUI so the approval question stays visible.
+Each match prompts every time. Press `y` to run the call or `n`/`esc` to reject
+it. Direct `!` commands use the same matcher.
 
-The preview is there to answer: "what am I about to allow?"
+## Scope
 
-## How To Extend It
+Confirmations apply only to the interactive coordinator, where a human can
+answer the prompt.
 
-The policy interface is small:
+They do not apply to:
 
-```go
-type Policy interface {
-    Decide(ctx context.Context, req Request) Result
-}
-```
+- `neo run`
+- work subagents
+- inspect subagents
 
-Future policies could add per-tool rules, command allowlists, or stronger sandboxing without changing the core agent loop.
+Add `agent` to `tool_approvals` if you want confirmation before interactive
+delegation.
+
+Inspect subagents are limited through capability selection rather than
+permissions. Their tool registry contains only `read_file`, `grep`, and `glob`.
+
+## Migration
+
+The old `permissions:` configuration and `--permission` CLI option have been
+removed. Neo rejects them with migration guidance instead of silently changing
+their meaning.
+
+Remove the old mode and add `tool_approvals` only for calls you want to confirm.
+Run Neo inside a suitable VM or sandbox.
 
 ## Where To Look
 
-- `internal/permission/policy.go`: permission modes and path checks.
-- `internal/agent/agent.go`: approval hook.
-- `internal/tui/blocks.go`: approval rendering.
-- `internal/agent/preview.go`: write/edit previews.
+- `internal/approval/matcher.go`: literal matching.
+- `internal/agent/agent.go`: serial confirmation barrier.
+- `internal/tui/approvals.go`: interactive yes/no prompt.
+- `internal/factory/supervisor.go`: inspect tool selection.

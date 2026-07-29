@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,10 +28,6 @@ const (
 	// OpenAI auth modes (the openai_auth config key).
 	OpenAIAuthAPIKey       = "api_key"
 	OpenAIAuthSubscription = "subscription"
-
-	PermissionModeAsk      = "ask"
-	PermissionModeTrusted  = "trusted"
-	PermissionModeReadonly = "readonly"
 )
 
 //go:embed defaults/neo.yaml
@@ -44,13 +41,14 @@ type Config struct {
 	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex
 	// device-code credentials via `neo login`). This also applies when OpenAI
 	// is selected through /model while another provider is the startup default.
-	OpenAIAuth  string      `yaml:"openai_auth"`
-	Model       string      `yaml:"model"`
-	Subagents   Backend     `yaml:"subagents"`
-	Features    Features    `yaml:"features"`
-	Compaction  Compaction  `yaml:"compaction"`
-	Permissions Permissions `yaml:"permissions"`
-	Output      Output      `yaml:"output"`
+	OpenAIAuth string     `yaml:"openai_auth"`
+	Model      string     `yaml:"model"`
+	Subagents  Backend    `yaml:"subagents"`
+	Features   Features   `yaml:"features"`
+	Compaction Compaction `yaml:"compaction"`
+	// ToolApprovals lists optional interactive tool names and Bash prefixes.
+	ToolApprovals []string `yaml:"tool_approvals"`
+	Output        Output   `yaml:"output"`
 
 	// source records where this config was loaded from (a file path or
 	// "embedded"); surfaced in diagnostics via Source().
@@ -68,11 +66,6 @@ type Backend struct {
 // the coordinator. parseConfig fills either missing half when one is supplied.
 func (c *Config) SubagentsConfigured() bool {
 	return c.Subagents.Provider != "" || c.Subagents.Model != ""
-}
-
-// Permissions configures how Neo gates tool calls before they run.
-type Permissions struct {
-	Mode string `yaml:"mode"`
 }
 
 // Output configures how Neo renders tool activity during a chat session.
@@ -167,6 +160,14 @@ func configPaths(home string) []string {
 }
 
 func parseConfig(b []byte, source string) (*Config, error) {
+	var keys map[string]yaml.Node
+	if err := yaml.Unmarshal(b, &keys); err != nil {
+		return nil, fmt.Errorf("%s: %w", source, err)
+	}
+	if _, ok := keys["permissions"]; ok {
+		return nil, fmt.Errorf("%s: permissions has been removed; use tool_approvals for optional interactive confirmations", source)
+	}
+
 	var c Config
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", source, err)
@@ -195,14 +196,20 @@ func parseConfig(b []byte, source string) (*Config, error) {
 			c.Subagents.Model = defaultModelFor(c.Subagents.Provider, c.OpenAIAuth)
 		}
 	}
-	if c.Permissions.Mode == "" {
-		c.Permissions.Mode = PermissionModeTrusted
+	seenApprovals := make(map[string]struct{}, len(c.ToolApprovals))
+	approvals := make([]string, 0, len(c.ToolApprovals))
+	for i, entry := range c.ToolApprovals {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			return nil, fmt.Errorf("%s: tool_approvals[%d] must not be empty", source, i)
+		}
+		if _, duplicate := seenApprovals[entry]; duplicate {
+			continue
+		}
+		seenApprovals[entry] = struct{}{}
+		approvals = append(approvals, entry)
 	}
-	switch c.Permissions.Mode {
-	case PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly:
-	default:
-		return nil, fmt.Errorf("%s: permissions.mode must be one of %q, %q, %q", source, PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly)
-	}
+	c.ToolApprovals = approvals
 	return &c, nil
 }
 

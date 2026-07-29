@@ -12,7 +12,6 @@ import (
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/tools"
 )
@@ -202,10 +201,8 @@ func (t parallelProbeTool) Run(ctx context.Context, input map[string]any) (strin
 	}
 }
 
-type askPolicy struct{}
-
-func (askPolicy) Decide(context.Context, permission.Request) permission.Result {
-	return permission.Result{Decision: permission.Ask, Reason: "test approval"}
+func requireApproval(string, map[string]any) bool {
+	return true
 }
 
 type approvalProbeTool struct {
@@ -454,7 +451,7 @@ func TestAgent_ApprovalTurnsParallelSafeCallsIntoSerialBarriers(t *testing.T) {
 	}}
 	var events []Event
 	ag := New(Config{
-		Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), Policy: askPolicy{},
+		Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), RequiresApproval: requireApproval,
 		Approve: func(context.Context, ApprovalRequest) (bool, error) { return true, nil },
 		OnEvent: func(e Event) { events = append(events, e) },
 	})
@@ -931,10 +928,10 @@ func TestAgent_ApprovalAllowsTool(t *testing.T) {
 		llmtest.Text("done"),
 	}}
 	ag := New(Config{
-		Model:    "test-model",
-		Provider: prov,
-		Tools:    tools.NewRegistry(echoTool{}),
-		Policy:   permission.New("ask", "."),
+		Model:            "test-model",
+		Provider:         prov,
+		Tools:            tools.NewRegistry(echoTool{}),
+		RequiresApproval: requireApproval,
 		Approve: func(context.Context, ApprovalRequest) (bool, error) {
 			return true, nil
 		},
@@ -950,15 +947,16 @@ func TestAgent_ApprovalAllowsTool(t *testing.T) {
 }
 
 func TestAgent_ApprovalDenialBecomesToolError(t *testing.T) {
+	called := false
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
 		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "pong"}),
 		llmtest.Text("done"),
 	}}
 	ag := New(Config{
-		Model:    "test-model",
-		Provider: prov,
-		Tools:    tools.NewRegistry(echoTool{}),
-		Policy:   permission.New("ask", "."),
+		Model:            "test-model",
+		Provider:         prov,
+		Tools:            tools.NewRegistry(recordingTool{name: "echo", called: &called}),
+		RequiresApproval: requireApproval,
 		Approve: func(context.Context, ApprovalRequest) (bool, error) {
 			return false, nil
 		},
@@ -971,9 +969,12 @@ func TestAgent_ApprovalDenialBecomesToolError(t *testing.T) {
 	if !result.IsError || !strings.Contains(result.Content, "denied") {
 		t.Fatalf("tool result = %+v, want denial error", result)
 	}
+	if called {
+		t.Fatal("denied tool executed")
+	}
 }
 
-func TestAgent_MissingApproverDeniesAskedTool(t *testing.T) {
+func TestAgent_NonMatchingApprovalRunsWithoutPrompt(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
 		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "pong"}),
 		llmtest.Text("done"),
@@ -982,7 +983,33 @@ func TestAgent_MissingApproverDeniesAskedTool(t *testing.T) {
 		Model:    "test-model",
 		Provider: prov,
 		Tools:    tools.NewRegistry(echoTool{}),
-		Policy:   permission.New("ask", "."),
+		RequiresApproval: func(string, map[string]any) bool {
+			return false
+		},
+		Approve: func(context.Context, ApprovalRequest) (bool, error) {
+			t.Fatal("non-matching call requested approval")
+			return false, nil
+		},
+	})
+	if _, err := ag.Send(context.Background(), "ping"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	result := ag.Transcript()[2].Content[0]
+	if result.IsError || result.Content != "pong" {
+		t.Fatalf("tool result = %+v, want successful execution", result)
+	}
+}
+
+func TestAgent_MissingApproverDeniesAskedTool(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("call_1", "echo", map[string]any{"text": "pong"}),
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{
+		Model:            "test-model",
+		Provider:         prov,
+		Tools:            tools.NewRegistry(echoTool{}),
+		RequiresApproval: requireApproval,
 	})
 	if _, err := ag.Send(context.Background(), "ping"); err != nil {
 		t.Fatalf("send: %v", err)
@@ -994,14 +1021,14 @@ func TestAgent_MissingApproverDeniesAskedTool(t *testing.T) {
 	}
 }
 
-func TestAgent_RunToolUsesPolicyAndDoesNotMutateTranscript(t *testing.T) {
+func TestAgent_RunToolUsesApprovalAndDoesNotMutateTranscript(t *testing.T) {
 	var events []Event
 	approvals := 0
 	ag := New(Config{
-		Model:    "test-model",
-		Provider: &llmtest.FakeProvider{},
-		Tools:    tools.NewRegistry(namedTool("bash")),
-		Policy:   permission.New("ask", "."),
+		Model:            "test-model",
+		Provider:         &llmtest.FakeProvider{},
+		Tools:            tools.NewRegistry(namedTool("bash")),
+		RequiresApproval: requireApproval,
 		Approve: func(context.Context, ApprovalRequest) (bool, error) {
 			approvals++
 			return true, nil
@@ -1044,24 +1071,6 @@ func TestAgent_RunToolCapsReturnedOutput(t *testing.T) {
 		t.Fatalf("RunTool output stored %d bytes, want at most %d", len(out), maxToolResultContentBytes)
 	}
 	assertTruncationMarker(t, out, maxToolResultContentBytes+1, 1)
-}
-
-func TestAgent_RunToolReadonlyDeniesBash(t *testing.T) {
-	ag := New(Config{
-		Model:    "test-model",
-		Provider: &llmtest.FakeProvider{},
-		Tools:    tools.NewRegistry(namedTool("bash")),
-		Policy:   permission.New("readonly", "."),
-		Approve: func(context.Context, ApprovalRequest) (bool, error) {
-			t.Fatal("readonly should deny bash without asking")
-			return false, nil
-		},
-	})
-
-	out, isErr := ag.RunTool(context.Background(), "bash", map[string]any{"command": "date"})
-	if !isErr || !strings.Contains(out, "readonly denied bash") {
-		t.Fatalf("RunTool = (%q, %v), want readonly denial", out, isErr)
-	}
 }
 
 func TestAgent_AccumulatesUsage(t *testing.T) {

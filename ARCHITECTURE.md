@@ -4,7 +4,7 @@
 
 Neo is a local coding agent distributed as one Go binary. It runs in a
 repository, sends conversation state and tool definitions to a configured LLM
-provider, executes approved tools on the user's machine, and renders the work in
+provider, executes tools in its runtime environment, and renders the work in
 a terminal UI or as a headless command.
 
 The core architectural rule is that the agent loop is policy-free.
@@ -39,7 +39,7 @@ Neo is a Go module licensed under the MIT License.
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         cmd/neo COMPOSITION ROOT                        │
 │                                                                         │
-│  config  provider  session  system prompt  tools  permissions           │
+│  config  provider  session  system prompt  tools  approvals             │
 │  skills  AGENTS.md  subagent supervisor  workflow events               │
 └───────────────┬───────────────────────────────┬─────────────────────────┘
                 │                               │
@@ -55,7 +55,7 @@ Neo is a Go module licensed under the MIT License.
            │           │
            ▼           ▼
 ┌──────────────────┐  ┌──────────────────────────────────────────────────┐
-│ internal/llm     │  │ internal/tools + internal/permission             │
+│ internal/llm     │  │ internal/tools + internal/approval               │
 │ Provider         │  │                                                  │
 │ interface        │  │ bash, file I/O, search, workflow, agent          │
 └────────┬─────────┘  └────────────────────────┬─────────────────────────┘
@@ -76,7 +76,7 @@ the CLI or TUI.
 ### Dependency Direction
 
 ```text
-internal/llm          internal/tools          internal/permission
+internal/llm          internal/tools          internal/approval
      ▲                      ▲                         ▲
      │                      │                         │
      └──────────── internal/agent ────────────────────┘
@@ -97,10 +97,9 @@ Supporting leaf packages:
 Key rules:
 
 - `internal/llm` defines the provider-neutral conversation protocol.
-- `internal/tools` defines executable capabilities, not when they are allowed.
-- `internal/permission` decides whether a concrete tool call is allowed, denied,
-  or requires approval.
-- `internal/agent` coordinates providers, tools, and policy through interfaces.
+- `internal/tools` defines executable capabilities.
+- `internal/approval` matches optional interactive confirmation preferences.
+- `internal/agent` coordinates providers, tools, and confirmation barriers.
 - `internal/factory` reuses the core loop for supervised child agents.
 - `internal/tui` consumes events and supplies user interaction. It does not
   implement agent decisions.
@@ -126,7 +125,7 @@ command finishes.
 5. Discover skills and AGENTS.md files when enabled
 6. Build flattened and segmented system prompts
 7. Construct workflow and subagent capabilities
-8. Build the tool registry and permission policy
+8. Build the tool registry and optional interactive approval matcher
 9. Construct the core agent with restored messages and usage
 10. Start the Bubble Tea TUI
 11. Save the session after each completed user send
@@ -143,7 +142,8 @@ embedded internal/config/defaults/neo.yaml
 ```
 
 Files are not merged. Parsing applies defaults and validates provider,
-authentication, subagent backend, and permission values before the chat starts.
+authentication, subagent backend, and optional tool approvals before the chat
+starts.
 
 ### Resume
 
@@ -160,13 +160,12 @@ project instructions, and advertised skill catalog as interactive chat, with
 these differences:
 
 - it processes one prompt and exits;
-- it defaults to read-only permissions;
-- read-only mode exposes only `read_file`, `grep`, and `glob`;
+- it receives the standard headless tool registry;
 - it has a default ten-minute wall-clock timeout;
 - it does not create or update a session;
 - it can return a JSON summary with timing and tool counts;
 - it does not expand `$name` or `/name` skill invocations;
-- it has no TUI approver, subagent tool, or visible workflow tool.
+- it has no interactive approvals, subagent tool, or visible workflow tool.
 
 ---
 
@@ -249,7 +248,7 @@ starts the provider/tool loop.
 3. Call Provider.Complete with messages, system prompt, and tool specs
 4. Add response usage to the session total
 5. Emit assistant text and tool activity as events
-6. Execute requested tools through the permission path
+6. Execute requested tools, pausing at optional interactive approval barriers
 7. Append the assistant message and matching tool results atomically
 8. Continue at step 2 while tool results or steering require another response
 9. Emit done when the provider ends the turn
@@ -310,13 +309,9 @@ type Tool interface {
 ```
 
 The registry gives sorted tool specifications to providers and resolves names
-at runtime. Two optional capability interfaces classify concrete calls:
-
-- `ParallelTool` says whether this input is safe to run concurrently;
-- `ReadOnlyTool` says whether this input can run under read-only policy.
-
-The runtime owns both decisions. Model-supplied arguments cannot declare
-themselves parallel-safe or read-only.
+at runtime. The optional `ParallelTool` interface says whether a concrete input
+is safe to run concurrently. The runtime owns that decision; model-supplied
+arguments cannot declare themselves parallel-safe.
 
 ### Built-in Tools
 
@@ -339,44 +334,34 @@ special-case any tool name.
 Only adjacent runs of parallel-safe calls from one provider response are
 eligible for concurrent execution. Neo:
 
-1. resolves tools and makes permission decisions serially;
+1. resolves tools and matches interactive approval rules serially;
 2. splits the run at approval barriers;
-3. executes allowed parallel groups with a bounded semaphore;
+3. executes parallel groups with a bounded semaphore;
 4. waits for the whole group;
 5. emits and appends results in original request order.
 
 The default maximum is eight concurrent tool calls. Unclassified tools fail
 closed to serial execution. File reads and searches are parallel-safe. Writable
-tools and `bash` are serial. An `agent` call is parallel-safe only in
-read-only `inspect` mode.
+tools and `bash` are serial. An `agent` call is parallel-safe only in `inspect`
+mode, whose registry contains only read and search tools.
 
 ---
 
-## 6. Permissions and Workspace Boundary
+## 6. Sandbox and Interactive Approvals
 
-Every model-requested call passes through `permission.Policy` before execution.
-The decision is one of `Allow`, `Ask`, or `Deny`.
+Neo treats its VM or sandbox as the security boundary. That environment must
+control filesystem, process, network, credential, and external-service access.
+Neo does not classify shell commands or enforce application permission modes.
 
-| Mode | Read operations | Mutating operations |
-| --- | --- | --- |
-| `readonly` | allowed | denied |
-| `ask` | allowed | require user approval |
-| `trusted` | allowed | allowed |
+Interactive users can configure a default-empty `tool_approvals` list. Each
+literal entry matches both an exact tool name and the start of a Bash command.
+Matching calls become serial barriers and receive a yes/no prompt. The matcher
+does not parse or normalize shell behavior, and its result is user-interface
+friction rather than authorization.
 
-Path-shaped file tools are denied when their resolved path is outside the
-workspace root. `internal/workspace.ResolveWithin` also evaluates existing
-symlinks and the nearest existing ancestor of a new path, which blocks common
-symlink escapes.
-
-In `ask` mode, dangerous shell patterns and obvious paths outside the workspace
-receive an explicit approval reason. Examples include `sudo`, recursive forced
-removal, recursive ownership or mode changes, and destructive Git commands.
-The TUI can grant a narrow in-memory allow rule for the current session, but
-high-risk shell calls always require a fresh decision.
-
-`bash` is a real local shell, not a sandbox. In trusted mode it has the authority
-of the Neo process. The permission layer is a user-consent and workspace policy,
-not operating-system isolation.
+Approvals are not passed to headless or child agents. Inspect children are
+constrained by capability selection: their registry contains only `read_file`,
+`grep`, and `glob`.
 
 ---
 
@@ -434,10 +419,10 @@ does not judge whether a child's answer is correct.
 
 Two modes define immutable capabilities for a run:
 
-| Mode | Tools | Permission | Scheduling |
-| --- | --- | --- | --- |
-| `work` | bash, read, write, edit, grep, glob | inherited session intent; autonomous after admission | serial |
-| `inspect` | read, grep, glob | forced read-only | parallel-safe |
+| Mode | Tools | Scheduling |
+| --- | --- | --- |
+| `work` | bash, read, write, edit, grep, glob | serial |
+| `inspect` | read, grep, glob | parallel-safe |
 
 If no separate subagent backend is configured, future children follow the
 coordinator's active provider and model. Existing children keep the backend
@@ -515,6 +500,7 @@ expanded into a user turn when the user references `$name` or invokes
 | --- | --- | --- |
 | `cmd/neo/` | CLI dispatch and application composition | The only layer that wires the full product together. |
 | `internal/agent/` | Transcript, provider/tool loop, parallel scheduling, steering, usage, events | No config, session, TUI, or provider-specific policy. |
+| `internal/approval/` | Literal matcher for optional interactive confirmations | No shell parsing or security claims. |
 | `internal/atomicfile/` | Atomic single-file replacement helper | No domain-specific serialization. |
 | `internal/auth/` | Device-code login, token refresh, credential storage | Used only for OpenAI subscription auth. |
 | `internal/compact/` | Compactor interface, transcript summarization, safe splitting | No session persistence or UI. |
@@ -525,11 +511,10 @@ expanded into a user turn when the user references `$name` or invokes
 | `internal/llm/<provider>/` | Vendor wire conversion, HTTP transport, retry integration | Does not execute tools or own transcripts. |
 | `internal/llm/retry/` | Shared transient failure classification, backoff, and `Retry-After` handling | Does not know provider wire formats. |
 | `internal/logx/` | Optional structured debug logging with payload controls | Disabled unless configured by environment. |
-| `internal/permission/` | Tool-call policy, path checks, approval rules, session allowlist | Does not execute tools or render prompts. |
 | `internal/projectctx/` | AGENTS.md discovery and prompt augmentation | Layered feature, not core behavior. |
 | `internal/session/` | Local session metadata, transcripts, usage, list and search | No provider calls. |
 | `internal/skills/` | Skill discovery, catalog, reference and slash expansion | Layered feature, not core behavior. |
-| `internal/tools/` | Tool interfaces, registry, shell, file and search tools | Does not choose permission mode. |
+| `internal/tools/` | Tool interfaces, registry, shell, file and search tools | Capabilities are selected by the composition root. |
 | `internal/tui/` | Bubble Tea state, input, rendering, approvals, steering | Consumes agent events; does not implement the loop. |
 | `internal/workflow/` | Visible checklist model and tool | UI state only, not a durable workflow engine. |
 | `internal/workspace/` | Repository root, ancestor, and safe path helpers | Shared filesystem boundary logic. |
@@ -539,8 +524,8 @@ expanded into a user turn when the user references `$name` or invokes
 
 ## 12. Security Model
 
-Neo's main trust boundaries are the model provider, local tool execution, the
-workspace boundary, and local persisted secrets.
+Neo's main trust boundaries are the model provider, the VM or sandbox that
+contains tool execution, and locally persisted secrets.
 
 ### Provider Boundary
 
@@ -554,12 +539,14 @@ payload logging is separately controlled to reduce accidental disclosure.
 
 ### Tool Boundary
 
-Tool definitions describe capabilities, but the permission policy decides each
-call. File tools are workspace-bounded. Read-only subagents receive a filtered
-registry as well as a read-only policy, providing two independent restrictions.
+Tool definitions describe capabilities available inside the VM or sandbox.
+Inspect subagents receive a filtered registry containing only read and search
+tools. Search tools also validate workspace-root inputs as part of their tool
+contract.
 
 Shell execution remains the broadest capability. Timeouts and output limits
 control resource use and transcript growth, but they are not a security sandbox.
+Optional interactive approvals do not change that boundary.
 
 ### Persistence Boundary
 
@@ -599,7 +586,7 @@ just performance           release-shaped performance checks
 
 Tests live beside their packages. Provider adapters use fake HTTP servers or
 fake providers; agent tests exercise transcript and scheduling invariants;
-permission and workspace tests cover path and command rules; TUI tests drive
+approval and workspace tests cover matching and path helpers; TUI tests drive
 Bubble Tea updates without requiring a live provider.
 
 The `website/` directory is a separate Astro project. Its build copies or
@@ -614,7 +601,7 @@ These are current architectural limits, not planned behavior:
 
 | # | Limitation | Detail |
 | --- | --- | --- |
-| 1 | No OS sandbox | Trusted shell commands run with the Neo process's host permissions. |
+| 1 | No built-in OS sandbox | Security depends on the VM or sandbox used to run Neo. |
 | 2 | Single-process local stores | Auth and session index updates have no cross-process lock, so concurrent writers can lose logical updates. |
 | 3 | Approximate compaction threshold | Context use is estimated from characters rather than provider tokenization. |
 | 4 | Provider feature differences | Prompt caching, opaque reasoning replay, model discovery, image handling, and usage fields vary by adapter. |
@@ -642,15 +629,14 @@ Provider-specific data should stay in the adapter or in opaque `Raw` blocks.
 1. Implement `tools.Tool`.
 2. Implement `ParallelTool` only when concurrent execution is safe for the
    concrete input.
-3. Implement `ReadOnlyTool` only when the concrete input cannot mutate state.
-4. Register the tool at the appropriate application surface.
-5. Extend path policy if the tool accepts path-shaped arguments.
-6. Test success, malformed input, cancellation, output bounds, and permission
-   behavior.
-7. Update `docs/developer/tools.md`.
+3. Register the tool at the appropriate application surface.
+4. Add input validation for path-shaped arguments where the tool contract needs
+   a workspace root.
+5. Test success, malformed input, cancellation, output bounds, and capability
+   filtering.
+6. Update `docs/developer/tools.md`.
 
-Unclassified tools deliberately run serially and fail closed under read-only
-policy.
+Unclassified tools deliberately run serially.
 
 ### Add a Product Capability
 

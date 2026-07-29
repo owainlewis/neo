@@ -31,8 +31,9 @@ from first inspection to tested change.
   bring their evidence back into one coherent workflow.
 - **Your model, your choice.** Use Anthropic, OpenAI, Google Gemini, or
   OpenRouter, and switch models for the active provider without leaving the terminal.
-- **Control that fits the task.** Choose trusted, approval-based, or read-only
-  permissions. Steer active work or queue the next instruction at any time.
+- **Sandbox-first execution.** Let the runtime contain tools, and optionally
+  confirm selected interactive tool calls. Steer active work or queue the next
+  instruction at any time.
 - **A small, dependable foundation.** One native Go binary, built-in tools,
   local sessions, no runtime or plugin stack, and no product telemetry.
 
@@ -82,7 +83,7 @@ let every task follow the same process.
 
 Continue with the [user guide](website/src/content/docs/docs/quick-start.md),
 or explore the [technical reference](docs/developer/index.md) for configuration,
-permissions, sessions, tools, skills, and the CLI.
+sandboxing, tool approvals, sessions, tools, skills, and the CLI.
 
 ## Contributing
 

@@ -27,8 +27,11 @@ model: claude-opus-4-8
 #   provider: anthropic
 #   model: <claude-model-id>
 
-permissions:
-  mode: trusted # trusted, ask, or readonly
+# Optional interactive confirmations. Empty by default.
+# tool_approvals:
+#   - git
+#   - rm -rf
+#   - write_file
 
 # Transcripts compact at 70% of this estimate.
 compaction:
@@ -79,12 +82,29 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | `output.verbose: false` | (default) | Show live in-flight activity and concise completed receipts (e.g. a file read or command run). Errors, failures, and direct `!` command output always render in full. |
 | `output.verbose: true` | | Restore full tool call/result cards, including complete file contents and command output. |
 
-## Permissions
+## Tool Approvals
 
-`permissions.mode` defaults to `trusted`.
+`tool_approvals` is an optional top-level list. It is empty by default and
+applies only to interactive coordinator calls and direct `!` commands.
 
-| Mode | Effect |
-| --- | --- |
-| `trusted` | Allow built-in tools, including bash, with no approval prompts; deny path-shaped file tools outside the repo root. |
-| `ask` | Allow read/search tools inside the repo root; ask before bash and file mutations. |
-| `readonly` | Allow read/search tools only; deny bash and file mutations. |
+```yaml
+tool_approvals:
+  - git
+  - rm -rf
+  - write_file
+```
+
+Each entry matches both an exact tool name and the start of a Bash command.
+Matching is literal and case-sensitive. The next command character must be
+whitespace or the end, so `git` matches `git status` but not `github`.
+
+Entries are trimmed when loaded. Empty entries are rejected and exact
+duplicates keep their first position. Neo does not parse shell chains,
+wrappers, aliases, variables, scripts, or substitutions.
+
+This is optional user-interface friction, not a security boundary. It is not
+passed to `neo run` or child agents. The VM or sandbox must control filesystem,
+process, network, credentials, and external-service access.
+
+The old `permissions:` section has been removed. Neo rejects it with migration
+guidance instead of silently granting broader access.

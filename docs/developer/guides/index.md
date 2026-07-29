@@ -9,7 +9,7 @@ These guides explain Neo's core features in plain language. The reference docs s
 | [Agent loop](agent-loop.md) | How one user message becomes model calls, tool calls, and a final answer. |
 | [System prompt](system-prompt.md) | What instructions Neo gives the model and how project context is added. |
 | [Tools](tools.md) | How Neo lets the model read files, search, run commands, and edit. |
-| [Permissions](permissions.md) | Why approvals exist and how `ask`, `trusted`, and `readonly` work. |
+| [Sandbox and approvals](permissions.md) | Where Neo's security boundary lives and how optional confirmations work. |
 | [Providers](providers.md) | How Anthropic, OpenAI, OpenRouter, and Google Gemini plug in. |
 | [Sessions](sessions.md) | How Neo saves and resumes conversations. |
 | [Compaction](compaction.md) | Why long chats need context management and what Neo has today. |

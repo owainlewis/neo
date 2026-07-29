@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,7 +313,7 @@ func TestPrintSessionSearchResultsIncludesMetadataAndExcerpt(t *testing.T) {
 	}
 }
 
-func TestParseHeadlessArgsDefaultsReadonly(t *testing.T) {
+func TestParseHeadlessArgsDefaults(t *testing.T) {
 	opts, prompt, err := parseHeadlessArgs([]string{"Review", "the", "repo"}, nil)
 	if err != nil {
 		t.Fatalf("parseHeadlessArgs returned error: %v", err)
@@ -320,18 +321,48 @@ func TestParseHeadlessArgsDefaultsReadonly(t *testing.T) {
 	if prompt != "Review the repo" {
 		t.Fatalf("prompt = %q", prompt)
 	}
-	if opts.permission != "readonly" {
-		t.Fatalf("permission = %q, want readonly", opts.permission)
-	}
 	if opts.timeout != 10*time.Minute {
 		t.Fatalf("timeout = %v, want 10m", opts.timeout)
 	}
 }
 
-func TestParseHeadlessArgsRejectsInvalidPermission(t *testing.T) {
-	_, _, err := parseHeadlessArgs([]string{"--permission", "root", "prompt"}, nil)
-	if err == nil {
-		t.Fatal("expected invalid permission error")
+func TestParseHeadlessArgsRejectsRemovedPermissionFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"--permission", "readonly", "prompt"},
+		{"prompt", "--permission", "readonly"},
+		{"--permission=readonly", "prompt"},
+		{"prompt", "-permission=readonly"},
+	} {
+		_, _, err := parseHeadlessArgs(args, nil)
+		if err == nil || !strings.Contains(err.Error(), "--permission has been removed") {
+			t.Fatalf("parseHeadlessArgs(%q) error = %v, want removed-option error", args, err)
+		}
+	}
+}
+
+func TestHeadlessRegistryIncludesWritableTools(t *testing.T) {
+	names := newRegistry(t.TempDir(), t.TempDir()).Names()
+	for _, want := range []string{"bash", "edit_file", "write_file"} {
+		found := false
+		for _, name := range names {
+			if name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("headless registry %v missing %q", names, want)
+		}
+	}
+}
+
+func TestHeadlessResultOmitsPermissionField(t *testing.T) {
+	out, err := json.Marshal(headlessResult{OK: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "permission") {
+		t.Fatalf("headless JSON still contains removed permission field: %s", out)
 	}
 }
 

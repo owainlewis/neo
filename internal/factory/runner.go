@@ -10,7 +10,6 @@ import (
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -24,14 +23,8 @@ type AgentRunner struct {
 	backendMu    sync.RWMutex
 	Provider     llm.Provider
 	DefaultModel string
-	Root         string // workspace root; bounds file tools via permission policy
+	Root         string
 	BashTimeout  time.Duration
-
-	// Mode is the permission mode child agents run under. They execute
-	// autonomously (there is no approver inside a subagent), so "ask" cannot be
-	// honored during a run; but "readonly" must propagate. Empty defaults to
-	// trusted.
-	Mode permission.Mode
 }
 
 // SetBackend updates the default provider and model used by future workers.
@@ -66,19 +59,11 @@ func (r *AgentRunner) RunAgent(ctx context.Context, dir, input string, events ch
 func (r *AgentRunner) RunAgentWithOptions(ctx context.Context, dir, input string, events chan<- AgentEvent, opts RunOptions) (string, error) {
 	provider, model := r.backend()
 
-	mode := r.Mode
-	if opts.PermissionMode != "" {
-		mode = opts.PermissionMode
-	}
-	if mode == "" || mode == permission.ModeAsk {
-		mode = permission.ModeTrusted
-	}
 	ag := agent.New(agent.Config{
 		Model:     model,
 		System:    dynamicAgentSystemPrompt,
 		Provider:  provider,
 		Tools:     r.registryWithOptions(dir, opts),
-		Policy:    permission.New(string(mode), r.Root),
 		Compactor: compact.NewSummarizer(provider, model),
 		MaxTurns:  agent.DefaultMaxTurns,
 		OnEvent: func(e agent.Event) {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -24,60 +23,31 @@ func (fastParallelTool) Run(context.Context, map[string]any) (string, error) {
 	return "ok", nil
 }
 
-type countingPolicy struct {
+type countingMatcher struct {
 	mu    sync.Mutex
 	calls int
 }
 
-type denyOnePolicy struct{}
-
-func (denyOnePolicy) Decide(_ context.Context, req permission.Request) permission.Result {
-	if req.Args["id"] == "deny" {
-		return permission.Result{Decision: permission.Deny, Reason: "denied for test"}
-	}
-	return permission.Result{Decision: permission.Allow}
+func (m *countingMatcher) Requires(string, map[string]any) bool {
+	m.mu.Lock()
+	m.calls++
+	m.mu.Unlock()
+	return false
 }
 
-func (p *countingPolicy) Decide(context.Context, permission.Request) permission.Result {
-	p.mu.Lock()
-	p.calls++
-	p.mu.Unlock()
-	return permission.Result{Decision: permission.Allow}
-}
-
-func TestAgent_ParallelPermissionDecisionsRunExactlyOnce(t *testing.T) {
-	policy := &countingPolicy{}
+func TestAgent_ParallelApprovalMatchingRunsExactlyOnce(t *testing.T) {
+	matcher := &countingMatcher{}
 	tool := fastParallelTool{}
 	prov := parallelResponse(tool.Name(), 2)
-	ag := New(Config{Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), Policy: policy})
+	ag := New(Config{Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), RequiresApproval: matcher.Requires})
 	if _, err := ag.Send(context.Background(), "inspect"); err != nil {
 		t.Fatal(err)
 	}
-	policy.mu.Lock()
-	got := policy.calls
-	policy.mu.Unlock()
+	matcher.mu.Lock()
+	got := matcher.calls
+	matcher.mu.Unlock()
 	if got != 2 {
-		t.Fatalf("permission decisions = %d, want 2", got)
-	}
-}
-
-func TestAgent_DeniedParallelCallDoesNotCancelSiblings(t *testing.T) {
-	tool := fastParallelTool{}
-	prov := &llmtest.FakeProvider{Responses: []llm.Response{
-		{Content: []llm.ContentBlock{
-			{Type: "tool_use", ID: "call_a", Name: tool.Name(), Input: map[string]any{"id": "allow"}},
-			{Type: "tool_use", ID: "call_b", Name: tool.Name(), Input: map[string]any{"id": "deny"}},
-			{Type: "tool_use", ID: "call_c", Name: tool.Name(), Input: map[string]any{"id": "allow"}},
-		}, StopReason: "tool_use"},
-		llmtest.Text("done"),
-	}}
-	ag := New(Config{Model: "test", Provider: prov, Tools: tools.NewRegistry(tool), Policy: denyOnePolicy{}})
-	if _, err := ag.Send(context.Background(), "inspect"); err != nil {
-		t.Fatal(err)
-	}
-	results := prov.Calls[1].Messages[2].Content
-	if len(results) != 3 || results[0].IsError || !results[1].IsError || results[2].IsError {
-		t.Fatalf("denied group results = %#v", results)
+		t.Fatalf("approval matches = %d, want 2", got)
 	}
 }
 

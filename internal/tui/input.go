@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/owainlewis/neo/internal/logx"
-	"github.com/owainlewis/neo/internal/permission"
 )
 
 func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -87,14 +86,6 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	case "y", "Y":
 		m.finishApproval(true)
-	case "a", "A":
-		req := permission.Request{ToolName: m.approval.req.ToolName, Args: m.approval.req.Args}
-		rule := permission.RuleFor(req)
-		m.allow.Add(rule)
-		m.finishApproval(true)
-		m.appendBlock(noticeBlock{text: "won't ask again for " + rule.Label() + " this session"})
-	case "ctrl+o":
-		m.toggleApprovalPreview()
 	case "pgup":
 		m.viewport.PageUp()
 	case "pgdown":

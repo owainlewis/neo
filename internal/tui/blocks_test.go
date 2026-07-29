@@ -42,52 +42,18 @@ func TestMaxTurnsBlockRenderShowsLimitAndContinuationHint(t *testing.T) {
 	}
 }
 
-func TestApprovalBlockRenderTruncatesLongPreview(t *testing.T) {
-	var lines []string
-	for i := 0; i < 80; i++ {
-		lines = append(lines, fmt.Sprintf("+line %02d", i))
-	}
-
+func TestApprovalBlockRenderShowsToolAndChoices(t *testing.T) {
 	out := plain(approvalBlock{req: agent.ApprovalRequest{
 		ToolName: "write_file",
 		Args:     map[string]any{"path": "notes.md", "content": "new\ncontent"},
-		Reason:   "file write requires approval",
-		Preview:  strings.Join(lines, "\n"),
 	}}.render(80, nil))
 
-	if !strings.Contains(firstLine(out), "permission required") {
+	if !strings.Contains(firstLine(out), "approval required") {
 		t.Fatalf("approval prompt should stay on the first line, got:\n%s", out)
 	}
-	if strings.Contains(out, "+line 79") {
-		t.Fatalf("approval preview was not truncated:\n%s", out)
-	}
-	for _, want := range []string{"write notes.md", "2 lines", "reason: file write requires approval", "keys: y approve", "ctrl+o to inspect"} {
+	for _, want := range []string{"write notes.md", "2 lines", "keys: y approve", "n/esc deny"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("approval block missing %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestApprovalBlockRenderKeepsShortPreview(t *testing.T) {
-	out := plain(approvalBlock{req: testApproval("edit_file", "-old\n+new")}.render(80, nil))
-	for _, want := range []string{"permission required", "edit", "keys: y approve", "-old", "+new"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("approval block missing %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestApprovalBlockRenderExpandedLongPreview(t *testing.T) {
-	var lines []string
-	for i := 0; i < 80; i++ {
-		lines = append(lines, fmt.Sprintf("+line %02d", i))
-	}
-
-	out := plain(approvalBlock{req: testApproval("edit_file", strings.Join(lines, "\n")), expanded: true}.render(80, nil))
-
-	for _, want := range []string{"+line 79", "full preview", "ctrl+o to collapse"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("expanded approval block missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -409,10 +375,6 @@ func TestToggleLatestToolResultExpansionIgnoresShortResults(t *testing.T) {
 	if m.toggleLatestToolResultExpansion() {
 		t.Fatal("short result should not toggle")
 	}
-}
-
-func testApproval(tool, preview string) agent.ApprovalRequest {
-	return agent.ApprovalRequest{ToolName: tool, Preview: preview}
 }
 
 func numberedLines(n int) string {

@@ -522,7 +522,7 @@ This keeps "how I am doing it" separate from "whether the durable objective is d
 
 ## 11. Safety
 
-Goals do not grant new permissions.
+Goals do not grant new runtime capabilities.
 
 Goals do not widen write access.
 
@@ -536,7 +536,7 @@ Continuation prompts must wrap it as task context, not higher-priority instructi
 
 Path boundaries can be advisory in Phase 1.
 
-Enforced path boundaries can come later through the permission layer.
+Enforced path boundaries belong to the VM or sandbox.
 
 ## 12. Implementation Boundaries
 

@@ -6,7 +6,7 @@
 | --- | --- |
 | `neo` | Open interactive chat mode. |
 | `neo chat` | Open interactive chat mode explicitly. |
-| `neo run [options] <prompt>` | Run one headless prompt and exit. Defaults to read-only permissions and no session persistence. |
+| `neo run [options] <prompt>` | Run one headless prompt and exit without session persistence. |
 | `neo sessions` | List saved chat sessions. |
 | `neo doctor` | Check local config, credentials, sessions, git, and workspace readiness. |
 | `neo sessions search <query>` | Search saved session transcripts locally. |
@@ -28,7 +28,9 @@
 
 - `neo` with no subcommand defaults to chat.
 - `neo run` executes one prompt without opening the TUI, prints the final answer, and exits. It is intended for scripts and eval harnesses.
-- `neo run` defaults to `--permission readonly`, applies a `10m` timeout, does not create or update sessions, and supports `--json` for a machine-readable summary containing elapsed time and tool counts.
+- `neo run` applies a `10m` timeout, does not create or update sessions, and supports `--json` for a machine-readable summary containing elapsed time and tool counts.
+- Headless runs receive the standard tool registry and do not use interactive `tool_approvals`. Run Neo inside a VM or sandbox that provides the required filesystem, process, network, and credential boundaries.
+- The removed `--permission` option returns migration guidance instead of being silently accepted.
 - `neo run` accepts prompt text as arguments and prepends piped stdin when present, e.g. `cat prompt.md | neo run --json`.
 - `neo doctor` is local-first: it checks config, required credential presence, session store access, git availability, and whether the current directory is a git workspace without calling providers or printing secrets.
 - `neo login` prints the OpenAI Codex device-code URL and one-time code, then stores refreshable subscription credentials in `~/.neo/auth.json` with file permissions intended to protect secrets.

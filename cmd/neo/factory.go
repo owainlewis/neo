@@ -8,7 +8,6 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
-	"github.com/owainlewis/neo/internal/permission"
 )
 
 // subagentBackend resolves the optional worker backend. The zero-value config
@@ -42,16 +41,12 @@ func (p unavailableProvider) Complete(context.Context, llm.Request) (*llm.Respon
 }
 
 // chatAgentTool builds the agent tool for an interactive chat session.
-func chatAgentTool(prov llm.Provider, model string, cfg *config.Config, cwd, root string) (factory.AgentTool, <-chan factory.Event, *factory.AgentRunner) {
+func chatAgentTool(prov llm.Provider, model, cwd, root string) (factory.AgentTool, <-chan factory.Event, *factory.AgentRunner) {
 	runner := &factory.AgentRunner{
 		Provider:     prov,
 		DefaultModel: model,
 		Root:         root,
 		BashTimeout:  5 * time.Minute,
-		// A readonly session must not gain write access by delegating;
-		// ask-mode sessions gate at the agent-tool approval instead. Subagents
-		// run autonomously once approved. Mode is fixed at session start.
-		Mode: permission.Mode(cfg.Permissions.Mode),
 	}
 	sup := factory.NewSupervisor(runner, factory.DefaultBudget())
 	return factory.AgentTool{Sup: sup, Dir: cwd}, sup.Events, runner

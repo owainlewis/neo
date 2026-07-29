@@ -22,12 +22,12 @@ model: claude-opus-4-8
 #   provider: anthropic
 #   model: <claude-model-id>
 
-# Tool permission mode:
-#   trusted  → allow built-in tools, ask before high-risk bash commands (default)
-#   ask      → allow read/search, ask before bash and file mutations
-#   readonly → allow read/search only
-permissions:
-  mode: trusted
+# Optional interactive confirmations. Entries match exact tool names and Bash
+# command prefixes. This is user-interface friction, not a security boundary.
+# tool_approvals:
+#   - git
+#   - rm -rf
+#   - write_file
 
 # Long transcripts compact at 70% of this context window estimate. Keep this
 # conservative by default; raise it for larger-context models.

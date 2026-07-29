@@ -8,6 +8,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | --- | --- |
 | `cmd/neo/` | CLI entry point, command dispatch, chat session startup. |
 | `internal/agent/` | Core agent loop, transcript state, event model, tool-use continuation. |
+| `internal/approval/` | Literal matcher for optional interactive tool confirmations. |
 | `internal/auth/` | OpenAI ChatGPT/Codex device-code login, token refresh, and stored subscription credentials. |
 | `internal/compact/` | Compaction interface, summarizing compactor, and safe split helpers. |
 | `internal/config/` | Config discovery, defaults, and feature flags. |
@@ -18,7 +19,6 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `internal/llm/chatcompletions/` | Reusable OpenAI-compatible Chat Completions adapter. |
 | `internal/llm/openrouter/` | OpenRouter provider setup and defaults. |
 | `internal/llm/google/` | Google Gemini adapter. |
-| `internal/permission/` | Tool-call permission policy and workspace path boundary checks. |
 | `internal/projectctx/` | AGENTS.md discovery and prompt augmentation. |
 | `internal/session/` | File-backed session metadata and transcripts. |
 | `internal/skills/` | Skill discovery, catalog rendering, and $name or /name expansion. |
@@ -33,8 +33,18 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 3. The CLI creates or loads a session from `internal/session`.
 4. Skills and AGENTS.md are discovered when enabled.
 5. `chatSystem` builds both flattened and segmented system prompts.
-6. `agent.New` receives provider, tools, permission policy, system prompt, and optional restored messages.
+6. `agent.New` receives the provider, tools, optional interactive approval matcher, system prompt, and restored messages.
 7. `tui.Run` owns user interaction and saves the transcript after each send.
+
+## Execution Boundary
+
+Neo assumes its VM or sandbox controls filesystem, process, network, credential,
+and external-service access. Neo does not classify commands or enforce a
+security policy. Interactive `tool_approvals` add optional confirmation before
+selected coordinator calls; they are not passed to headless or child agents.
+
+Inspect children are constrained by capability selection: their registry
+contains only `read_file`, `grep`, and `glob`.
 
 ## Agent Loop Contract
 
