@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -17,15 +18,6 @@ import (
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/tui"
 )
-
-func mustProvider(cfg *config.Config) llm.Provider {
-	prov, err := newProvider(cfg, cfg.Provider)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	return prov
-}
 
 func newProvider(cfg *config.Config, name string) (llm.Provider, error) {
 	switch name {
@@ -94,68 +86,70 @@ func (c codexCredentials) Token(ctx context.Context) (accessToken, accountID str
 
 // runLogin performs the OpenAI subscription device-code flow and stores the
 // result.
-func runLogin(ctx context.Context) {
+func runLogin(ctx context.Context, streams stdio) int {
 	store, err := auth.DefaultStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "login: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(streams.err, "login: %v\n", err)
+		return 1
 	}
 
 	creds, err := auth.LoginOpenAI(ctx, auth.LoginOptions{
 		OnDeviceCode: func(url, code string) {
-			fmt.Println("Log in to OpenAI with this device code:")
-			fmt.Println("\n  " + url)
-			fmt.Println("  Code: " + code + "\n")
-			fmt.Println("The code expires after 15 minutes. Never share it.")
-			fmt.Println("Waiting for authorization to complete...")
+			fmt.Fprintln(streams.out, "Log in to OpenAI with this device code:")
+			fmt.Fprintln(streams.out, "\n  "+url)
+			fmt.Fprintln(streams.out, "  Code: "+code+"\n")
+			fmt.Fprintln(streams.out, "The code expires after 15 minutes. Never share it.")
+			fmt.Fprintln(streams.out, "Waiting for authorization to complete...")
 		},
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "login failed: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(streams.err, "login failed: %v\n", err)
+		return 1
 	}
 	if err := store.Set(auth.ProviderOpenAICodex, creds); err != nil {
-		fmt.Fprintf(os.Stderr, "save credentials: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(streams.err, "save credentials: %v\n", err)
+		return 1
 	}
-	fmt.Println("Login complete. Credentials saved to " + store.Path() + ".")
-	fmt.Println("Set `provider: openai` and `openai_auth: subscription` in neo.yaml to use them.")
+	fmt.Fprintln(streams.out, "Login complete. Credentials saved to "+store.Path()+".")
+	fmt.Fprintln(streams.out, "Set `provider: openai` and `openai_auth: subscription` in neo.yaml to use them.")
+	return 0
 }
 
 // runLogout removes stored subscription credentials.
-func runLogout() {
+func runLogout(streams stdio) int {
 	store, err := auth.DefaultStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "logout: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(streams.err, "logout: %v\n", err)
+		return 1
 	}
 	if err := store.Delete(auth.ProviderOpenAICodex); err != nil {
-		fmt.Fprintf(os.Stderr, "logout: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(streams.err, "logout: %v\n", err)
+		return 1
 	}
-	fmt.Println("Logged out of OpenAI subscription.")
+	fmt.Fprintln(streams.out, "Logged out of OpenAI subscription.")
+	return 0
 }
 
-func sessionBackend(cfg *config.Config, meta session.Metadata) (string, string) {
+func sessionBackend(cfg *config.Config, meta session.Metadata, errOut io.Writer) (string, string) {
 	if meta.Provider == "" || meta.Model == "" {
 		return cfg.Provider, cfg.Model
 	}
 	if meta.Provider == cfg.Provider || providerCredentialPresent(cfg, meta.Provider) {
 		return meta.Provider, meta.Model
 	}
-	fmt.Fprintf(os.Stderr, "warning: session provider %s is not configured; continuing with %s model %s\n",
+	fmt.Fprintf(errOut, "warning: session provider %s is not configured; continuing with %s model %s\n",
 		meta.Provider, cfg.Provider, cfg.Model)
 	return cfg.Provider, cfg.Model
 }
 
-func modelChoices(ctx context.Context, cfg *config.Config, activeProvider string) []tui.ModelChoice {
+func modelChoices(ctx context.Context, cfg *config.Config, activeProvider string, errOut io.Writer) []tui.ModelChoice {
 	if activeProvider == "" {
 		activeProvider = cfg.Provider
 		if activeProvider == "" {
 			activeProvider = "anthropic"
 		}
 	}
-	return providerModelChoices(ctx, cfg, activeProvider)
+	return providerModelChoices(ctx, cfg, activeProvider, errOut)
 }
 
 func providerCredentialPresent(cfg *config.Config, provider string) bool {
@@ -181,7 +175,7 @@ func providerCredentialPresent(cfg *config.Config, provider string) bool {
 	}
 }
 
-func providerModelChoices(ctx context.Context, cfg *config.Config, provider string) []tui.ModelChoice {
+func providerModelChoices(ctx context.Context, cfg *config.Config, provider string, errOut io.Writer) []tui.ModelChoice {
 	switch provider {
 	case "openai":
 		if cfg.OpenAIAuth == config.OpenAIAuthSubscription {
@@ -203,7 +197,7 @@ func providerModelChoices(ctx context.Context, cfg *config.Config, provider stri
 			{ID: "gpt-4o-mini", Name: "GPT-4o mini", Description: "Smaller GPT-4o model"},
 		}
 	case "openrouter":
-		return openRouterModelChoices(ctx)
+		return openRouterModelChoices(ctx, errOut)
 	case "google":
 		return []tui.ModelChoice{
 			{ID: google.DefaultModel, Name: "Gemini 3.5 Flash", Description: "Stable Google Gemini model for coding and agentic tasks"},
@@ -225,14 +219,14 @@ func providerModelChoices(ctx context.Context, cfg *config.Config, provider stri
 // than a hardcoded list. On failure (offline, timeout, API change) it falls back
 // to the provider default so the picker still works. The fetch is time-boxed so
 // startup never hangs on a slow network.
-func openRouterModelChoices(ctx context.Context) []tui.ModelChoice {
+func openRouterModelChoices(ctx context.Context, errOut io.Writer) []tui.ModelChoice {
 	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	models, err := openrouter.Models(fetchCtx, nil)
 	if err != nil || len(models) == 0 {
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not fetch OpenRouter models (%v); using default\n", err)
+			fmt.Fprintf(errOut, "warning: could not fetch OpenRouter models (%v); using default\n", err)
 		}
 		return []tui.ModelChoice{
 			{ID: openrouter.DefaultModel, Name: openrouter.DefaultModel, Description: "Default OpenRouter model"},

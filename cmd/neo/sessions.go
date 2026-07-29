@@ -11,36 +11,37 @@ import (
 	"github.com/owainlewis/neo/internal/session"
 )
 
-func runSessions(ctx context.Context, args []string) {
+func runSessions(ctx context.Context, args []string, streams stdio) int {
 	if len(args) == 0 {
-		listSessions(ctx)
-		return
+		return listSessions(ctx, streams)
 	}
 	if args[0] == "search" {
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: neo sessions search <query>")
-			os.Exit(2)
+			fmt.Fprintln(streams.err, "usage: neo sessions search <query>")
+			return 2
 		}
-		searchSessions(ctx, strings.Join(args[1:], " "))
-		return
+		return searchSessions(ctx, strings.Join(args[1:], " "), streams)
 	}
-	fmt.Fprintf(os.Stderr, "unknown sessions command: %s\n", args[0])
-	fmt.Fprintln(os.Stderr, "usage: neo sessions [search <query>]")
-	os.Exit(2)
+	fmt.Fprintf(streams.err, "unknown sessions command: %s\n", args[0])
+	fmt.Fprintln(streams.err, "usage: neo sessions [search <query>]")
+	return 2
 }
 
-func listSessions(ctx context.Context) {
-	store := mustSessionStore()
+func listSessions(ctx context.Context, streams stdio) int {
+	store, ok := loadSessionStore(streams.err)
+	if !ok {
+		return 1
+	}
 	items, err := store.List(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "list sessions: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(streams.err, "list sessions: %v\n", err)
+		return 1
 	}
 	if len(items) == 0 {
-		fmt.Println("no saved sessions")
-		return
+		fmt.Fprintln(streams.out, "no saved sessions")
+		return 0
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	w := tabwriter.NewWriter(streams.out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tUPDATED\tMODEL\tCWD\tTITLE")
 	for _, meta := range items {
 		title := meta.Title
@@ -56,23 +57,28 @@ func listSessions(ctx context.Context) {
 		)
 	}
 	_ = w.Flush()
+	return 0
 }
 
-func searchSessions(ctx context.Context, query string) {
-	store := mustSessionStore()
+func searchSessions(ctx context.Context, query string, streams stdio) int {
+	store, ok := loadSessionStore(streams.err)
+	if !ok {
+		return 1
+	}
 	results, warnings, err := store.Search(ctx, query)
 	for _, warning := range warnings {
-		fmt.Fprintf(os.Stderr, "warning: skipped session %s: %v\n", warning.ID, warning.Err)
+		fmt.Fprintf(streams.err, "warning: skipped session %s: %v\n", warning.ID, warning.Err)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "search sessions: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(streams.err, "search sessions: %v\n", err)
+		return 1
 	}
 	if len(results) == 0 {
-		fmt.Println("no matching sessions")
-		return
+		fmt.Fprintln(streams.out, "no matching sessions")
+		return 0
 	}
-	printSessionSearchResults(os.Stdout, results)
+	printSessionSearchResults(streams.out, results)
+	return 0
 }
 
 func printSessionSearchResults(out io.Writer, results []session.SearchResult) {
@@ -96,13 +102,13 @@ func printSessionSearchResults(out io.Writer, results []session.SearchResult) {
 	_ = w.Flush()
 }
 
-func mustSessionStore() *session.Store {
+func loadSessionStore(errOut io.Writer) (*session.Store, bool) {
 	store, err := session.DefaultStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(errOut, "sessions: %v\n", err)
+		return nil, false
 	}
-	return store
+	return store, true
 }
 
 func shortPath(path string) string {

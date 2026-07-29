@@ -37,3 +37,15 @@
 - `neo logout` deletes the stored OpenAI subscription credential entry.
 - Resuming a session attempts to change into the saved session cwd. If unavailable, Neo warns and stays in the current directory.
 - Session saves happen after each user turn through the TUI `WithAfterSend` callback.
+
+## Process Boundary
+
+`cmd/neo.run(args, streams)` is the command dispatcher. It installs signal
+handling, writes through the supplied stdin, stdout, and stderr streams, and
+returns the command's exit code. Command helpers return status codes rather
+than terminating the process.
+
+The top-level `main` function contains the only `os.Exit` call. Before reaching
+that boundary, `execute` initializes logging, defers logging cleanup, and calls
+`run`. This guarantees cleanup completes before both successful and failed
+commands terminate.

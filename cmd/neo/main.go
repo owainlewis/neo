@@ -60,49 +60,79 @@ subagent prompts dynamically from the user's goal and current context; use the
 normal tools directly when delegation is unnecessary.`
 
 func main() {
-	if err := logx.InitFromEnv(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: NEO_LOG: %v\n", err)
-	}
-	defer func() { _ = logx.Close() }()
+	os.Exit(execute(os.Args[1:], stdio{
+		in:  os.Stdin,
+		out: os.Stdout,
+		err: os.Stderr,
+	}, lifecycle{
+		init:  logx.InitFromEnv,
+		close: logx.Close,
+	}))
+}
 
+type stdio struct {
+	in  io.Reader
+	out io.Writer
+	err io.Writer
+}
+
+type lifecycle struct {
+	init  func() error
+	close func() error
+}
+
+// execute owns process-lifetime setup and cleanup. It returns before main
+// terminates the process, so deferred cleanup is never skipped on failures.
+func execute(args []string, streams stdio, life lifecycle) int {
+	if err := life.init(); err != nil {
+		fmt.Fprintf(streams.err, "warning: NEO_LOG: %v\n", err)
+	}
+	defer func() { _ = life.close() }()
+	return run(args, streams)
+}
+
+// run is the testable command boundary. It owns signal handling, dispatches one
+// command, and returns the process exit code without terminating the process.
+func run(args []string, streams stdio) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	logx.Debug("neo start", "args", logx.SafeAny(os.Args[1:]))
+	logx.Debug("neo start", "args", logx.SafeAny(args))
 
 	// `neo` with no subcommand defaults to chat — the common case.
-	if len(os.Args) < 2 {
-		runChat(ctx)
-		return
+	if len(args) == 0 {
+		return runChat(ctx, streams)
 	}
 
-	switch os.Args[1] {
+	switch args[0] {
 	case "chat":
-		runChat(ctx)
+		return runChat(ctx, streams)
 	case "run":
-		runHeadless(ctx, os.Args[2:])
+		return runHeadless(ctx, args[1:], streams)
 	case "sessions":
-		runSessions(ctx, os.Args[2:])
+		return runSessions(ctx, args[1:], streams)
 	case "doctor":
-		os.Exit(runDoctor(ctx))
+		return runDoctor(ctx, streams.out)
 	case "resume":
-		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "usage: neo resume <session-id>")
-			os.Exit(2)
+		if len(args) < 2 {
+			fmt.Fprintln(streams.err, "usage: neo resume <session-id>")
+			return 2
 		}
-		resumeSession(ctx, os.Args[2])
+		return resumeSession(ctx, args[1], streams)
 	case "login":
-		runLogin(ctx)
+		return runLogin(ctx, streams)
 	case "logout":
-		runLogout()
+		return runLogout(streams)
 	case "-v", "--version", "version":
-		printVersion(os.Stdout)
+		printVersion(streams.out)
+		return 0
 	case "-h", "--help", "help":
-		printUsage()
+		printUsage(streams.out)
+		return 0
 	default:
-		logx.Debug("neo unknown command", "command", os.Args[1])
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		printUsage()
-		os.Exit(2)
+		logx.Debug("neo unknown command", "command", args[0])
+		fmt.Fprintf(streams.err, "unknown command: %s\n", args[0])
+		printUsage(streams.out)
+		return 2
 	}
 }
 
@@ -143,8 +173,8 @@ HEADLESS RUN:
 
   Options: --timeout <duration>, --json`
 
-func printUsage() {
-	fmt.Println(usageText)
+func printUsage(out io.Writer) {
+	fmt.Fprintln(out, usageText)
 }
 
 func printVersion(w io.Writer) {
@@ -169,7 +199,7 @@ func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
 // caching reuse the base across turns and sessions while the project tail
 // varies. Discovery errors are non-fatal, warning and falling back to the blocks
 // built so far rather than failing to start.
-func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []llm.SystemBlock) {
+func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, errOut io.Writer) (string, []llm.SystemBlock) {
 	// Base block: static instructions + skill catalog. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
 	base := skills.Augment(chatSystemPrompt, sk)
@@ -177,7 +207,7 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []ll
 	blocks := []llm.SystemBlock{{Text: base, Cache: cache}}
 	if cfg.AgentsFileEnabled() && cwd != "" {
 		if docs, err := projectctx.Load(cwd); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: AGENTS.md: %v\n", err)
+			fmt.Fprintf(errOut, "warning: AGENTS.md: %v\n", err)
 		} else if section := projectctx.Augment("", docs); section != "" {
 			// Dynamic tail: kept uncached and after the breakpoint so it never
 			// evicts the cached base.
@@ -191,18 +221,21 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill) (string, []ll
 	return b.String(), blocks
 }
 
-func mustConfig() *config.Config {
+func loadConfig(errOut io.Writer) (*config.Config, bool) {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(errOut, "config: %v\n", err)
+		return nil, false
 	}
-	return cfg
+	return cfg, true
 }
 
-func runChat(ctx context.Context) {
-	store := mustSessionStore()
-	runChatSession(ctx, store, nil)
+func runChat(ctx context.Context, streams stdio) int {
+	store, ok := loadSessionStore(streams.err)
+	if !ok {
+		return 1
+	}
+	return runChatSession(ctx, store, nil, streams)
 }
 
 type headlessOptions struct {
@@ -221,12 +254,12 @@ type headlessResult struct {
 	Error      string `json:"error,omitempty"`
 }
 
-func runHeadless(ctx context.Context, args []string) {
-	opts, prompt, err := parseHeadlessArgs(args, os.Stdin)
+func runHeadless(ctx context.Context, args []string, streams stdio) int {
+	opts, prompt, err := parseHeadlessArgs(args, streams.in)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		fmt.Fprintln(os.Stderr, "usage: neo run [--json] [--timeout 10m] <prompt>")
-		os.Exit(2)
+		fmt.Fprintln(streams.err, err)
+		fmt.Fprintln(streams.err, "usage: neo run [--json] [--timeout 10m] <prompt>")
+		return 2
 	}
 	if opts.timeout > 0 {
 		var cancel context.CancelFunc
@@ -234,17 +267,20 @@ func runHeadless(ctx context.Context, args []string) {
 		defer cancel()
 	}
 	started := time.Now()
-	cfg := mustConfig()
+	cfg, ok := loadConfig(streams.err)
+	if !ok {
+		return 1
+	}
 	providerName, model := cfg.Provider, cfg.Model
 	prov, err := checkedProvider(ctx, cfg, providerName)
 	if err != nil {
-		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Error: err.Error()})
-		os.Exit(1)
+		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Error: err.Error()}, streams)
+		return 1
 	}
 	cwd, _ := os.Getwd()
 	root := workspace.Root(cwd)
-	sk := loadSkills(cfg, cwd)
-	system, systemBlocks := chatSystem(cfg, cwd, sk)
+	sk := loadSkills(cfg, cwd, streams.err)
+	system, systemBlocks := chatSystem(cfg, cwd, sk, streams.err)
 
 	var toolCalls, toolErrors int
 	reg := newRegistry(cwd, root)
@@ -279,13 +315,14 @@ func runHeadless(ctx context.Context, args []string) {
 	if err != nil {
 		result.Error = err.Error()
 	}
-	finishHeadless(opts, result)
+	finishHeadless(opts, result, streams)
 	if err != nil {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
-func parseHeadlessArgs(args []string, stdin *os.File) (headlessOptions, string, error) {
+func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string, error) {
 	opts := headlessOptions{timeout: 10 * time.Minute}
 	for _, arg := range args {
 		if arg == "--permission" || arg == "-permission" ||
@@ -301,15 +338,13 @@ func parseHeadlessArgs(args []string, stdin *os.File) (headlessOptions, string, 
 		return opts, "", err
 	}
 	parts := fs.Args()
-	if stdin != nil {
-		if info, err := stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice == 0 {
-			b, err := io.ReadAll(stdin)
-			if err != nil {
-				return opts, "", fmt.Errorf("read stdin: %w", err)
-			}
-			if s := strings.TrimSpace(string(b)); s != "" {
-				parts = append([]string{s}, parts...)
-			}
+	if stdin != nil && !isCharacterDevice(stdin) {
+		b, err := io.ReadAll(stdin)
+		if err != nil {
+			return opts, "", fmt.Errorf("read stdin: %w", err)
+		}
+		if s := strings.TrimSpace(string(b)); s != "" {
+			parts = append([]string{s}, parts...)
 		}
 	}
 	prompt := strings.TrimSpace(strings.Join(parts, " "))
@@ -319,64 +354,85 @@ func parseHeadlessArgs(args []string, stdin *os.File) (headlessOptions, string, 
 	return opts, prompt, nil
 }
 
-func finishHeadless(opts headlessOptions, result headlessResult) {
+func isCharacterDevice(in io.Reader) bool {
+	input, ok := in.(interface {
+		Stat() (os.FileInfo, error)
+	})
+	if !ok {
+		return false
+	}
+	info, err := input.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func finishHeadless(opts headlessOptions, result headlessResult, streams stdio) {
 	if opts.json {
 		b, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "encode result: %v\n", err)
+			fmt.Fprintf(streams.err, "encode result: %v\n", err)
 			return
 		}
-		fmt.Println(string(b))
+		fmt.Fprintln(streams.out, string(b))
 		return
 	}
 	if result.Final != "" {
-		fmt.Println(result.Final)
+		fmt.Fprintln(streams.out, result.Final)
 	}
 	if result.Error != "" {
-		fmt.Fprintln(os.Stderr, result.Error)
+		fmt.Fprintln(streams.err, result.Error)
 	}
 }
 
-func resumeSession(ctx context.Context, id string) {
-	store := mustSessionStore()
+func resumeSession(ctx context.Context, id string, streams stdio) int {
+	store, ok := loadSessionStore(streams.err)
+	if !ok {
+		return 1
+	}
 	sess, err := store.Load(ctx, id)
 	if err != nil {
 		if errors.Is(err, session.ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "session not found: %s\n", id)
+			fmt.Fprintf(streams.err, "session not found: %s\n", id)
 		} else {
-			fmt.Fprintf(os.Stderr, "load session: %v\n", err)
+			fmt.Fprintf(streams.err, "load session: %v\n", err)
 		}
-		os.Exit(1)
+		return 1
 	}
-	restoreSessionCWD(sess.Metadata.CWD)
-	runChatSession(ctx, store, sess)
+	restoreSessionCWD(sess.Metadata.CWD, streams.err)
+	return runChatSession(ctx, store, sess, streams)
 }
 
-func restoreSessionCWD(cwd string) {
+func restoreSessionCWD(cwd string, errOut io.Writer) {
 	if cwd == "" {
 		return
 	}
 	info, err := os.Stat(cwd)
 	if err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "warning: session cwd %s is unavailable; using current directory\n", cwd)
+		fmt.Fprintf(errOut, "warning: session cwd %s is unavailable; using current directory\n", cwd)
 		return
 	}
 	if err := os.Chdir(cwd); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: session cwd %s: %v; using current directory\n", cwd, err)
+		fmt.Fprintf(errOut, "warning: session cwd %s: %v; using current directory\n", cwd, err)
 	}
 }
 
-func runChatSession(ctx context.Context, store *session.Store, sess *session.Session) {
-	cfg := mustConfig()
-	providerName, model := sessionBackend(cfg, sessionMetadata(sess))
+func runChatSession(ctx context.Context, store *session.Store, sess *session.Session, streams stdio) int {
+	cfg, ok := loadConfig(streams.err)
+	if !ok {
+		return 1
+	}
+	providerName, model := sessionBackend(cfg, sessionMetadata(sess), streams.err)
 	prov, err := chatSessionProvider(ctx, cfg, sess, providerName)
 	if err != nil && providerName != cfg.Provider {
-		fmt.Fprintf(os.Stderr, "warning: cannot resume with %s (%v); continuing with %s model %s\n", providerName, err, cfg.Provider, cfg.Model)
+		fmt.Fprintf(streams.err, "warning: cannot resume with %s (%v); continuing with %s model %s\n", providerName, err, cfg.Provider, cfg.Model)
 		providerName, model = cfg.Provider, cfg.Model
-		prov = mustProvider(cfg)
+		prov, err = newProvider(cfg, cfg.Provider)
+		if err != nil {
+			fmt.Fprintln(streams.err, err)
+			return 1
+		}
 	} else if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(streams.err, err)
+		return 1
 	}
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
@@ -410,16 +466,16 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 			Provider: providerName,
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "create session: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(streams.err, "create session: %v\n", err)
+			return 1
 		}
 	}
 	// Skills are loaded once: the catalog is advertised in the system prompt
 	// (via chatSystem), and the same slice drives $name and /name expansion in
 	// the TUI.
-	sk := loadSkills(cfg, cwd)
+	sk := loadSkills(cfg, cwd, streams.err)
 
-	system, systemBlocks := chatSystem(cfg, cwd, sk)
+	system, systemBlocks := chatSystem(cfg, cwd, sk, streams.err)
 	var requiresApproval func(string, map[string]any) bool
 	if len(cfg.ToolApprovals) > 0 {
 		requiresApproval = approval.New(cfg.ToolApprovals).Requires
@@ -457,14 +513,16 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	if err := tui.Run(ctx, ag, model, Version, sk,
 		tui.WithAfterSend(saveSession),
-		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName), switchModel),
+		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName, streams.err), switchModel),
 		tui.WithStepEvents(stepEvents),
 		tui.WithWorkflowEvents(workflowEvents),
 		tui.WithVerbose(cfg.VerboseEnabled()),
+		tui.WithIO(streams.in, streams.out),
 	); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(streams.err, err)
+		return 1
 	}
+	return 0
 }
 
 func chatCompactor(prov llm.Provider, model string, cfg *config.Config) compact.Compactor {
@@ -487,13 +545,13 @@ func sessionMetadata(sess *session.Session) session.Metadata {
 // current config rather than applying a model id to the wrong provider.
 // loadSkills discovers skills when the feature is enabled. A discovery error is
 // non-fatal — it warns and returns no skills rather than failing to start.
-func loadSkills(cfg *config.Config, cwd string) []skills.Skill {
+func loadSkills(cfg *config.Config, cwd string, errOut io.Writer) []skills.Skill {
 	if !cfg.SkillsEnabled() || cwd == "" {
 		return nil
 	}
 	sk, err := skills.Load(cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: skills: %v\n", err)
+		fmt.Fprintf(errOut, "warning: skills: %v\n", err)
 		return nil
 	}
 	return sk

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,7 @@ func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.
 	choices := modelChoices(context.Background(), &config.Config{
 		Provider:   "openai",
 		OpenAIAuth: config.OpenAIAuthSubscription,
-	}, "openai")
+	}, "openai", io.Discard)
 
 	if len(choices) != 1 {
 		t.Fatalf("subscription choices = %d, want 1: %#v", len(choices), choices)
@@ -39,7 +40,7 @@ func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
 	choices := modelChoices(context.Background(), &config.Config{
 		Provider:   "openai",
 		OpenAIAuth: config.OpenAIAuthAPIKey,
-	}, "openai")
+	}, "openai", io.Discard)
 
 	for _, choice := range choices {
 		if strings.Contains(choice.ID, "codex") {
@@ -50,7 +51,7 @@ func TestModelChoices_OpenAIAPIKeyDoesNotListCodexModels(t *testing.T) {
 
 func TestModelChoices_GoogleListsGeminiModels(t *testing.T) {
 	clearAdditionalProviderCredentials(t)
-	choices := modelChoices(context.Background(), &config.Config{Provider: "google"}, "google")
+	choices := modelChoices(context.Background(), &config.Config{Provider: "google"}, "google", io.Discard)
 	if len(choices) == 0 {
 		t.Fatal("expected google model choices")
 	}
@@ -105,7 +106,7 @@ func TestModelChoices_OpenRouterFallsBackWhenCatalogueUnavailable(t *testing.T) 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already-cancelled context forces the fetch to fail immediately
 
-	choices := modelChoices(ctx, &config.Config{Provider: "openrouter"}, "openrouter")
+	choices := modelChoices(ctx, &config.Config{Provider: "openrouter"}, "openrouter", io.Discard)
 	if len(choices) == 0 {
 		t.Fatal("expected a fallback openrouter model choice")
 	}
@@ -125,7 +126,7 @@ func TestModelChoices_OnlyListsActiveProvider(t *testing.T) {
 	clearAdditionalProviderCredentials(t)
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 
-	choices := modelChoices(context.Background(), &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}, "anthropic")
+	choices := modelChoices(context.Background(), &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}, "anthropic", io.Discard)
 	for _, choice := range choices {
 		if strings.HasPrefix(choice.ID, "gpt-") {
 			t.Fatalf("picker exposed another provider model: %#v", choices)
@@ -230,7 +231,7 @@ func TestChatSystem_IgnoresProjectMemoryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	system, blocks := chatSystem(&config.Config{}, cwd, nil)
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, io.Discard)
 
 	if len(blocks) != 1 {
 		t.Fatalf("system blocks = %d, want 1", len(blocks))
@@ -243,7 +244,7 @@ func TestChatSystem_IgnoresProjectMemoryFile(t *testing.T) {
 func TestSessionBackend_HonorsSavedModelForSameProvider(t *testing.T) {
 	cfg := &config.Config{Provider: "openai", Model: "gpt-5.2"}
 	meta := session.Metadata{Provider: "openai", Model: "gpt-5-mini"}
-	provider, model := sessionBackend(cfg, meta)
+	provider, model := sessionBackend(cfg, meta, io.Discard)
 	if provider != "openai" || model != "gpt-5-mini" {
 		t.Fatalf("session backend = %s/%s, want openai/gpt-5-mini", provider, model)
 	}
@@ -253,7 +254,7 @@ func TestSessionBackend_FallsBackWhenSavedProviderCredentialsAreMissing(t *testi
 	t.Setenv("OPENAI_API_KEY", "")
 	cfg := &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}
 	meta := session.Metadata{Provider: "openai", Model: "gpt-5-codex"}
-	provider, model := sessionBackend(cfg, meta)
+	provider, model := sessionBackend(cfg, meta, io.Discard)
 	if provider != "anthropic" || model != "claude-opus-4-8" {
 		t.Fatalf("session backend = %s/%s, want anthropic/claude-opus-4-8", provider, model)
 	}
@@ -263,7 +264,7 @@ func TestSessionBackend_RestoresSavedProviderWhenCredentialIsConfigured(t *testi
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	cfg := &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}
 	meta := session.Metadata{Provider: "openai", Model: "gpt-5.2"}
-	provider, model := sessionBackend(cfg, meta)
+	provider, model := sessionBackend(cfg, meta, io.Discard)
 	if provider != "openai" || model != "gpt-5.2" {
 		t.Fatalf("session backend = %s/%s, want openai/gpt-5.2", provider, model)
 	}
@@ -274,7 +275,7 @@ func TestSessionBackend_FallsBackForLegacySessionsWithoutProvider(t *testing.T) 
 	// that may belong to a different backend.
 	cfg := &config.Config{Provider: "anthropic", Model: "claude-opus-4-8"}
 	meta := session.Metadata{Model: "gpt-4o"}
-	provider, model := sessionBackend(cfg, meta)
+	provider, model := sessionBackend(cfg, meta, io.Discard)
 	if provider != "anthropic" || model != "claude-opus-4-8" {
 		t.Fatalf("session backend = %s/%s, want anthropic/claude-opus-4-8", provider, model)
 	}
@@ -370,5 +371,27 @@ func TestParseHeadlessArgsRequiresPrompt(t *testing.T) {
 	_, _, err := parseHeadlessArgs([]string{"--json"}, nil)
 	if err == nil {
 		t.Fatal("expected missing prompt error")
+	}
+}
+
+func TestParseHeadlessArgsReadsInjectedPipedInput(t *testing.T) {
+	input, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = input.Close() })
+	if _, err := input.WriteString("from stdin\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	_, prompt, err := parseHeadlessArgs([]string{"from", "args"}, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prompt != "from stdin from args" {
+		t.Fatalf("prompt = %q, want piped stdin followed by arguments", prompt)
 	}
 }

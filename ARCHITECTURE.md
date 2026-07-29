@@ -109,9 +109,12 @@ Key rules:
 
 ## 2. Process and Startup Lifecycle
 
-Neo is a single foreground process. `cmd/neo/main.go` installs signal handling,
-initializes optional debug logging, dispatches the command, and exits when that
-command finishes.
+Neo is a single foreground process. `cmd/neo/main.go` keeps process termination
+at one boundary: `main` calls `os.Exit` with the status returned by `execute`.
+`execute` initializes optional debug logging and defers its cleanup before
+calling `run`. The dispatcher installs signal handling, accepts injected stdin,
+stdout, and stderr streams, and returns a status code. Command helpers never
+terminate the process themselves, so all deferred cleanup runs before exit.
 
 ### Interactive Chat Startup
 
