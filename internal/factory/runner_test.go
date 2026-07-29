@@ -2,16 +2,12 @@ package factory
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
-	"github.com/owainlewis/neo/internal/permission"
 )
 
 func TestRegistryHasCodingToolsWithoutNestedAgent(t *testing.T) {
@@ -77,30 +73,6 @@ func TestAgentRunnerSetBackendAppliesToFutureWorkers(t *testing.T) {
 	}
 	if out != "new backend" || len(oldProvider.Calls) != 0 || newProvider.Calls[0].Model != "new-model" {
 		t.Fatalf("out=%q old=%d new=%+v", out, len(oldProvider.Calls), newProvider.Calls)
-	}
-}
-
-func TestReadonlyModePropagatesToSubagents(t *testing.T) {
-	prov := &llmtest.FakeProvider{Responses: []llm.Response{
-		llmtest.ToolUse("t1", "write_file", map[string]any{"path": "x.txt", "content": "hi"}),
-		llmtest.Text("done"),
-	}}
-	dir := t.TempDir()
-	r := &AgentRunner{Provider: prov, DefaultModel: "m", Root: dir, Mode: permission.ModeReadonly}
-	if _, err := r.RunAgent(context.Background(), dir, "write x.txt", make(chan AgentEvent, 32)); err != nil {
-		t.Fatal(err)
-	}
-	flat := ""
-	for _, m := range prov.Calls[1].Messages {
-		for _, c := range m.Content {
-			flat += c.Content
-		}
-	}
-	if !strings.Contains(flat, "readonly") {
-		t.Fatalf("write_file not denied:\n%s", flat)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "x.txt")); err == nil {
-		t.Fatal("file was written despite readonly mode")
 	}
 }
 

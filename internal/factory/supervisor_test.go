@@ -14,7 +14,6 @@ import (
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -105,7 +104,7 @@ func TestEventLifecycleCarriesCallMetadata(t *testing.T) {
 	}
 }
 
-func TestInspectCallsOverlapInReadonlyParent(t *testing.T) {
+func TestInspectCallsOverlapWithRestrictedTools(t *testing.T) {
 	started := make(chan RunOptions, 2)
 	release := make(chan struct{})
 	runner := configuredScriptedRunner{run: func(ctx context.Context, _, input string, _ chan<- AgentEvent, opts RunOptions) (string, error) {
@@ -134,7 +133,6 @@ func TestInspectCallsOverlapInReadonlyParent(t *testing.T) {
 		Model:            "m",
 		Provider:         prov,
 		Tools:            tools.NewRegistry(parentTool),
-		Policy:           permission.New(string(permission.ModeReadonly), dir),
 		MaxParallelTools: 2,
 	})
 	done := make(chan error, 1)
@@ -149,7 +147,7 @@ func TestInspectCallsOverlapInReadonlyParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, opt := range opts {
-		if opt.PermissionMode != permission.ModeReadonly || !slices.Equal(opt.Tools, inspectAgentTools) {
+		if !slices.Equal(opt.Tools, inspectAgentTools) {
 			t.Fatalf("inspect options=%+v", opt)
 		}
 	}
@@ -158,8 +156,8 @@ func TestInspectCallsOverlapInReadonlyParent(t *testing.T) {
 func TestAgentToolModesFailClosed(t *testing.T) {
 	tool := AgentTool{}
 	inspect := map[string]any{"prompt": "review", "mode": "inspect"}
-	if !tool.ParallelSafe(inspect) || !tool.ReadOnly(inspect) {
-		t.Fatal("valid inspect call should be parallel-safe and read-only")
+	if !tool.ParallelSafe(inspect) {
+		t.Fatal("valid inspect call should be parallel-safe")
 	}
 	for _, input := range []map[string]any{
 		{"prompt": "review"},
@@ -167,7 +165,7 @@ func TestAgentToolModesFailClosed(t *testing.T) {
 		{"prompt": "review", "mode": "unknown"},
 		{"mode": "inspect"},
 	} {
-		if tool.ParallelSafe(input) || tool.ReadOnly(input) {
+		if tool.ParallelSafe(input) {
 			t.Fatalf("call did not fail closed: %#v", input)
 		}
 	}

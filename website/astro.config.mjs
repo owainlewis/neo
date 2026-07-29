@@ -41,7 +41,7 @@ export default defineConfig({
             { label: 'Agent loop', slug: 'docs/reference/guides/agent-loop' },
             { label: 'System prompt', slug: 'docs/reference/guides/system-prompt' },
             { label: 'Tools', slug: 'docs/reference/guides/tools' },
-            { label: 'Permissions', slug: 'docs/reference/guides/permissions' },
+            { label: 'Sandbox and approvals', slug: 'docs/reference/guides/permissions' },
             { label: 'Providers', slug: 'docs/reference/guides/providers' },
             { label: 'Sessions', slug: 'docs/reference/guides/sessions' },
             { label: 'Compaction', slug: 'docs/reference/guides/compaction' },

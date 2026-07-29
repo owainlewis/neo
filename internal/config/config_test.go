@@ -453,7 +453,7 @@ func TestFeatures_PromptCachingDefaultsOnExplicitFalseDisables(t *testing.T) {
 	})
 }
 
-func TestPermissions_DefaultsToTrusted(t *testing.T) {
+func TestToolApprovals_DefaultsEmpty(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
 		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
@@ -461,36 +461,42 @@ func TestPermissions_DefaultsToTrusted(t *testing.T) {
 		if err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		if cfg.Permissions.Mode != PermissionModeTrusted {
-			t.Fatalf("permissions.mode = %q, want %q", cfg.Permissions.Mode, PermissionModeTrusted)
+		if len(cfg.ToolApprovals) != 0 {
+			t.Fatalf("tool_approvals = %#v, want empty", cfg.ToolApprovals)
 		}
 	})
 }
 
-func TestPermissions_AcceptsKnownModes(t *testing.T) {
-	for _, mode := range []string{PermissionModeAsk, PermissionModeTrusted, PermissionModeReadonly} {
-		t.Run(mode, func(t *testing.T) {
-			withTempDir(t, func(dir string) {
-				t.Setenv("HOME", dir)
-				writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\npermissions:\n  mode: "+mode+"\n")
-				cfg, err := Load()
-				if err != nil {
-					t.Fatalf("load: %v", err)
-				}
-				if cfg.Permissions.Mode != mode {
-					t.Fatalf("permissions.mode = %q, want %q", cfg.Permissions.Mode, mode)
-				}
-			})
-		})
-	}
-}
-
-func TestPermissions_RejectsUnknownMode(t *testing.T) {
+func TestToolApprovals_TrimsAndDeduplicates(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)
-		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\npermissions:\n  mode: nope\n")
-		if _, err := Load(); err == nil {
-			t.Fatal("expected invalid permissions.mode to fail")
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\ntool_approvals:\n  - ' git '\n  - write_file\n  - git\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if len(cfg.ToolApprovals) != 2 || cfg.ToolApprovals[0] != "git" || cfg.ToolApprovals[1] != "write_file" {
+			t.Fatalf("tool_approvals = %#v", cfg.ToolApprovals)
+		}
+	})
+}
+
+func TestToolApprovals_RejectsEmptyEntry(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\ntool_approvals:\n  - '   '\n")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+			t.Fatalf("error = %v, want empty-entry error", err)
+		}
+	})
+}
+
+func TestPermissions_RejectsRemovedConfigWithMigration(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\npermissions:\n  mode: readonly\n")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "use tool_approvals") {
+			t.Fatalf("error = %v, want migration error", err)
 		}
 	})
 }

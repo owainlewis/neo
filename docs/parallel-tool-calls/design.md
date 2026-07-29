@@ -34,7 +34,10 @@ The registry owns the lookup so the agent loop does not contain a list of tool n
 
 ## Scheduling
 
-Before scheduling a call, the coordinator resolves the tool and evaluates its permission policy serially. A denied call receives its normal result. A call requiring approval is handled serially and becomes a barrier. Execution receives the completed authorization decision so policy is not evaluated twice and approval callbacks cannot overlap.
+Before scheduling a call, the coordinator resolves the tool and evaluates the
+optional interactive approval matcher serially. A call requiring confirmation
+is handled serially and becomes a barrier. Matching is not evaluated twice and
+approval callbacks cannot overlap.
 
 For each provider response, the loop keeps the original content order and divides calls into groups:
 
@@ -73,7 +76,7 @@ Tool descriptions should describe capability, not scheduler mechanics. No `paral
 ## Errors And Limits
 
 - Unknown tools return their normal error and act as serial barriers.
-- Permission decisions are made serially before scheduling.
+- Approval matching is performed serially before scheduling.
 - Approval callbacks always run serially on the coordinator.
 - A denied call does not cancel unrelated calls in its group.
 - Parallel-enabled tools must document and test prompt cancellation.
@@ -85,7 +88,7 @@ In scope:
 
 - Optional tool execution capability.
 - Bounded scheduler in the agent loop.
-- Serial permission preflight and approval handling.
+- Serial approval matching and prompt handling.
 - Parallel classification for built-in read/search tools.
 - Deterministic transcript and serialized events.
 - Stable call/group event identity for parallel UI rendering.
@@ -108,7 +111,7 @@ Out of scope:
 - Results are stored in original call order even when completion order differs.
 - Tool call and result events are emitted in source order, and callbacks are never invoked concurrently.
 - A parallel-start event declares every row before execution and all later events correlate by tool-use ID.
-- Permission approval callbacks are never invoked concurrently.
+- Approval callbacks are never invoked concurrently.
 - Failure, denial, timeout, cancellation, and steering keep every tool call paired with one result.
 - Steering skips every unstarted call, including a following write barrier.
 - Cancellation synthesizes results for calls that have not started.

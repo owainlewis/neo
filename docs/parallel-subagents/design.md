@@ -38,12 +38,13 @@ Dynamic child execution receives immutable per-run options rather than changing 
 
 ```go
 type RunOptions struct {
-	PermissionMode permission.Mode
-	Tools          []string
+	Tools []string
 }
 ```
 
-Inspect calls pass a read-only permission mode and the exact inspection tool allowlist. Work calls preserve the existing tool and permission behavior. This permits inspect and work children to coexist without a race on runner configuration.
+Inspect calls pass the exact inspection tool list. Work calls receive the
+standard child registry. This permits inspect and work children to coexist
+without changing shared runner configuration.
 
 ## Coordinator Pattern
 
@@ -66,9 +67,8 @@ This encourages native multi-call output. The runtime does not need to force or 
 ## Safety
 
 - Inspect children use an explicit allowlist: `read_file`, `grep`, `glob`.
-- Inspect children receive a read-only permission policy as defense in depth.
 - They do not receive `bash`, file mutation tools, or the `agent` tool.
-- Work children preserve current parent permission behavior and remain serial.
+- Work children receive the standard writable child registry and remain serial.
 - Parent cancellation propagates through the shared context to every active child. Every child event send, including the final usage event, must select on that context.
 - Existing supervisor limits bound depth, child count, total agents, and wall time.
 - The generic tool scheduler adds a maximum number of concurrent calls.
@@ -83,7 +83,11 @@ The parent tool-call metadata is carried through the internal execution context 
 
 Existing calls with only `prompt` or with `max_retries` continue to use `work` mode and execute serially. Existing static workflow agents are unchanged.
 
-Retries stay inside each child call. `StepResult` gains an internal structured failure code or `Retryable` field so the caller does not infer retry behavior from output text. Admission and budget denial, invalid input, permission denial, parent cancellation, and parent timeout are terminal. Only explicitly transient execution failures may retry.
+Retries stay inside each child call. `StepResult` gains an internal structured
+failure code or `Retryable` field so the caller does not infer retry behavior
+from output text. Admission and budget denial, invalid input, parent
+cancellation, and parent timeout are terminal. Only explicitly transient
+execution failures may retry.
 
 ## Scope
 
@@ -91,7 +95,7 @@ In scope:
 
 - `inspect` and `work` modes on the existing `agent` tool.
 - Strict shared mode parsing and immutable per-run child options.
-- Safe tool and permission filtering for inspect children.
+- Exact tool filtering for inspect children.
 - Parallel classification through the shared tool scheduler.
 - Prompt guidance for multi-investigation fan-out.
 - Concurrent supervisor, event, cancellation, retry, and ordering tests.
@@ -120,7 +124,7 @@ Inspection without shell cannot query diffs, staged state, blame, or history. Th
 - Two `mode=inspect` calls emitted together demonstrably overlap.
 - An inspect child cannot invoke `bash`, `write_file`, `edit_file`, or `agent`.
 - Invalid mode values return an error and never receive the work toolset.
-- Concurrent inspect calls use independent immutable tool and permission options.
+- Concurrent inspect calls use independent immutable tool options.
 - A prompt-only call retains the current work toolset and serial behavior.
 - A work call never overlaps another tool call.
 - Concurrent children retain distinct node IDs and correctly attributed events.
@@ -129,7 +133,7 @@ Inspection without shell cannot query diffs, staged state, blame, or history. Th
 - Parent cancellation stops cancellation-compliant active children, all event sends unblock, and no Neo-owned goroutine leaks.
 - Supervisor concurrency stays within existing child, agent, and wall-time budgets.
 - Budget denials are not retried.
-- Invalid input, permission denial, cancellation, and parent timeout are not retried.
+- Invalid input, cancellation, and parent timeout are not retried.
 - The race detector reports no event, node, transcript, or policy races.
 
 ## Checks

@@ -22,7 +22,6 @@ import (
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workflow"
 	"github.com/owainlewis/neo/internal/workspace"
@@ -136,9 +135,8 @@ type approvalRequestMsg struct {
 }
 
 type approvalState struct {
-	req      agent.ApprovalRequest
-	reply    chan bool
-	expanded bool
+	req   agent.ApprovalRequest
+	reply chan bool
 }
 
 type turnStats struct {
@@ -191,11 +189,7 @@ type model struct {
 	activeTree      *treeBlock         // block receiving new subagent activity
 	treeIndex       map[int]*treeBlock // supervisor node id -> the block holding it
 	approval        *approvalState
-	// allow holds the rules the user granted via "always allow" during this
-	// session. It is consulted before prompting, so a granted tool/command
-	// stops asking. It is intentionally not persisted.
-	allow    permission.Allowlist
-	quitting bool
+	quitting        bool
 
 	// cancel for the currently in-flight Send, if any.
 	sendCancel      context.CancelFunc
@@ -372,12 +366,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 
 	case approvalRequestMsg:
-		logx.Debug("tui approval requested", "tool", msg.req.ToolName, "reason", msg.req.Reason)
-		req := permission.Request{ToolName: msg.req.ToolName, Args: msg.req.Args}
-		if m.allow.Allows(req) {
-			msg.reply <- true
-			break
-		}
+		logx.Debug("tui approval requested", "tool", msg.req.ToolName)
 		m.approval = &approvalState{req: msg.req, reply: msg.reply}
 		m.appendBlock(approvalBlock{req: msg.req})
 		m.layout()
@@ -684,24 +673,6 @@ func (m *model) finishApproval(ok bool) {
 		m.appendBlock(noticeBlock{text: "denied " + m.approval.req.ToolName})
 	}
 	m.approval = nil
-}
-
-func (m *model) toggleApprovalPreview() bool {
-	if m.approval == nil || !approvalPreviewIsTruncated(m.approval.req.Preview) {
-		return false
-	}
-	m.approval.expanded = !m.approval.expanded
-	for i := len(m.blocks) - 1; i >= 0; i-- {
-		b, ok := m.blocks[i].(approvalBlock)
-		if !ok {
-			continue
-		}
-		b.expanded = m.approval.expanded
-		m.blocks[i] = b
-		m.refreshViewport()
-		return true
-	}
-	return false
 }
 
 func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBlock, bool) {

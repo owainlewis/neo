@@ -15,14 +15,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
 // RunOptions are immutable capabilities for one child run.
 type RunOptions struct {
-	PermissionMode permission.Mode
-	Tools          []string
+	Tools []string
 }
 
 // PromptOptions configure one chat-spawned child and carry parent call

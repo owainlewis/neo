@@ -10,9 +10,9 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/approval"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 )
@@ -57,7 +57,7 @@ func TestSkillsAppearInHelpAndPicker(t *testing.T) {
 func TestSkillSlashInvocationExpandsBodyWithArguments(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
 	m := makeTestModel()
-	m.ag = agent.New(agent.Config{Model: "test", Provider: prov, Policy: permission.New("trusted", ".")})
+	m.ag = agent.New(agent.Config{Model: "test", Provider: prov})
 	m.skills = []skills.Skill{{Name: "review", Description: "review a diff", Body: "Review carefully."}}
 
 	cmd := m.handleSlashCommand("/review internal/tui")
@@ -94,7 +94,7 @@ func TestSkillSlashInvocationExpandsBodyWithArguments(t *testing.T) {
 func TestSkillSlashInvocationDoesNotRescanExpandedBody(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
 	m := makeTestModel()
-	m.ag = agent.New(agent.Config{Model: "test", Provider: prov, Policy: permission.New("trusted", ".")})
+	m.ag = agent.New(agent.Config{Model: "test", Provider: prov})
 	m.skills = []skills.Skill{
 		{Name: "review", Description: "review a diff", Body: "Mention $commit as an example."},
 		{Name: "commit", Description: "write a commit", Body: "Commit instructions."},
@@ -281,7 +281,7 @@ func TestApprovalPromptRepliesFromKeypress(t *testing.T) {
 			m := makeTestModel()
 			reply := make(chan bool, 1)
 			m.Update(approvalRequestMsg{
-				req:   agent.ApprovalRequest{ToolName: "bash", Preview: "preview"},
+				req:   agent.ApprovalRequest{ToolName: "bash"},
 				reply: reply,
 			})
 			if m.approval == nil {
@@ -298,67 +298,25 @@ func TestApprovalPromptRepliesFromKeypress(t *testing.T) {
 	}
 }
 
-func TestApprovalPreviewToggleUpdatesPendingCard(t *testing.T) {
+func TestApprovalPromptsAgainAfterApproval(t *testing.T) {
 	m := makeTestModel()
-	reply := make(chan bool, 1)
-	m.Update(approvalRequestMsg{
-		req:   agent.ApprovalRequest{ToolName: "edit_file", Preview: numberedLines(25)},
-		reply: reply,
-	})
-	if !m.toggleApprovalPreview() {
-		t.Fatal("expected approval preview to expand")
-	}
-	out := renderPlainBlocks(m)
-	if !strings.Contains(out, "line 24") {
-		t.Fatalf("expanded approval preview missing full content:\n%s", out)
-	}
-	if !m.toggleApprovalPreview() {
-		t.Fatal("expected approval preview to collapse")
-	}
-	out = renderPlainBlocks(m)
-	if strings.Contains(out, "line 24") {
-		t.Fatalf("collapsed approval preview should hide full content:\n%s", out)
-	}
-}
-
-func TestApprovalAlwaysAllowSkipsLaterPrompts(t *testing.T) {
-	m := makeTestModel()
-
-	// First call: grant "always" for this bash command.
 	reply := make(chan bool, 1)
 	m.Update(approvalRequestMsg{
 		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "go test ./..."}},
 		reply: reply,
 	})
-	if m.approval == nil {
-		t.Fatal("expected first call to prompt")
-	}
-	m.Update(keyPress('a'))
+	m.Update(keyPress('y'))
 	if got := <-reply; !got {
-		t.Fatal("expected always-allow to approve the call")
+		t.Fatal("expected first call to be approved")
 	}
 
-	// A later go test invocation must auto-approve without a prompt.
 	reply2 := make(chan bool, 1)
 	m.Update(approvalRequestMsg{
-		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "go test -run X"}},
+		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "go test ./..."}},
 		reply: reply2,
 	})
-	if m.approval != nil {
-		t.Fatal("granted command should not prompt again")
-	}
-	if got := <-reply2; !got {
-		t.Fatal("granted command should auto-approve")
-	}
-
-	// An unrelated command still prompts.
-	reply3 := make(chan bool, 1)
-	m.Update(approvalRequestMsg{
-		req:   agent.ApprovalRequest{ToolName: "bash", Args: map[string]any{"command": "rm -rf build"}},
-		reply: reply3,
-	})
 	if m.approval == nil {
-		t.Fatal("unrelated command should still prompt")
+		t.Fatal("configured calls should prompt every time")
 	}
 }
 
@@ -384,11 +342,16 @@ func TestBangCommand_EmptyShowsHelpfulError(t *testing.T) {
 
 func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) {
 	prov := &llmtest.FakeProvider{}
+	approvals := 0
 	ag := agent.New(agent.Config{
-		Model:    "test",
-		Provider: prov,
-		Tools:    tools.NewRegistry(tuiEchoTool{}),
-		Policy:   permission.New("trusted", "."),
+		Model:            "test",
+		Provider:         prov,
+		Tools:            tools.NewRegistry(tuiEchoTool{}),
+		RequiresApproval: approval.New([]string{"echo"}).Requires,
+		Approve: func(context.Context, agent.ApprovalRequest) (bool, error) {
+			approvals++
+			return true, nil
+		},
 	})
 	m := makeTestModel()
 	m.ag = ag
@@ -406,6 +369,9 @@ func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) 
 	}
 	if len(prov.Calls) != 0 {
 		t.Fatalf("provider calls = %d, want 0", len(prov.Calls))
+	}
+	if approvals != 1 {
+		t.Fatalf("approvals = %d, want 1", approvals)
 	}
 	if got := len(m.ag.Transcript()); got != 0 {
 		t.Fatalf("agent transcript length = %d, want 0", got)
@@ -442,7 +408,6 @@ func TestBangCommand_ConciseModeKeepsRequestedCommandOutput(t *testing.T) {
 		Model:    "test",
 		Provider: prov,
 		Tools:    tools.NewRegistry(tuiEchoTool{}),
-		Policy:   permission.New("trusted", "."),
 	})
 	m := makeTestModel() // verbose defaults to false
 	m.ag = ag
@@ -481,7 +446,6 @@ func TestBangCommand_FailureMarksSummaryFailed(t *testing.T) {
 		Model:    "test",
 		Provider: &llmtest.FakeProvider{},
 		Tools:    tools.NewRegistry(tuiFailTool{}),
-		Policy:   permission.New("trusted", "."),
 	})
 	m := makeTestModel()
 	m.ag = ag

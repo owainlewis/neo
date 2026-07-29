@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/approval"
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
@@ -112,7 +112,7 @@ USAGE:
   neo                Interactive chat mode (default)
   neo chat           Interactive chat mode (explicit)
   neo run [options] <prompt>
-                     Run one headless prompt and exit (readonly by default)
+                     Run one headless prompt and exit
   neo sessions       List saved chat sessions
   neo sessions search <query>
                      Search saved session transcripts
@@ -139,9 +139,9 @@ CONFIG:
 
 HEADLESS RUN:
   neo run --json --timeout 10m "Review this repo without changing files"
-  cat prompt.md | neo run --json --permission readonly
+  cat prompt.md | neo run --json
 
-  Options: --permission readonly|ask|trusted (default readonly), --timeout <duration>, --json`
+  Options: --timeout <duration>, --json`
 
 func printUsage() {
 	fmt.Println(usageText)
@@ -206,9 +206,8 @@ func runChat(ctx context.Context) {
 }
 
 type headlessOptions struct {
-	permission string
-	timeout    time.Duration
-	json       bool
+	timeout time.Duration
+	json    bool
 }
 
 type headlessResult struct {
@@ -216,7 +215,6 @@ type headlessResult struct {
 	ElapsedMS  int64  `json:"elapsed_ms"`
 	Provider   string `json:"provider"`
 	Model      string `json:"model"`
-	Permission string `json:"permission"`
 	ToolCalls  int    `json:"tool_calls"`
 	ToolErrors int    `json:"tool_errors"`
 	Final      string `json:"final,omitempty"`
@@ -227,7 +225,7 @@ func runHeadless(ctx context.Context, args []string) {
 	opts, prompt, err := parseHeadlessArgs(args, os.Stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		fmt.Fprintln(os.Stderr, "usage: neo run [--json] [--permission readonly|ask|trusted] [--timeout 10m] <prompt>")
+		fmt.Fprintln(os.Stderr, "usage: neo run [--json] [--timeout 10m] <prompt>")
 		os.Exit(2)
 	}
 	if opts.timeout > 0 {
@@ -240,7 +238,7 @@ func runHeadless(ctx context.Context, args []string) {
 	providerName, model := cfg.Provider, cfg.Model
 	prov, err := checkedProvider(ctx, cfg, providerName)
 	if err != nil {
-		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Permission: opts.permission, Error: err.Error()})
+		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Error: err.Error()})
 		os.Exit(1)
 	}
 	cwd, _ := os.Getwd()
@@ -250,16 +248,12 @@ func runHeadless(ctx context.Context, args []string) {
 
 	var toolCalls, toolErrors int
 	reg := newRegistry(cwd, root)
-	if permission.Mode(opts.permission) == permission.ModeReadonly {
-		reg = reg.Filter([]string{"read_file", "grep", "glob"})
-	}
 	ag := agent.New(agent.Config{
 		Model:        model,
 		System:       system,
 		SystemBlocks: systemBlocks,
 		Provider:     prov,
 		Tools:        reg,
-		Policy:       permission.New(opts.permission, root),
 		Compactor:    chatCompactor(prov, model, cfg),
 		OnEvent: func(e agent.Event) {
 			switch e.Kind {
@@ -278,7 +272,6 @@ func runHeadless(ctx context.Context, args []string) {
 		ElapsedMS:  time.Since(started).Milliseconds(),
 		Provider:   prov.Name(),
 		Model:      model,
-		Permission: opts.permission,
 		ToolCalls:  toolCalls,
 		ToolErrors: toolErrors,
 		Final:      out,
@@ -293,19 +286,19 @@ func runHeadless(ctx context.Context, args []string) {
 }
 
 func parseHeadlessArgs(args []string, stdin *os.File) (headlessOptions, string, error) {
-	opts := headlessOptions{permission: string(permission.ModeReadonly), timeout: 10 * time.Minute}
+	opts := headlessOptions{timeout: 10 * time.Minute}
+	for _, arg := range args {
+		if arg == "--permission" || arg == "-permission" ||
+			strings.HasPrefix(arg, "--permission=") || strings.HasPrefix(arg, "-permission=") {
+			return opts, "", fmt.Errorf("--permission has been removed; run Neo inside a sandbox and use tool_approvals for optional interactive confirmations")
+		}
+	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.StringVar(&opts.permission, "permission", opts.permission, "permission mode: readonly, ask, or trusted")
 	fs.DurationVar(&opts.timeout, "timeout", opts.timeout, "maximum wall-clock duration")
 	fs.BoolVar(&opts.json, "json", false, "print a JSON summary instead of plain text")
 	if err := fs.Parse(args); err != nil {
 		return opts, "", err
-	}
-	switch permission.Mode(opts.permission) {
-	case permission.ModeReadonly, permission.ModeAsk, permission.ModeTrusted:
-	default:
-		return opts, "", fmt.Errorf("invalid --permission %q", opts.permission)
 	}
 	parts := fs.Args()
 	if stdin != nil {
@@ -404,7 +397,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		var at factory.AgentTool
 		workerProvider, workerModel, followsCoordinator := subagentBackend(ctx, cfg, prov, model)
 		agentRunnerFollowsCoordinator = followsCoordinator
-		at, stepEvents, agentRunner = chatAgentTool(workerProvider, workerModel, cfg, cwd, root)
+		at, stepEvents, agentRunner = chatAgentTool(workerProvider, workerModel, cwd, root)
 		extra = append(extra, at)
 	}
 	reg := newRegistry(cwd, root, extra...)
@@ -427,16 +420,20 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	sk := loadSkills(cfg, cwd)
 
 	system, systemBlocks := chatSystem(cfg, cwd, sk)
+	var requiresApproval func(string, map[string]any) bool
+	if len(cfg.ToolApprovals) > 0 {
+		requiresApproval = approval.New(cfg.ToolApprovals).Requires
+	}
 	ag := agent.New(agent.Config{
-		Model:        model,
-		System:       system,
-		SystemBlocks: systemBlocks,
-		Provider:     prov,
-		Tools:        reg,
-		Policy:       permission.New(cfg.Permissions.Mode, root),
-		Compactor:    chatCompactor(prov, model, cfg),
-		Messages:     sess.Messages,
-		Usage:        sess.Usage,
+		Model:            model,
+		System:           system,
+		SystemBlocks:     systemBlocks,
+		Provider:         prov,
+		Tools:            reg,
+		Compactor:        chatCompactor(prov, model, cfg),
+		RequiresApproval: requiresApproval,
+		Messages:         sess.Messages,
+		Usage:            sess.Usage,
 	})
 
 	saveSession := func() error {

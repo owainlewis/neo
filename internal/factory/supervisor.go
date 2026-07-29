@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -93,7 +92,6 @@ func (s *Supervisor) RunAgentPrompt(ctx context.Context, dir, prompt string, opt
 	opts := RunOptions{Tools: append([]string(nil), dynamicAgentTools...)}
 	if mode == AgentModeInspect {
 		opts.Tools = append([]string(nil), inspectAgentTools...)
-		opts.PermissionMode = permission.ModeReadonly
 	}
 	id, err := s.admitAndRegister(prompt, call)
 	if err != nil {
@@ -225,8 +223,6 @@ func (t AgentTool) Run(ctx context.Context, input map[string]any) (string, error
 }
 
 func (AgentTool) ParallelSafe(input map[string]any) bool { return isInspectInput(input) }
-
-func (AgentTool) ReadOnly(input map[string]any) bool { return isInspectInput(input) }
 
 func isInspectInput(input map[string]any) bool {
 	mode, err := parseAgentMode(input)

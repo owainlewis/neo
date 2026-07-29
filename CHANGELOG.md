@@ -2,6 +2,15 @@
 
 All notable changes to Neo will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Replaced permission modes and command-risk heuristics with default-empty,
+  interactive-only `tool_approvals`. Neo now treats its VM or sandbox as the
+  security boundary. Existing `permissions:` config and `--permission` fail
+  with migration guidance.
+
 ## [v0.4.1] - 2026-07-25
 
 ### Changed

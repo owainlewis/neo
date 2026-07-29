@@ -10,7 +10,6 @@ import (
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
-	"github.com/owainlewis/neo/internal/permission"
 	"github.com/owainlewis/neo/internal/tools"
 )
 
@@ -61,8 +60,6 @@ type ToolCallRef struct {
 type ApprovalRequest struct {
 	ToolName string
 	Args     map[string]any
-	Reason   string
-	Preview  string
 }
 
 type Config struct {
@@ -74,8 +71,8 @@ type Config struct {
 	SystemBlocks     []llm.SystemBlock
 	Provider         llm.Provider
 	Tools            *tools.Registry
-	Policy           permission.Policy
 	Compactor        compact.Compactor
+	RequiresApproval func(string, map[string]any) bool
 	Approve          func(context.Context, ApprovalRequest) (bool, error)
 	MaxTurns         int
 	MaxParallelTools int
@@ -209,9 +206,9 @@ func (a *Agent) Usage() llm.Usage {
 	return a.usage
 }
 
-// RunTool runs a built-in tool directly through the same permission and
-// approval path used for model-requested tool calls. It emits the normal tool
-// call/result events, but does not mutate the LLM transcript.
+// RunTool runs a built-in tool directly through the same approval path used for
+// model-requested tool calls. It emits the normal tool call/result events, but
+// does not mutate the LLM transcript.
 func (a *Agent) RunTool(ctx context.Context, name string, input map[string]any) (string, bool) {
 	a.emit(Event{Kind: EventToolCall, Name: name, Args: cloneInput(input)})
 	out, isErr := a.runTool(ctx, name, input)
@@ -417,13 +414,13 @@ func skippedToolResults(content []llm.ContentBlock, reason string) []llm.Content
 }
 
 type preparedToolCall struct {
-	block     llm.ContentBlock
-	tool      tools.Tool
-	decision  permission.Result
-	lookupErr string
-	groupID   string
-	groupSize int
-	groupPos  int
+	block            llm.ContentBlock
+	tool             tools.Tool
+	approvalRequired bool
+	lookupErr        string
+	groupID          string
+	groupSize        int
+	groupPos         int
 }
 
 type toolOutcome struct {
@@ -476,7 +473,7 @@ func (a *Agent) processResponseContent(ctx context.Context, content []llm.Conten
 		}
 		prepared := make([]preparedToolCall, 0, j-i)
 		for _, candidate := range content[i:j] {
-			prepared = append(prepared, a.prepareTool(ctx, candidate))
+			prepared = append(prepared, a.prepareTool(candidate))
 		}
 		processed, batchResults, steering := a.executePreparedCalls(ctx, prepared)
 		results = append(results, batchResults...)
@@ -494,7 +491,7 @@ func (a *Agent) processResponseContent(ctx context.Context, content []llm.Conten
 }
 
 // executePreparedCalls splits a run of parallel-safe calls around approval
-// barriers. Permission decisions were made serially by prepareTool.
+// barriers. Approval matching was performed serially by prepareTool.
 func (a *Agent) executePreparedCalls(ctx context.Context, calls []preparedToolCall) (int, []llm.ContentBlock, []string) {
 	var results []llm.ContentBlock
 	processed := 0
@@ -503,7 +500,7 @@ func (a *Agent) executePreparedCalls(ctx context.Context, calls []preparedToolCa
 			return processed, results, steering
 		}
 		barrier := processed
-		for barrier < len(calls) && calls[barrier].decision.Decision != permission.Ask {
+		for barrier < len(calls) && !calls[barrier].approvalRequired {
 			barrier++
 		}
 		if barrier > processed {
@@ -530,7 +527,7 @@ func (a *Agent) executePreparedCalls(ctx context.Context, calls []preparedToolCa
 func (a *Agent) executePreparedGroup(ctx context.Context, calls []preparedToolCall) []llm.ContentBlock {
 	runnable := 0
 	for _, call := range calls {
-		if call.tool != nil && call.lookupErr == "" && call.decision.Decision == permission.Allow {
+		if call.tool != nil && call.lookupErr == "" && !call.approvalRequired {
 			runnable++
 		}
 	}
@@ -560,7 +557,7 @@ func (a *Agent) executePreparedGroup(ctx context.Context, calls []preparedToolCa
 		call.groupID = groupID
 		call.groupSize = len(calls)
 		call.groupPos = i
-		if call.tool == nil || call.lookupErr != "" || call.decision.Decision != permission.Allow {
+		if call.tool == nil || call.lookupErr != "" || call.approvalRequired {
 			outcomes[i] = a.runPreparedTool(ctx, call)
 			continue
 		}
@@ -597,7 +594,7 @@ func (a *Agent) executePreparedGroup(ctx context.Context, calls []preparedToolCa
 }
 
 func (a *Agent) executeSerialBlock(ctx context.Context, block llm.ContentBlock) llm.ContentBlock {
-	return a.executePreparedSerial(ctx, a.prepareTool(ctx, block))
+	return a.executePreparedSerial(ctx, a.prepareTool(block))
 }
 
 func (a *Agent) executePreparedSerial(ctx context.Context, call preparedToolCall) llm.ContentBlock {
@@ -646,28 +643,24 @@ func hasToolUse(content []llm.ContentBlock) bool {
 }
 
 func (a *Agent) runTool(ctx context.Context, name string, input map[string]any) (string, bool) {
-	call := a.prepareTool(ctx, llm.ContentBlock{Type: "tool_use", Name: name, Input: input})
+	call := a.prepareTool(llm.ContentBlock{Type: "tool_use", Name: name, Input: input})
 	outcome := a.runPreparedTool(ctx, call)
 	return outcome.text, outcome.isError
 }
 
-// prepareTool performs lookup and the permission decision on the coordinator
+// prepareTool performs lookup and approval matching on the coordinator
 // goroutine. Approval itself remains deferred so it can act as a serial
 // execution barrier.
-func (a *Agent) prepareTool(ctx context.Context, block llm.ContentBlock) preparedToolCall {
-	call := preparedToolCall{block: block, decision: permission.Result{Decision: permission.Allow}}
+func (a *Agent) prepareTool(block llm.ContentBlock) preparedToolCall {
+	call := preparedToolCall{block: block}
 	t, ok := a.cfg.Tools.Get(block.Name)
 	if !ok {
 		call.lookupErr = fmt.Sprintf("unknown tool: %s", block.Name)
 		return call
 	}
 	call.tool = t
-	if a.cfg.Policy != nil {
-		call.decision = a.cfg.Policy.Decide(ctx, permission.Request{
-			ToolName: block.Name,
-			Args:     block.Input,
-			ReadOnly: a.cfg.Tools.ReadOnly(block.Name, block.Input),
-		})
+	if a.cfg.RequiresApproval != nil {
+		call.approvalRequired = a.cfg.RequiresApproval(block.Name, block.Input)
 	}
 	return call
 }
@@ -685,36 +678,24 @@ func (a *Agent) runPreparedTool(ctx context.Context, call preparedToolCall) tool
 		logx.Debug("tool lookup failed", "name", name)
 		return toolOutcome{text: call.lookupErr, isError: true}
 	}
-	if a.cfg.Policy != nil {
-		decision := call.decision
-		switch decision.Decision {
-		case permission.Deny:
-			if decision.Reason == "" {
-				decision.Reason = "permission policy denied this tool call"
-			}
-			logx.Debug("tool denied", "name", name, "reason", decision.Reason)
-			return toolOutcome{text: decision.Reason, isError: true}
-		case permission.Ask:
-			if a.cfg.Approve == nil {
-				logx.Debug("tool approval missing approver", "name", name)
-				return toolOutcome{text: "permission approval required but no approver is configured", isError: true}
-			}
-			approved, err := a.cfg.Approve(ctx, ApprovalRequest{
-				ToolName: name,
-				Args:     cloneInput(input),
-				Reason:   decision.Reason,
-				Preview:  Preview(name, input),
-			})
-			if err != nil {
-				logx.Debug("tool approval error", "name", name, "error", err.Error())
-				return toolOutcome{text: fmt.Sprintf("approval error: %v", err), isError: true}
-			}
-			if !approved {
-				logx.Debug("tool denied by user", "name", name)
-				return toolOutcome{text: "user denied this tool call", isError: true}
-			}
-			logx.Debug("tool approved", "name", name)
+	if call.approvalRequired {
+		if a.cfg.Approve == nil {
+			logx.Debug("tool approval missing approver", "name", name)
+			return toolOutcome{text: "tool approval required but no approver is configured", isError: true}
 		}
+		approved, err := a.cfg.Approve(ctx, ApprovalRequest{
+			ToolName: name,
+			Args:     cloneInput(input),
+		})
+		if err != nil {
+			logx.Debug("tool approval error", "name", name, "error", err.Error())
+			return toolOutcome{text: fmt.Sprintf("approval error: %v", err), isError: true}
+		}
+		if !approved {
+			logx.Debug("tool denied by user", "name", name)
+			return toolOutcome{text: "user denied this tool call", isError: true}
+		}
+		logx.Debug("tool approved", "name", name)
 	}
 	out, err := call.tool.Run(ctx, input)
 	if err != nil {

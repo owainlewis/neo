@@ -32,7 +32,9 @@ neo resume <session-id>
 
 ## Why CWD Matters
 
-Tools and permissions are bound to the workspace when the TUI starts. Resume sessions from the shell with `neo resume <id>` so Neo can restore the saved cwd before creating tools.
+Tools are created for the workspace when the TUI starts. Resume sessions from
+the shell with `neo resume <id>` so Neo can restore the saved cwd before
+creating them.
 
 ## Where To Look
 

@@ -15,3 +15,9 @@ Neo exposes a small built-in tool surface to the model.
 
 Independent inspect calls issued in one model response can run concurrently.
 Inspect children receive only `read_file`, `grep`, and `glob`.
+
+## Execution and confirmations
+
+Neo relies on its VM or sandbox for security boundaries. Interactive users can
+set `tool_approvals` to confirm exact tool names or Bash command prefixes. The
+list is empty by default and is not applied to headless or child agents.

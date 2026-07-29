@@ -28,7 +28,9 @@ The core loop lives in `internal/agent`. It is deliberately policy-free:
 - It runs injected tools.
 - It appends tool results before continuing.
 
-It does not know about coding style, AGENTS.md, skills, permissions, or the terminal UI. Those are layered around it.
+It does not know about coding style, AGENTS.md, skills, sandbox policy, or the
+terminal UI. Those are layered around it. It accepts a small optional callback
+that marks interactive tool calls requiring confirmation so they remain serial.
 
 ## The Important Invariant
 
@@ -53,7 +55,7 @@ Risky extensions:
 
 - Teaching the loop about project files.
 - Putting UI behavior in the loop.
-- Making the loop decide permissions itself.
+- Making the loop classify command risk or enforce sandbox policy.
 
 ## Where To Look
 
