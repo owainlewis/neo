@@ -15,11 +15,11 @@ type splashBlock struct {
 }
 
 var neoWordmark = []string{
-	` _   _  _____   ___ `,
-	`| \ | || ____| / _ \`,
-	`|  \| ||  _|  | | | |`,
-	`| |\  || |___ | |_| |`,
-	`|_| \_||_____| \___/`,
+	`    _   ____________`,
+	`   / | / / ____/ __ \`,
+	`  /  |/ / __/ / / / /`,
+	` / /|  / /___/ /_/ /`,
+	`/_/ |_/_____/\____/`,
 }
 
 func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
@@ -36,21 +36,26 @@ func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
 		lines = append(lines, centerSplashLine(styAccent.Render(line), width))
 	}
 
-	detail := "workflow-first coding agent"
 	if version := strings.TrimSpace(b.version); version != "" {
-		detail += " · " + version
+		lines = append(lines, "", centerSplashLine(styMuted.Render(version), width))
 	}
-	lines = append(lines, "", centerSplashLine(styMuted.Render(detail), width), "")
+	lines = append(lines, "")
 
-	tip := "TIP: Use @ to add files or / for commands."
-	if lipgloss.Width(tip) <= width {
-		lines = append(lines, centerSplashLine(styDim.Render("TIP: ")+styMuted.Render("Use @ to add files or / for commands."), width))
+	inputHint := "@ add files · / commands"
+	if lipgloss.Width(inputHint) <= width {
+		lines = append(lines, centerSplashLine(styMuted.Render(inputHint), width))
 	} else {
 		lines = append(lines,
-			centerSplashLine(styDim.Render("TIP"), width),
 			centerSplashLine(styMuted.Render("@ add files"), width),
 			centerSplashLine(styMuted.Render("/ commands"), width),
 		)
+	}
+
+	workflowHint := "TIP: Press tab to show the workflow while Neo works."
+	if lipgloss.Width(workflowHint) <= width {
+		lines = append(lines, centerSplashLine(styDim.Render("TIP: ")+styMuted.Render("Press tab to show the workflow while Neo works."), width))
+	} else {
+		lines = append(lines, centerSplashLine(styMuted.Render("tab → workflow"), width))
 	}
 	return "\n\n" + strings.Join(lines, "\n")
 }

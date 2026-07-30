@@ -104,7 +104,7 @@ func TestWorkflowStartsCollapsedWithProgressInStatus(t *testing.T) {
 	if got := m.workflowPanelView(); got != "" {
 		t.Fatalf("collapsed workflow panel = %q, want empty", got)
 	}
-	if got := plain(m.statusLine()); !strings.Contains(got, "1/2 Inspect") || !strings.Contains(got, "tab show plan") {
+	if got := plain(m.statusLine()); !strings.Contains(got, "1/2 Inspect") || !strings.Contains(got, "tab show workflow") {
 		t.Fatalf("status should carry compact workflow progress: %q", got)
 	}
 

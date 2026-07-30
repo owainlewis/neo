@@ -472,7 +472,7 @@ func TestStatusLineCombinesWorkflowStepAndToolActivity(t *testing.T) {
 	m.currentTool = &toolCallBlock{name: "edit_file", args: map[string]any{"path": "internal/tui/blocks.go"}}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"2/3 Refine progress UI", "Editing internal/tui/blocks.go", "7s", "tab show plan"} {
+	for _, want := range []string{"2/3 Refine progress UI", "Editing internal/tui/", "7s", "tab show workflow"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status line missing %q: %q", want, out)
 		}
@@ -492,7 +492,7 @@ func TestStatusLinePreservesElapsedAndControlsWithLongActivity(t *testing.T) {
 	}}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"9s", "tab show plan", "esc interrupt"} {
+	for _, want := range []string{"9s", "tab show workflow", "esc interrupt"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("long status line hid %q: %q", want, out)
 		}
@@ -511,7 +511,7 @@ func TestStatusLineKeepsApprovalControlWithWorkflow(t *testing.T) {
 	m.approval = &approvalState{}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"Waiting for", "tab show plan", "esc to deny"} {
+	for _, want := range []string{"Waiting for", "tab show workflow", "esc to deny"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("approval status missing %q: %q", want, out)
 		}

@@ -11,11 +11,12 @@ func TestSplashBlock_RendersCenteredWordmarkAndGuidance(t *testing.T) {
 	out := plain((splashBlock{version: "v0.2.0"}).render(80, nil))
 
 	for _, want := range []string{
-		` _   _  _____   ___ `,
-		`| \ | || ____| / _ \`,
-		`|_| \_||_____| \___/`,
-		"workflow-first coding agent · v0.2.0",
-		"TIP: Use @ to add files or / for commands.",
+		`    _   ____________`,
+		`   / | / / ____/ __ \`,
+		`/_/ |_/_____/\____/`,
+		"v0.2.0",
+		"@ add files · / commands",
+		"TIP: Press tab to show the workflow while Neo works.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("splash missing %q:\n%s", want, out)
@@ -25,7 +26,7 @@ func TestSplashBlock_RendersCenteredWordmarkAndGuidance(t *testing.T) {
 
 func TestSplashBlock_DoesNotRepeatFooterContext(t *testing.T) {
 	out := plain((splashBlock{version: "v0.2.0"}).render(80, nil))
-	for _, duplicate := range []string{"~/Code/neo", "main", "claude-opus"} {
+	for _, duplicate := range []string{"workflow-first coding agent", "~/Code/neo", "main", "claude-opus"} {
 		if strings.Contains(out, duplicate) {
 			t.Fatalf("splash repeated footer context %q:\n%s", duplicate, out)
 		}
@@ -43,7 +44,7 @@ func TestSplashBlock_UsesCompactFallbackAtNarrowWidths(t *testing.T) {
 	b := splashBlock{version: "a-deliberately-long-version-name"}
 	out := b.render(width, nil)
 	plainOut := plain(out)
-	for _, want := range []string{"NEO", "@ add files", "/ commands"} {
+	for _, want := range []string{"NEO", "@ add files", "/ commands", "tab → workflow"} {
 		if !strings.Contains(plainOut, want) {
 			t.Errorf("compact splash missing %q:\n%s", want, plainOut)
 		}

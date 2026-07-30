@@ -763,12 +763,12 @@ func (m *model) statusLine() string {
 		fullHint = "ctrl+↩ queue · esc interrupt"
 	}
 	if m.workflow != nil {
-		planHint := "tab show plan"
+		workflowHint := "tab show workflow"
 		if m.workflowVisible {
-			planHint = "tab hide plan"
+			workflowHint = "tab hide workflow"
 		}
-		fullHint = planHint + " · " + fullHint
-		compactHint = planHint + " · " + compactHint
+		fullHint = workflowHint + " · " + fullHint
+		compactHint = workflowHint + " · " + compactHint
 	}
 	activity := m.statusActivity()
 	prefix := " " + m.spin.View() + " "
