@@ -4,52 +4,59 @@ import (
 	"strings"
 
 	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 )
 
-// splashBlock renders the welcome shown once at the top of every chat session.
-// It introduces Neo's workflow-first contract, then gives just enough project
-// context and input discovery to help the user start useful work.
+// splashBlock renders the compact welcome shown once at the top of a session.
+// Repository and model context deliberately stay in the footer so the initial
+// screen does not repeat itself.
 type splashBlock struct {
 	version string
-	model   string
-	cwd     string
-	branch  string
+}
+
+var neoWordmark = []string{
+	` _   _  _____   ___ `,
+	`| \ | || ____| / _ \`,
+	`|  \| ||  _|  | | | |`,
+	`| |\  || |___ | |_| |`,
+	`|_| \_||_____| \___/`,
 }
 
 func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
-	context := b.cwd
-	if b.branch != "" && b.branch != "no-git" {
-		context += " · " + b.branch
+	width = max(width, 1)
+	lines := make([]string, 0, len(neoWordmark)+6)
+	wordmark := neoWordmark
+	for _, line := range neoWordmark {
+		if lipgloss.Width(line) > width {
+			wordmark = []string{"NEO"}
+			break
+		}
 	}
-	backend := strings.TrimSpace(strings.Join(nonEmpty(b.model, b.version), " · "))
+	for _, line := range wordmark {
+		lines = append(lines, centerSplashLine(styAccent.Render(line), width))
+	}
 
-	lines := []string{
-		styAccent.Render("NEO") + "  " + styLabel.Render("workflow-first coding agent"),
-		styMuted.Render("Plans the work, executes it, and verifies the result."),
-		"",
-		styMuted.Render(context),
+	detail := "workflow-first coding agent"
+	if version := strings.TrimSpace(b.version); version != "" {
+		detail += " · " + version
 	}
-	if backend != "" {
-		lines = append(lines, styDim.Render(backend))
-	}
-	lines = append(lines,
-		"",
-		styDim.Render("Try: ")+styMuted.Render("Fix a failing test and verify the change"),
-		styTool.Render("@")+styDim.Render(" add files  ·  ")+styTool.Render("/")+styDim.Render(" commands"),
-	)
+	lines = append(lines, "", centerSplashLine(styMuted.Render(detail), width), "")
 
-	for i, line := range lines {
-		lines[i] = "  " + truncate(line, max(width-2, 1))
+	tip := "TIP: Use @ to add files or / for commands."
+	if lipgloss.Width(tip) <= width {
+		lines = append(lines, centerSplashLine(styDim.Render("TIP: ")+styMuted.Render("Use @ to add files or / for commands."), width))
+	} else {
+		lines = append(lines,
+			centerSplashLine(styDim.Render("TIP"), width),
+			centerSplashLine(styMuted.Render("@ add files"), width),
+			centerSplashLine(styMuted.Render("/ commands"), width),
+		)
 	}
 	return "\n\n" + strings.Join(lines, "\n")
 }
 
-func nonEmpty(values ...string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
+func centerSplashLine(line string, width int) string {
+	line = truncate(line, max(width, 1))
+	padding := max((width-lipgloss.Width(line))/2, 0)
+	return strings.Repeat(" ", padding) + line
 }

@@ -41,14 +41,12 @@ func TestFooterStaysOnOneLineAndSuppressesMissingGit(t *testing.T) {
 	}
 }
 
-func TestIdleStatusTeachesInputAffordances(t *testing.T) {
+func TestIdleStatusStaysMinimal(t *testing.T) {
 	m := makeTestModel()
 	m.width = 80
 	out := plain(m.statusLine())
-	for _, want := range []string{"ready", "@ add files", "/ commands"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("idle status missing %q: %q", want, out)
-		}
+	if out != " ● ready" {
+		t.Fatalf("idle status = %q", out)
 	}
 }
 

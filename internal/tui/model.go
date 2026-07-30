@@ -304,9 +304,6 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
 		version: version,
-		model:   backendLabel(providerTag, modelTag),
-		cwd:     cwd,
-		branch:  branch,
 	})
 	m.appendTranscript(ag.Transcript())
 	return m, nil
@@ -744,13 +741,9 @@ func (m *model) setDotColor(c color.Color) {
 
 func (m *model) statusLine() string {
 	if !m.busy {
-		// Steady green dot when idle — no pulse, no spinner machinery. Use the
-		// otherwise quiet row to keep the two main input affordances discoverable.
+		// Idle is intentionally quiet; input discovery lives in the splash.
 		dot := lipgloss.NewStyle().Foreground(colDotReady).Render("●")
-		line := " " + dot + " " + styMuted.Render("ready") + "   " +
-			styTool.Render("@") + styDim.Render(" add files · ") +
-			styTool.Render("/") + styDim.Render(" commands")
-		return truncate(line, max(m.width, 1))
+		return truncate(" "+dot+" "+styMuted.Render("ready"), max(m.width, 1))
 	}
 
 	elapsed := time.Since(m.busySince)

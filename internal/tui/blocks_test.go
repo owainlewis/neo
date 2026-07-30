@@ -521,11 +521,12 @@ func TestStatusLineKeepsApprovalControlWithWorkflow(t *testing.T) {
 	}
 }
 
-func TestStatusSpinnerNeverDisappears(t *testing.T) {
-	for i, frame := range statusSpinner.Frames {
-		if strings.TrimSpace(frame) == "" {
-			t.Fatalf("spinner frame %d is blank", i)
-		}
+func TestStatusIndicatorIsStaticAndVisible(t *testing.T) {
+	if len(statusSpinner.Frames) != 1 {
+		t.Fatalf("status indicator has %d frames, want 1", len(statusSpinner.Frames))
+	}
+	if strings.TrimSpace(statusSpinner.Frames[0]) == "" {
+		t.Fatal("status indicator is blank")
 	}
 }
 
