@@ -403,7 +403,7 @@ func TestWorkflowBlockRenderShowsProgressAndCompletion(t *testing.T) {
 		},
 	}).render(80, nil))
 
-	for _, want := range []string{"Plan  2/2", "✓ Inspect", "updated status line"} {
+	for _, want := range []string{"Plan  2/2 complete", "✓ Inspect", "updated status line"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("workflow render missing %q:\n%s", want, out)
 		}
@@ -454,7 +454,7 @@ func TestStatusLineShowsOneLineOfRealActivity(t *testing.T) {
 
 	m.currentTool = nil
 	out = plain(m.statusLine())
-	if !strings.Contains(out, "Thinking · 4s") || strings.Contains(out, "Reading") {
+	if !strings.Contains(out, "Understanding request · 4s") || strings.Contains(out, "Reading") {
 		t.Fatalf("generic working state should not invent activity: %q", out)
 	}
 }
@@ -472,7 +472,7 @@ func TestStatusLineCombinesWorkflowStepAndToolActivity(t *testing.T) {
 	m.currentTool = &toolCallBlock{name: "edit_file", args: map[string]any{"path": "internal/tui/blocks.go"}}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"2/3 Refine progress UI", "Editing internal/tui/blocks.go", "7s", "tab plan"} {
+	for _, want := range []string{"2/3 Refine progress UI", "Editing internal/tui/blocks.go", "7s", "tab show plan"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status line missing %q: %q", want, out)
 		}
@@ -492,7 +492,7 @@ func TestStatusLinePreservesElapsedAndControlsWithLongActivity(t *testing.T) {
 	}}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"9s", "tab plan", "esc interrupt"} {
+	for _, want := range []string{"9s", "tab show plan", "esc interrupt"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("long status line hid %q: %q", want, out)
 		}
@@ -504,14 +504,14 @@ func TestStatusLinePreservesElapsedAndControlsWithLongActivity(t *testing.T) {
 
 func TestStatusLineKeepsApprovalControlWithWorkflow(t *testing.T) {
 	m := makeTestModel()
-	m.width = 48
+	m.width = 64
 	m.busy = true
 	m.busySince = time.Now()
 	m.workflow = &workflowBlock{items: []workflow.Item{{ID: "1", Text: "Inspect", Status: workflow.Running}}}
 	m.approval = &approvalState{}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"Waiting for", "tab plan", "esc deny"} {
+	for _, want := range []string{"Waiting for", "tab show plan", "esc to deny"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("approval status missing %q: %q", want, out)
 		}
@@ -573,6 +573,42 @@ func TestStatusLineUsesApprovalHintAndFitsNarrowWidth(t *testing.T) {
 		if got := len([]rune(line)); got > m.width {
 			t.Fatalf("status line %d width = %d, want <= %d: %q", i, got, m.width, line)
 		}
+	}
+}
+
+func TestResultSummaryUsesWorkflowOutcome(t *testing.T) {
+	m := makeTestModel()
+	m.turn = turnStats{tools: 3, workflow: true}
+	m.workflow = &workflowBlock{title: "Fix flaky tests", items: []workflow.Item{
+		{ID: "1", Text: "Inspect", Status: workflow.Done},
+		{ID: "2", Text: "Fix", Status: workflow.Done},
+		{ID: "3", Text: "Verify", Status: workflow.Done},
+	}}
+
+	summary, ok := m.resultSummary(nil, 3*time.Second)
+	if !ok || summary.failed || summary.label != "Fix flaky tests" || summary.detail != "3/3 verified" {
+		t.Fatalf("workflow summary = %#v, ok=%v", summary, ok)
+	}
+	out := plain(summary.render(80, nil))
+	for _, want := range []string{"✓ Fix flaky tests", "3/3 verified", "3s"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered summary missing %q: %q", want, out)
+		}
+	}
+}
+
+func TestResultSummaryBlockStaysOnOneLine(t *testing.T) {
+	const width = 32
+	out := resultSummaryBlock{
+		label:   "A deliberately long workflow title",
+		detail:  "4/4 verified with a long explanation",
+		elapsed: 2 * time.Second,
+	}.render(width, nil)
+	if got := lipgloss.Height(out); got != 1 {
+		t.Fatalf("summary height = %d, want 1: %q", got, plain(out))
+	}
+	if got := lipgloss.Width(out); got > width {
+		t.Fatalf("summary width = %d, want <= %d: %q", got, width, plain(out))
 	}
 }
 

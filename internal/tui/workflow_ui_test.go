@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/workflow"
@@ -20,6 +21,45 @@ func TestBranchMsgUpdatesFooterBranch(t *testing.T) {
 	footer := plain(m.footerLine())
 	if !strings.Contains(footer, "feature/ui-refresh") {
 		t.Fatalf("footer = %q", footer)
+	}
+}
+
+func TestFooterStaysOnOneLineAndSuppressesMissingGit(t *testing.T) {
+	m := makeTestModel()
+	m.width = 28
+	m.cwd = "~/Code/a-long-repository"
+	m.branch = "no-git"
+	m.providerTag = "anthropic"
+	m.modelTag = "claude-sonnet"
+
+	footer := m.footerLine()
+	if strings.Contains(plain(footer), "no-git") {
+		t.Fatalf("footer exposed no-git sentinel: %q", plain(footer))
+	}
+	if got := lipgloss.Width(footer); got > m.width {
+		t.Fatalf("footer width = %d, want <= %d: %q", got, m.width, plain(footer))
+	}
+}
+
+func TestIdleStatusTeachesInputAffordances(t *testing.T) {
+	m := makeTestModel()
+	m.width = 80
+	out := plain(m.statusLine())
+	for _, want := range []string{"ready", "@ add files", "/ commands"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("idle status missing %q: %q", want, out)
+		}
+	}
+}
+
+func TestWorkflowProgressDistinguishesFailedPlan(t *testing.T) {
+	m := makeTestModel()
+	m.workflow = &workflowBlock{items: []workflow.Item{
+		{ID: "1", Text: "Implement", Status: workflow.Done},
+		{ID: "2", Text: "Verify", Status: workflow.Failed},
+	}}
+	if got := m.workflowProgress(); got != "2/2 Plan finished · 1 failed" {
+		t.Fatalf("workflow progress = %q", got)
 	}
 }
 
@@ -66,7 +106,7 @@ func TestWorkflowStartsCollapsedWithProgressInStatus(t *testing.T) {
 	if got := m.workflowPanelView(); got != "" {
 		t.Fatalf("collapsed workflow panel = %q, want empty", got)
 	}
-	if got := plain(m.statusLine()); !strings.Contains(got, "1/2 Inspect") || !strings.Contains(got, "tab plan") {
+	if got := plain(m.statusLine()); !strings.Contains(got, "1/2 Inspect") || !strings.Contains(got, "tab show plan") {
 		t.Fatalf("status should carry compact workflow progress: %q", got)
 	}
 

@@ -41,7 +41,7 @@ type resultSummaryBlock struct {
 func (b resultSummaryBlock) render(width int, _ *glamour.TermRenderer) string {
 	glyph := styOK.Render("✓")
 	if b.failed {
-		glyph = styErr.Render("✗")
+		glyph = styWarn.Render("✗")
 	}
 	parts := []string{strings.TrimSpace(b.label)}
 	if strings.TrimSpace(b.detail) != "" {
@@ -51,7 +51,7 @@ func (b resultSummaryBlock) render(width int, _ *glamour.TermRenderer) string {
 		parts = append(parts, formatElapsed(b.elapsed))
 	}
 	line := glyph + " " + strings.Join(parts, styMuted.Render(" · "))
-	return styResultSummary.Width(width - 2).Render(line)
+	return styResultSummary.Render(truncate(line, max(width-2, 1)))
 }
 
 // workflowBlock is the visible task plan for a multi-step user request. The
@@ -71,22 +71,31 @@ func (b *workflowBlock) render(width int, _ *glamour.TermRenderer) string {
 	}
 	done, failed, skipped := workflowCounts(b.items)
 	total := len(b.items)
-	meta := fmt.Sprintf("%d/%d", done+failed+skipped, total)
+	meta := fmt.Sprintf("%d/%d complete", done, total)
+	if failed > 0 {
+		meta += fmt.Sprintf(" · %d failed", failed)
+	}
+	if skipped > 0 {
+		meta += fmt.Sprintf(" · %d skipped", skipped)
+	}
 	header := styLabel.Render(title) + styMuted.Render("  "+meta)
 	sb.WriteString(truncate(header, max(width, 1)) + "\n")
 	for _, item := range b.items {
 		glyph := styMuted.Render("○")
-		textStyle := lipgloss.NewStyle()
+		textStyle := styMuted
 		switch item.Status {
 		case workflow.Running:
 			glyph = styTool.Render("●")
 			textStyle = styLabel
 		case workflow.Done:
 			glyph = styOK.Render("✓")
+			textStyle = styDim
 		case workflow.Failed:
-			glyph = styErr.Render("✗")
+			glyph = styWarn.Render("✗")
+			textStyle = styMuted
 		case workflow.Skipped:
 			glyph = styMuted.Render("-")
+			textStyle = styDim
 		}
 		line := fmt.Sprintf("%s %s", glyph, textStyle.Render(oneLine(item.Text)))
 		if strings.TrimSpace(item.Detail) != "" {
@@ -206,7 +215,7 @@ func (b *parallelBlock) render(width int, _ *glamour.TermRenderer) string {
 	glyph := styTool.Render("●")
 	if !b.running() {
 		if b.failed() {
-			glyph = styErr.Render("✗")
+			glyph = styWarn.Render("✗")
 		} else if b.cancelled() {
 			glyph = styMuted.Render("-")
 		} else {
@@ -232,7 +241,7 @@ func (b *parallelBlock) render(width int, _ *glamour.TermRenderer) string {
 		case parallelSucceeded:
 			rowGlyph = styOK.Render("✓")
 		case parallelFailed:
-			rowGlyph = styErr.Render("✗")
+			rowGlyph = styWarn.Render("✗")
 		case parallelCancelled:
 			rowGlyph = styMuted.Render("-")
 		}
@@ -355,11 +364,12 @@ func (b toolResultBlock) render(width int, _ *glamour.TermRenderer) string {
 	if len(footerParts) > 0 {
 		footer = "\n" + styMuted.Render(strings.Join(footerParts, " · "))
 	}
-	style := styCardResult
+	card := styCardResult.Width(width - 2).Render(body + footer)
 	if b.isError {
-		style = styCardErr
+		card = styCardErr.Width(max(width-4, 1)).Render(body + footer)
+		return accentCard(card, colWarn)
 	}
-	return style.Width(width - 2).Render(body + footer)
+	return card
 }
 
 func (b toolResultBlock) isTruncated() bool {
@@ -426,7 +436,7 @@ func (b *treeBlock) renderNode(sb *strings.Builder, id int, width int) {
 		if n.ok {
 			glyph = styOK.Render("✓")
 		} else {
-			glyph = styErr.Render("✗")
+			glyph = styWarn.Render("✗")
 		}
 	}
 	task := styMuted.Render(truncate(oneLine(n.task), 44))

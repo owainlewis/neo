@@ -8,7 +8,11 @@ var (
 	colAccent = lipgloss.Color("12")
 	colTool   = lipgloss.Color("14")
 	colOK     = lipgloss.Color("10")
-	colErr    = lipgloss.Color("9")
+	// Failure palette. Routine execution failures are part of normal agent
+	// exploration, so they use warm copper. Muted rose is reserved for errors
+	// that stop or block the user's current action.
+	colWarn = lipgloss.Color("173")
+	colErr  = lipgloss.Color("167")
 	// Status-dot palette. The dot is always present in the status line; its
 	// color encodes what the agent is doing.
 	colDotReady    = lipgloss.Color("42")  // green  — idle, awaiting input
@@ -21,10 +25,8 @@ var (
 	colToolBg  = lipgloss.Color("235")
 	colInputBg = lipgloss.Color("234")
 	// Accent-bar colours for attention blocks. A left stripe replaces heavy
-	// background fills. colApprove is the brand blue; colWarn is a warm copper
-	// that reads as "heads up" without the old olive.
+	// background fills.
 	colApprove = colAccent
-	colWarn    = lipgloss.Color("173")
 
 	styMuted    = lipgloss.NewStyle().Foreground(colMuted)
 	styDim      = lipgloss.NewStyle().Foreground(colDim)
@@ -32,6 +34,7 @@ var (
 	styAccent   = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
 	styTool     = lipgloss.NewStyle().Foreground(colTool).Bold(true)
 	styOK       = lipgloss.NewStyle().Foreground(colOK)
+	styWarn     = lipgloss.NewStyle().Foreground(colWarn)
 	styErr      = lipgloss.NewStyle().Foreground(colErr)
 	styThinking = lipgloss.NewStyle().Foreground(colMuted)
 
@@ -43,8 +46,10 @@ var (
 			Background(colCardBg).
 			Padding(0, 1)
 
+	// Failed tool output keeps the standard card surface; the surrounding
+	// copper status glyph carries severity without an alarming red fill.
 	styCardErr = lipgloss.NewStyle().
-			Background(lipgloss.Color("52")).
+			Background(colCardBg).
 			Padding(0, 1)
 
 	styResultSummary = lipgloss.NewStyle().

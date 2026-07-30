@@ -397,7 +397,7 @@ func TestBangCommand_RunsBashThroughToolEventsWithoutProviderCall(t *testing.T) 
 	if !ok {
 		t.Fatalf("expected resultSummaryBlock, got %T", m.blocks[2])
 	}
-	if rs.label != "Done" || !strings.Contains(rs.detail, "command complete") {
+	if rs.label != "Command complete" || rs.detail != "" {
 		t.Fatalf("unexpected summary: %+v", rs)
 	}
 }
@@ -465,7 +465,7 @@ func TestBangCommand_FailureMarksSummaryFailed(t *testing.T) {
 		t.Fatalf("expected failed command result, got %#v", m.blocks[0])
 	}
 	summary, ok := m.blocks[1].(resultSummaryBlock)
-	if !ok || !summary.failed || summary.label != "Finished with issues" {
+	if !ok || !summary.failed || summary.label != "Command finished with issues" {
 		t.Fatalf("failed command summary = %#v", m.blocks[1])
 	}
 }
@@ -648,12 +648,12 @@ func TestSlashPicker_RenderShowsCommandDescriptions(t *testing.T) {
 		},
 	}
 	out := plain(renderSlashPicker(80, picker))
-	for _, want := range []string{"→ help", "show this list", "(1/1)"} {
+	for _, want := range []string{"Commands", "› /help", "show this list", "tab insert", "1/1"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("picker missing %q: %s", want, out)
 		}
 	}
-	for _, unwanted := range []string{"slash commands", "/help"} {
+	for _, unwanted := range []string{"slash commands"} {
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("picker should not include %q: %s", unwanted, out)
 		}
@@ -684,7 +684,7 @@ func TestSlashPicker_RendersBelowInput(t *testing.T) {
 
 	out := plain(m.View().Content)
 	inputIndex := strings.Index(out, "/")
-	pickerIndex := strings.Index(out, "→ clear")
+	pickerIndex := strings.Index(out, "› /clear")
 	if inputIndex == -1 || pickerIndex == -1 {
 		t.Fatalf("expected input and picker in view: %s", out)
 	}
