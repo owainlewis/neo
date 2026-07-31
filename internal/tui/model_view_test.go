@@ -209,7 +209,7 @@ func TestViewSeparatesTranscriptFromProgress(t *testing.T) {
 		}
 	}
 
-	assertGap("collapsed plan", "Thinking")
+	assertGap("collapsed plan", "Understanding request")
 	m.workflow = &workflowBlock{title: "Plan", items: []workflow.Item{
 		{ID: "1", Text: "Inspect", Status: workflow.Running},
 		{ID: "2", Text: "Implement", Status: workflow.Pending},
@@ -217,7 +217,7 @@ func TestViewSeparatesTranscriptFromProgress(t *testing.T) {
 	m.workflowVisible = true
 	m.layout()
 	m.refreshViewport()
-	assertGap("expanded plan", "Plan  0/2")
+	assertGap("expanded plan", "Plan  0/2 complete")
 }
 
 func TestViewFitsShortTerminal(t *testing.T) {
@@ -270,7 +270,7 @@ func TestViewFitsShortTerminal(t *testing.T) {
 			}
 			if tc.pickerItems > 0 {
 				out := plain(view)
-				if !strings.Contains(out, "cmdt") || !strings.Contains(out, "(20/20)") {
+				if !strings.Contains(out, "cmdt") || !strings.Contains(out, "20/20") {
 					t.Fatalf("picker window lost selected item or total count:\n%s", out)
 				}
 			}

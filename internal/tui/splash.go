@@ -1,133 +1,67 @@
 package tui
 
 import (
-	"fmt"
-	"math/rand/v2"
 	"strings"
 
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
-// splashBlock renders the welcome shown once at the top of every chat
-// session. Visual model: a left-edge gradient bar carries the brand
-// colour; the wordmark, tagline and a stacked metadata list sit beside
-// it like a magazine pull-quote.
+// splashBlock renders the compact welcome shown once at the top of a session.
+// Repository and model context deliberately stay in the footer so the initial
+// screen does not repeat itself.
 type splashBlock struct {
 	version string
-	model   string
-	cwd     string
-	branch  string
-	tagline string // motivational line under the wordmark; picked once per session
 }
 
-// skyPalette is the Tailwind sky color ramp (light → dark) used by the
-// left accent bar. gradientFor picks N equally-spaced stops from this so
-// the bar can stretch to match a variable number of content lines.
-var skyPalette = []string{
-	"#bae6fd", // sky-200
-	"#7dd3fc", // sky-300
-	"#38bdf8", // sky-400
-	"#0ea5e9", // sky-500
-	"#0284c7", // sky-600
-	"#0369a1", // sky-700
-	"#075985", // sky-800
-	"#0c4a6e", // sky-900
-}
-
-// taglines are short, capitalized motivational lines shown under the wordmark.
-// One is chosen per session (see randomTagline) so it stays stable across
-// viewport refreshes.
-var taglines = []string{
-	"Let's build something great",
-	"Make it work, then make it right",
-	"One small step at a time",
-	"Code with intention",
-	"Less, but better",
-	"Think. Build. Verify.",
-	"Today, we make it work",
-	"Clarity over cleverness",
-	"Small steps, solid ground",
-	"Trust the process",
-	"Ship it",
-	"Onward",
-}
-
-func randomTagline() string {
-	return taglines[rand.IntN(len(taglines))]
+var neoWordmark = []string{
+	`    _   ____________`,
+	`   / | / / ____/ __ \`,
+	`  /  |/ / __/ / / / /`,
+	` / /|  / /___/ /_/ /`,
+	`/_/ |_/_____/\____/`,
 }
 
 func (b splashBlock) render(width int, _ *glamour.TermRenderer) string {
-	wordmark := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("231")).
-		Bold(true).
-		Render("NEO")
-
-	// Metadata rendered as a stacked list with aligned labels. Branch row
-	// is suppressed when there's no git context.
-	rows := [][2]string{
-		{"version", b.version},
-		{"model", b.model},
-	}
-	if b.branch != "" && b.branch != "no-git" {
-		rows = append(rows, [2]string{"branch", b.branch})
-	}
-	rows = append(rows, [2]string{"cwd", b.cwd})
-
-	labelW := 0
-	for _, r := range rows {
-		if w := ansi.StringWidth(r[0]); w > labelW {
-			labelW = w
+	width = max(width, 1)
+	lines := make([]string, 0, len(neoWordmark)+6)
+	wordmark := neoWordmark
+	for _, line := range neoWordmark {
+		if lipgloss.Width(line) > width {
+			wordmark = []string{"NEO"}
+			break
 		}
 	}
-	metaLines := make([]string, 0, len(rows))
-	for _, r := range rows {
-		metaLines = append(metaLines, fmt.Sprintf("%s  %s",
-			styDim.Render(padRight(r[0], labelW)),
-			styMuted.Render(r[1])))
+	for _, line := range wordmark {
+		lines = append(lines, centerSplashLine(styAccent.Render(line), width))
 	}
 
-	// Compose the full content column: wordmark, tagline, breathing
-	// space, then the metadata list.
-	tagline := b.tagline
-	if tagline == "" {
-		tagline = taglines[0]
+	if version := strings.TrimSpace(b.version); version != "" {
+		lines = append(lines, "", centerSplashLine(styMuted.Render(version), width))
 	}
-	content := []string{wordmark, styMuted.Render(tagline), ""}
-	content = append(content, metaLines...)
+	lines = append(lines, "")
 
-	gradient := gradientFor(len(content))
-
-	var sb strings.Builder
-	sb.WriteString("\n\n")
-	for i, line := range content {
-		bar := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(gradient[i])).
-			Render("█")
-		sb.WriteString("   ")
-		sb.WriteString(bar)
-		sb.WriteString("   ")
-		sb.WriteString(line)
-		sb.WriteString("\n")
+	inputHint := "@ add files · / commands"
+	if lipgloss.Width(inputHint) <= width {
+		lines = append(lines, centerSplashLine(styMuted.Render(inputHint), width))
+	} else {
+		lines = append(lines,
+			centerSplashLine(styMuted.Render("@ add files"), width),
+			centerSplashLine(styMuted.Render("/ commands"), width),
+		)
 	}
-	sb.WriteString("\n   ")
-	sb.WriteString(styDim.Render("type "))
-	sb.WriteString(styTool.Render("/help"))
-	sb.WriteString(styDim.Render(" for slash commands"))
-	return sb.String()
+
+	workflowHint := "TIP: Press tab to show the workflow while Neo works."
+	if lipgloss.Width(workflowHint) <= width {
+		lines = append(lines, centerSplashLine(styDim.Render("TIP: ")+styMuted.Render("Press tab to show the workflow while Neo works."), width))
+	} else {
+		lines = append(lines, centerSplashLine(styMuted.Render("tab → workflow"), width))
+	}
+	return "\n\n" + strings.Join(lines, "\n")
 }
 
-// gradientFor returns n hex colors picked across skyPalette (light → dark),
-// so the bar can scale with the content height without losing the ramp.
-func gradientFor(n int) []string {
-	if n <= 1 {
-		return []string{skyPalette[0]}
-	}
-	last := len(skyPalette) - 1
-	out := make([]string, n)
-	for i := 0; i < n; i++ {
-		out[i] = skyPalette[i*last/(n-1)]
-	}
-	return out
+func centerSplashLine(line string, width int) string {
+	line = truncate(line, max(width, 1))
+	padding := max((width-lipgloss.Width(line))/2, 0)
+	return strings.Repeat(" ", padding) + line
 }

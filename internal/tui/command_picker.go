@@ -114,14 +114,14 @@ func renderSlashPicker(width int, picker commandPicker, rowLimits ...int) string
 	if width <= 0 || len(picker.matches) == 0 {
 		return ""
 	}
-	maxRows := len(picker.matches) + 1
+	maxRows := len(picker.matches) + 2 // heading + matches + footer
 	if len(rowLimits) > 0 {
 		maxRows = min(maxRows, rowLimits[0])
 	}
-	if maxRows < 2 {
+	if maxRows < 3 {
 		return ""
 	}
-	start, end := pickerWindow(len(picker.matches), picker.selected, maxRows-1)
+	start, end := pickerWindow(len(picker.matches), picker.selected, maxRows-2)
 	contentWidth := width - 2 // styPicker adds one column of horizontal padding.
 	if contentWidth < 1 {
 		contentWidth = 1
@@ -139,7 +139,7 @@ func renderSlashPicker(width int, picker commandPicker, rowLimits ...int) string
 		descWidth = 0
 	}
 
-	var lines []string
+	lines := []string{styLabel.Render("Commands")}
 	for i := start; i < end; i++ {
 		c := picker.matches[i]
 		name := padRight(truncate(slashPickerDisplayName(c.cmd), cmdWidth), cmdWidth)
@@ -147,9 +147,8 @@ func renderSlashPicker(width int, picker commandPicker, rowLimits ...int) string
 		cmdStyle := styPickerCommand
 		descStyle := styMuted
 		if i == picker.selected {
-			prefix = styPickerSelected.Render("→") + " "
+			prefix = styPickerSelected.Render("›") + " "
 			cmdStyle = styPickerSelected
-			descStyle = styPickerSelected
 		}
 		line := prefix + cmdStyle.Render(name)
 		if descWidth > 0 {
@@ -157,7 +156,8 @@ func renderSlashPicker(width int, picker commandPicker, rowLimits ...int) string
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, styMuted.Render(fmt.Sprintf("(%d/%d)", picker.selected+1, len(picker.matches))))
+	footer := fmt.Sprintf("↑↓ select · tab insert · esc close  %d/%d", picker.selected+1, len(picker.matches))
+	lines = append(lines, styMuted.Render(truncate(footer, contentWidth)))
 	return styPicker.Render(strings.Join(lines, "\n"))
 }
 
@@ -191,5 +191,5 @@ func slashPickerCommandWidth(commands []slashCommand) int {
 }
 
 func slashPickerDisplayName(cmd string) string {
-	return strings.TrimPrefix(cmd, "/")
+	return cmd
 }

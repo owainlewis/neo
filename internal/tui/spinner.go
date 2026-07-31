@@ -8,12 +8,11 @@ import (
 	"charm.land/bubbles/v2/spinner"
 )
 
-// Status spinner: a dot that gently changes weight but never disappears.
-// Keeping a visible mark in every frame makes a slow provider response look
-// active instead of stalled.
+// Status indicator is deliberately static. Activity text, color, and elapsed
+// time communicate progress without adding perpetual motion to the interface.
 var statusSpinner = spinner.Spinner{
-	Frames: []string{"●", "◉"},
-	FPS:    time.Second / 2,
+	Frames: []string{"●"},
+	FPS:    time.Second,
 }
 
 // toolVerb returns a present-tense status phrase for an in-flight tool call,

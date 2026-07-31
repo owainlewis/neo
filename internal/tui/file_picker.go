@@ -255,29 +255,30 @@ func renderFilePicker(width int, picker filePicker, rowLimits ...int) string {
 	if width <= 0 || len(picker.matches) == 0 {
 		return ""
 	}
-	maxRows := len(picker.matches) + 1
+	maxRows := len(picker.matches) + 2 // heading + matches + footer
 	if len(rowLimits) > 0 {
 		maxRows = min(maxRows, rowLimits[0])
 	}
-	if maxRows < 2 {
+	if maxRows < 3 {
 		return ""
 	}
-	start, end := pickerWindow(len(picker.matches), picker.selected, maxRows-1)
+	start, end := pickerWindow(len(picker.matches), picker.selected, maxRows-2)
 	contentWidth := width - 2 // styPicker adds one column of horizontal padding.
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
-	var lines []string
+	lines := []string{styLabel.Render("Files")}
 	for i := start; i < end; i++ {
 		path := picker.matches[i]
 		prefix := "  "
 		style := styPickerCommand
 		if i == picker.selected {
-			prefix = styPickerSelected.Render("→") + " "
+			prefix = styPickerSelected.Render("›") + " "
 			style = styPickerSelected
 		}
 		lines = append(lines, prefix+style.Render(truncate(path, max(1, contentWidth-2))))
 	}
-	lines = append(lines, styMuted.Render(fmt.Sprintf("(%d/%d)", picker.selected+1, len(picker.matches))))
+	footer := fmt.Sprintf("↑↓ select · tab insert · esc close  %d/%d", picker.selected+1, len(picker.matches))
+	lines = append(lines, styMuted.Render(truncate(footer, contentWidth)))
 	return styPicker.Render(strings.Join(lines, "\n"))
 }

@@ -304,10 +304,6 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	// Welcome banner shown once at the top of scrollback.
 	m.blocks = append(m.blocks, splashBlock{
 		version: version,
-		model:   backendLabel(providerTag, modelTag),
-		cwd:     cwd,
-		branch:  branch,
-		tagline: randomTagline(),
 	})
 	m.appendTranscript(ag.Transcript())
 	return m, nil
@@ -502,7 +498,7 @@ func makeView(content string) tea.View {
 	return v
 }
 
-const defaultPlaceholder = "Ask neo anything…   ↩ send"
+const defaultPlaceholder = "Describe the outcome…   ↩ send"
 
 func (m *model) submitUserTurn(displayText, agentText string, images []string) tea.Cmd {
 	return m.submitUserTurnWithSkillExpansion(displayText, agentText, images, true)
@@ -680,25 +676,48 @@ func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBl
 		return resultSummaryBlock{}, false
 	}
 	maxTurns := errors.Is(err, agent.ErrMaxTurns)
+	workflowDone, workflowFailed, workflowSkipped := 0, 0, 0
+	workflowTotal := 0
+	if m.workflow != nil {
+		workflowDone, workflowFailed, workflowSkipped = workflowCounts(m.workflow.items)
+		workflowTotal = len(m.workflow.items)
+	}
 	// Tool failures are intermediate warnings when the agent recovers and
-	// completes the turn. Direct commands have no later agent outcome, so their
-	// tool result remains the final outcome.
-	failed := !maxTurns && (err != nil || (m.turn.direct && m.turn.errors > 0))
+	// completes the turn. Direct commands and failed workflow items are final
+	// outcomes, so their receipts stay visibly incomplete.
+	failed := !maxTurns && (err != nil || (m.turn.direct && m.turn.errors > 0) || workflowFailed > 0)
 	label := "Done"
 	if maxTurns {
 		label = "Paused"
+	} else if m.workflow != nil && strings.TrimSpace(m.workflow.title) != "" {
+		label = strings.TrimSpace(m.workflow.title)
+	} else if m.turn.direct {
+		label = "Command complete"
+		if failed {
+			label = "Command finished with issues"
+		}
 	} else if failed {
 		label = "Finished with issues"
 	}
+
 	parts := []string{}
-	if m.turn.tools > 0 {
+	if workflowTotal > 0 {
+		outcome := fmt.Sprintf("%d/%d complete", workflowDone, workflowTotal)
+		if workflowDone == workflowTotal {
+			outcome = fmt.Sprintf("%d/%d verified", workflowDone, workflowTotal)
+		}
+		parts = append(parts, outcome)
+		if workflowFailed > 0 {
+			parts = append(parts, fmt.Sprintf("%d failed", workflowFailed))
+		}
+		if workflowSkipped > 0 {
+			parts = append(parts, fmt.Sprintf("%d skipped", workflowSkipped))
+		}
+	} else if m.turn.tools > 0 && !m.turn.direct {
 		parts = append(parts, fmt.Sprintf("%d %s", m.turn.tools, plural("tool", m.turn.tools)))
 	}
-	if m.turn.workflow {
-		parts = append(parts, "plan updated")
-	}
-	if m.turn.direct {
-		parts = append(parts, "command complete")
+	if m.turn.errors > 0 && !failed {
+		parts = append(parts, fmt.Sprintf("recovered from %d tool %s", m.turn.errors, plural("error", m.turn.errors)))
 	}
 	if maxTurns {
 		parts = append(parts, "reply to continue")
@@ -722,9 +741,9 @@ func (m *model) setDotColor(c color.Color) {
 
 func (m *model) statusLine() string {
 	if !m.busy {
-		// Steady green dot when idle — no pulse, no spinner machinery.
+		// Idle is intentionally quiet; input discovery lives in the splash.
 		dot := lipgloss.NewStyle().Foreground(colDotReady).Render("●")
-		return " " + dot + " " + styMuted.Render("ready")
+		return truncate(" "+dot+" "+styMuted.Render("ready"), max(m.width, 1))
 	}
 
 	elapsed := time.Since(m.busySince)
@@ -744,12 +763,12 @@ func (m *model) statusLine() string {
 		fullHint = "ctrl+↩ queue · esc interrupt"
 	}
 	if m.workflow != nil {
-		planHint := "tab plan"
+		workflowHint := "tab show workflow"
 		if m.workflowVisible {
-			planHint = "tab hide plan"
+			workflowHint = "tab hide workflow"
 		}
-		fullHint = planHint + " · " + fullHint
-		compactHint = planHint + " · " + compactHint
+		fullHint = workflowHint + " · " + fullHint
+		compactHint = workflowHint + " · " + compactHint
 	}
 	activity := m.statusActivity()
 	prefix := " " + m.spin.View() + " "
@@ -797,7 +816,10 @@ func (m *model) statusActivity() string {
 		parts = append(parts, capitalize(toolVerb(m.currentTool.name, m.currentTool.args)))
 	}
 	if len(parts) == 0 {
-		return "Thinking"
+		if m.turn.tools > 0 {
+			return "Reviewing results"
+		}
+		return "Understanding request"
 	}
 	return strings.Join(parts, " · ")
 }
@@ -814,6 +836,12 @@ func (m *model) workflowProgress() string {
 	done, failed, skipped := workflowCounts(m.workflow.items)
 	finished := done + failed + skipped
 	if finished == len(m.workflow.items) {
+		if failed > 0 {
+			return fmt.Sprintf("%d/%d Plan finished · %d failed", finished, len(m.workflow.items), failed)
+		}
+		if skipped > 0 {
+			return fmt.Sprintf("%d/%d Plan complete · %d skipped", finished, len(m.workflow.items), skipped)
+		}
 		return fmt.Sprintf("%d/%d Plan complete", finished, len(m.workflow.items))
 	}
 	title := strings.TrimSpace(m.workflow.title)
@@ -851,13 +879,21 @@ func formatElapsed(d time.Duration) string {
 }
 
 func (m *model) footerLine() string {
-	left := fmt.Sprintf("%s (%s)", m.cwd, m.branch)
-	right := backendLabel(m.providerTag, m.modelTag)
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
+	left := m.cwd
+	if m.branch != "" && m.branch != "no-git" {
+		left += " · " + m.branch
 	}
-	return styFooter.Render(left + strings.Repeat(" ", gap) + right)
+	right := backendLabel(m.providerTag, m.modelTag)
+	line := left
+	if right != "" {
+		gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+		if gap > 0 {
+			line += strings.Repeat(" ", gap) + right
+		} else {
+			line += "  " + right
+		}
+	}
+	return styFooter.Render(truncate(line, max(m.width, 1)))
 }
 
 // inputMaxRows caps how tall the input grows; beyond that the textarea
