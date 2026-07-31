@@ -2,7 +2,14 @@
 
 All notable changes to Neo will be documented in this file.
 
-## Unreleased
+## [v0.5.1] - 2026-07-31
+
+### Changed
+
+- Polished the workflow experience in the TUI: simpler splash and welcome,
+  clearer activity and workflow hints, and tidier command and file pickers.
+
+## [v0.5.0] - 2026-07-29
 
 ### Changed
 
@@ -130,6 +137,10 @@ All notable changes to Neo will be documented in this file.
 
 - Initial public release.
 
+[v0.5.1]: https://github.com/owainlewis/neo/compare/v0.5.0...v0.5.1
+[v0.5.0]: https://github.com/owainlewis/neo/compare/v0.4.1...v0.5.0
+[v0.4.1]: https://github.com/owainlewis/neo/compare/v0.4.0...v0.4.1
+[v0.4.0]: https://github.com/owainlewis/neo/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/owainlewis/neo/compare/v0.2.2...v0.3.0
 [v0.2.2]: https://github.com/owainlewis/neo/compare/v0.2.1...v0.2.2
 [v0.2.1]: https://github.com/owainlewis/neo/compare/v0.2.0...v0.2.1
