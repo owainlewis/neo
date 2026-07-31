@@ -240,5 +240,3 @@ func parseRetryAfterBody(body []byte) retry.RetryAfter {
 	}
 	return retry.Absent()
 }
-
-func sleep(ctx context.Context, d time.Duration) error { return retry.Sleep(ctx, d) }

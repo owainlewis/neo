@@ -14,12 +14,9 @@ var (
 	colDotReady    = lipgloss.Color("42")  // green  — idle, awaiting input
 	colDotThinking = lipgloss.Color("208") // orange — model is thinking
 	colDotTool     = lipgloss.Color("14")  // cyan   — a tool is in flight
-	// Splash banner colour. Picked to feel "neo blue" — saturated but not
-	// neon. xterm-256 39 is DeepSkyBlue1 (rgb 0/175/255).
-	colBanner  = lipgloss.Color("39")
-	colCardBg  = lipgloss.Color("236")
-	colToolBg  = lipgloss.Color("235")
-	colInputBg = lipgloss.Color("234")
+	colCardBg      = lipgloss.Color("236")
+	colToolBg      = lipgloss.Color("235")
+	colInputBg     = lipgloss.Color("234")
 	// Accent-bar colours for attention blocks. A left stripe replaces heavy
 	// background fills. colApprove is the brand blue; colWarn is a warm copper
 	// that reads as "heads up" without the old olive.
