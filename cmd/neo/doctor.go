@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,10 +29,10 @@ type doctorCheck struct {
 	Detail string
 }
 
-func runDoctor(ctx context.Context) int {
+func runDoctor(ctx context.Context, out io.Writer) int {
 	_ = ctx
 	checks := doctorChecks()
-	printDoctorChecks(checks)
+	printDoctorChecks(out, checks)
 	for _, check := range checks {
 		if check.Status == doctorFail {
 			return 1
@@ -155,8 +156,8 @@ func doctorGitChecks() []doctorCheck {
 	return checks
 }
 
-func printDoctorChecks(checks []doctorCheck) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+func printDoctorChecks(out io.Writer, checks []doctorCheck) {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "STATUS\tCHECK\tDETAIL")
 	for _, check := range checks {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", check.Status, check.Name, check.Detail)

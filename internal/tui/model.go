@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,6 +36,8 @@ type Options struct {
 	StepEvents     <-chan factory.Event
 	WorkflowEvents <-chan workflow.Event
 	Verbose        bool
+	Input          io.Reader
+	Output         io.Writer
 }
 
 type Option func(*Options)
@@ -72,6 +75,15 @@ func WithVerbose(verbose bool) Option {
 	return func(opts *Options) { opts.Verbose = verbose }
 }
 
+// WithIO configures the terminal streams used by Bubble Tea. When omitted,
+// Run preserves the standard stdin/stdout behavior.
+func WithIO(input io.Reader, output io.Writer) Option {
+	return func(opts *Options) {
+		opts.Input = input
+		opts.Output = output
+	}
+}
+
 // Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
 // loaded skill set used for $name expansion (nil when the feature is off).
 func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skills.Skill, options ...Option) error {
@@ -85,7 +97,7 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 		return err
 	}
 	// AltScreen + MouseMode are properties of the View in v2 (see View()).
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, programOptions(opts)...)
 	// Pipe agent events directly into the Bubble Tea program. This avoids a
 	// hand-rolled channel pump and the back-pressure that came with it.
 	ag.SetEventHandler(func(e agent.Event) { p.Send(agentEventMsg{ev: e}) })
@@ -122,6 +134,20 @@ func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skill
 		logx.Debug("tui exit", "error", "")
 	}
 	return err
+}
+
+func programOptions(opts Options) []tea.ProgramOption {
+	var options []tea.ProgramOption
+	// Let Bubble Tea resolve the controlling terminal when the process stdin is
+	// redirected. Explicit input is reserved for genuinely injected readers.
+	input, isFile := opts.Input.(*os.File)
+	if opts.Input != nil && (!isFile || input != os.Stdin) {
+		options = append(options, tea.WithInput(opts.Input))
+	}
+	if opts.Output != nil {
+		options = append(options, tea.WithOutput(opts.Output))
+	}
+	return options
 }
 
 type sendResultMsg struct{ err error }
@@ -217,9 +243,17 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	// Glamour's WithAutoStyle issues an OSC 11 query each time; doing that
 	// from inside Update (e.g. on resize) leaks the terminal's reply into the
 	// textarea. We capture the chosen style and reuse it.
-	styleName := "light"
-	if lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
-		styleName = "dark"
+	styleName := "dark"
+	input, inputOK := opts.Input.(*os.File)
+	output, outputOK := opts.Output.(*os.File)
+	if opts.Input == nil {
+		input, inputOK = os.Stdin, true
+	}
+	if opts.Output == nil {
+		output, outputOK = os.Stdout, true
+	}
+	if inputOK && outputOK && !lipgloss.HasDarkBackground(input, output) {
+		styleName = "light"
 	}
 	md, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle(styleName),

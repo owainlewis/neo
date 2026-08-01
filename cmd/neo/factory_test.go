@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,7 +50,7 @@ func TestSubagentBackendCredentialFailureDoesNotBreakCoordinator(t *testing.T) {
 }
 
 func TestChatSystemAdvertisesAgentToolWorkflowPattern(t *testing.T) {
-	system, blocks := chatSystem(&config.Config{}, t.TempDir(), nil)
+	system, blocks := chatSystem(&config.Config{}, t.TempDir(), nil, io.Discard)
 	for _, want := range []string{
 		"user's request",
 		"AGENTS.md",
@@ -80,7 +81,7 @@ func TestChatSystemPreservesAgentsWorkflowInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	system, blocks := chatSystem(&config.Config{}, root, nil)
+	system, blocks := chatSystem(&config.Config{}, root, nil, io.Discard)
 
 	if len(blocks) < 2 {
 		t.Fatalf("system blocks = %d, want project instructions block", len(blocks))

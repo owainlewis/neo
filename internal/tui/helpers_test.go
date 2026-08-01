@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"io"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -18,6 +20,18 @@ import (
 )
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func TestProgramOptionsPreserveBubbleTeaTTYSelectionForProcessStdin(t *testing.T) {
+	processStreams := programOptions(Options{Input: os.Stdin, Output: io.Discard})
+	if len(processStreams) != 1 {
+		t.Fatalf("process stream options = %d, want output only", len(processStreams))
+	}
+
+	injectedStreams := programOptions(Options{Input: strings.NewReader("q"), Output: io.Discard})
+	if len(injectedStreams) != 2 {
+		t.Fatalf("injected stream options = %d, want input and output", len(injectedStreams))
+	}
+}
 
 // plain strips ANSI escape codes so tests can assert on rendered text content.
 func plain(s string) string { return ansiRe.ReplaceAllString(s, "") }

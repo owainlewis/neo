@@ -6,7 +6,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 
 | Path | Responsibility |
 | --- | --- |
-| `cmd/neo/` | CLI entry point, command dispatch, chat session startup. |
+| `cmd/neo/` | Process lifecycle, stream-injected command dispatch, and chat session startup. |
 | `internal/agent/` | Core agent loop, transcript state, event model, tool-use continuation. |
 | `internal/approval/` | Literal matcher for optional interactive tool confirmations. |
 | `internal/auth/` | OpenAI ChatGPT/Codex device-code login, token refresh, and stored subscription credentials. |
