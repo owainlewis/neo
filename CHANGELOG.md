@@ -4,11 +4,19 @@ All notable changes to Neo will be documented in this file.
 
 ## Unreleased
 
+## [v0.6.0] - 2026-08-01
+
 ### Added
 
 - Added visible, configurable named phases with built-in `/design`, `/plan`,
   `/build`, and `/review` prompts. Phases reuse the existing workflow UI and can
-  be extended or overridden through `neo.yaml`.
+  be extended or overridden through `neo.yaml`. They activate only through
+  explicit slash commands.
+
+### Fixed
+
+- Rejected unsupported workflow actions instead of reporting success for an
+  update the UI could not apply.
 
 ## [v0.5.1] - 2026-07-31
 
@@ -145,6 +153,7 @@ All notable changes to Neo will be documented in this file.
 
 - Initial public release.
 
+[v0.6.0]: https://github.com/owainlewis/neo/compare/v0.5.1...v0.6.0
 [v0.5.1]: https://github.com/owainlewis/neo/compare/v0.5.0...v0.5.1
 [v0.5.0]: https://github.com/owainlewis/neo/compare/v0.4.1...v0.5.0
 [v0.4.1]: https://github.com/owainlewis/neo/compare/v0.4.0...v0.4.1
