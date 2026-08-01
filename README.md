@@ -82,6 +82,10 @@ Neo follows repository instructions from `AGENTS.md` and reusable skills from
 `.neo/skills/`. Define how your team plans, tests, reviews, and ships once, then
 let every task follow the same process.
 
+Neo also ships with focused `/design`, `/plan`, `/build`, and `/review` phases.
+Each phase is a named prompt shown in the workflow UI for that turn. Add or
+override phases through `neo.yaml` without installing a skill.
+
 Continue with the [user guide](website/src/content/docs/docs/quick-start.md),
 or explore the [technical reference](docs/developer/index.md) for configuration,
 sandboxing, tool approvals, sessions, tools, skills, and the CLI.

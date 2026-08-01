@@ -13,6 +13,7 @@ import (
 	"github.com/owainlewis/neo/internal/approval"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
+	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/tools"
 )
@@ -51,6 +52,74 @@ func TestSkillsAppearInHelpAndPicker(t *testing.T) {
 	m.updateSlashPicker()
 	if len(m.picker.matches) != 1 || m.picker.matches[0].cmd != "/review" {
 		t.Fatalf("expected /review picker match, got %+v", m.picker.matches)
+	}
+}
+
+func TestPhasesAppearInHelpAndTakePrecedenceOverSkills(t *testing.T) {
+	m := makeTestModel()
+	m.phases, _ = phase.Resolve(map[string]phase.Definition{
+		"security": {Description: "Review security", Prompt: "Inspect trust boundaries."},
+	})
+	m.skills = []skills.Skill{{Name: "review", Description: "skill review", Body: "Skill body."}}
+
+	help := plain(helpBlock{commands: m.slashCommands()}.render(100, nil))
+	for _, want := range []string{"/design", "/plan", "/build", "/review", "/security", "Review security"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help missing %q:\n%s", want, help)
+		}
+	}
+	if strings.Contains(help, "skill review") {
+		t.Fatalf("skill should not replace phase with the same name:\n%s", help)
+	}
+	if _, ok := m.slashSkill("/review"); ok {
+		t.Fatal("phase name resolved as a skill")
+	}
+}
+
+func TestPhaseSlashInvocationShowsPhaseAndPreservesVisibleTranscript(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
+	m := makeTestModel()
+	m.ag = agent.New(agent.Config{Model: "test", Provider: prov})
+	m.phases, _ = phase.Resolve(nil)
+
+	cmd := m.handleSlashCommand("/review internal/tui")
+	if cmd == nil {
+		t.Fatal("expected phase command to start a send")
+	}
+	if got := plain(m.statusLine()); !strings.Contains(got, "Review") {
+		t.Fatalf("active status missing phase: %q", got)
+	}
+	m.Update(cmd())
+
+	got := prov.Calls[0].Messages[0].Content[0].Text
+	if !strings.Contains(got, "[phase: review]") || !strings.Contains(got, "internal/tui") {
+		t.Fatalf("provider prompt missing phase instructions or args:\n%s", got)
+	}
+	transcript := m.ag.Transcript()
+	if transcript[0].DisplayText != "/review internal/tui" {
+		t.Fatalf("visible transcript text = %q", transcript[0].DisplayText)
+	}
+	if rendered := plain(m.blocks[len(m.blocks)-1].render(80, nil)); !strings.Contains(rendered, "Review") {
+		t.Fatalf("completion receipt missing phase: %q", rendered)
+	}
+}
+
+func TestPhaseLikeProseRemainsAnOrdinaryPrompt(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
+	m := makeTestModel()
+	m.ag = agent.New(agent.Config{Model: "test", Provider: prov})
+	m.phases, _ = phase.Resolve(nil)
+	request := "Run design and plan phases for encrypted sessions"
+
+	cmd := m.submitUserTurn(request, request, nil)
+	if got := m.turn.phase; got != "" {
+		t.Fatalf("turn phase = %q, want no phase", got)
+	}
+	m.Update(cmd())
+
+	got := prov.Calls[0].Messages[0].Content[0].Text
+	if got != request {
+		t.Fatalf("provider prompt = %q, want unchanged request", got)
 	}
 }
 

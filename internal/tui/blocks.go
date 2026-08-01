@@ -474,12 +474,19 @@ func (b errorBlock) render(width int, _ *glamour.TermRenderer) string {
 	return styErr.Render("! " + b.err.Error())
 }
 
-type maxTurnsBlock struct{ limit int }
+type maxTurnsBlock struct {
+	limit int
+	phase string
+}
 
 func (b maxTurnsBlock) render(width int, _ *glamour.TermRenderer) string {
-	msg := "Paused after reaching Neo's safety step limit. Reply to continue."
+	prefix := "Paused"
+	if strings.TrimSpace(b.phase) != "" {
+		prefix = strings.TrimSpace(b.phase) + " paused"
+	}
+	msg := prefix + " after reaching Neo's safety step limit. Reply to continue."
 	if b.limit > 0 {
-		msg = fmt.Sprintf("Paused after %d steps. Reply to continue.", b.limit)
+		msg = fmt.Sprintf("%s after %d steps. Reply to continue.", prefix, b.limit)
 	}
 	return accentCard(styMuted.Render(msg), colWarn)
 }

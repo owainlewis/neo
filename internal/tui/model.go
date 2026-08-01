@@ -23,6 +23,7 @@ import (
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
+	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workflow"
 	"github.com/owainlewis/neo/internal/workspace"
@@ -35,6 +36,7 @@ type Options struct {
 	ModelSwitcher  func(string) error
 	StepEvents     <-chan factory.Event
 	WorkflowEvents <-chan workflow.Event
+	Phases         []phase.Definition
 	Verbose        bool
 	Input          io.Reader
 	Output         io.Writer
@@ -65,6 +67,12 @@ func WithStepEvents(ch <-chan factory.Event) Option {
 
 func WithWorkflowEvents(ch <-chan workflow.Event) Option {
 	return func(opts *Options) { opts.WorkflowEvents = ch }
+}
+
+// WithPhases supplies the built-in and configured named prompts shown as slash
+// commands and as a compact label for the active turn.
+func WithPhases(definitions []phase.Definition) Option {
+	return func(opts *Options) { opts.Phases = definitions }
 }
 
 // WithVerbose controls tool activity rendering: false (the default) shows live
@@ -170,6 +178,7 @@ type turnStats struct {
 	errors   int
 	workflow bool
 	direct   bool
+	phase    string
 }
 
 type queuedTurn struct {
@@ -231,6 +240,9 @@ type model struct {
 	// skills drives $name expansion of the user's input and /name skill
 	// invocations before a turn is sent.
 	skills []skills.Skill
+	// phases are named prompts. They add one temporary turn label but leave the
+	// generic workflow state and rendering unchanged.
+	phases []phase.Definition
 
 	afterSend     func() error
 	modelChoices  []ModelChoice
@@ -329,6 +341,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		files:         newFilePicker(workspace.Root(absCWD)),
 		md:            md,
 		skills:        sk,
+		phases:        opts.Phases,
 		afterSend:     opts.AfterSend,
 		modelChoices:  normalizeModelChoices(modelTag, opts.ModelChoices),
 		modelSwitcher: opts.ModelSwitcher,
@@ -601,7 +614,7 @@ func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, 
 	m.busySince = time.Now()
 	m.turn = turnStats{}
 	m.setDotColor(colDotThinking)
-	return m.startSend(sent, images)
+	return m.startSend(displayText, sent, images)
 }
 
 // handleSlashCommand parses slash commands. Called only when input begins
@@ -630,6 +643,17 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 			}
 		}
 	default:
+		if definition, ok := phase.Find(m.phases, cmd); ok {
+			if m.busy {
+				m.appendBlock(errorBlock{err: fmt.Errorf("%s is unavailable while a turn is running", cmd)})
+				return nil
+			}
+			args := strings.TrimSpace(strings.TrimPrefix(line, cmd))
+			expanded := phase.ExpandInvocation(definition, args)
+			send := m.submitUserTurnWithSkillExpansion(line, expanded, nil, false)
+			m.turn.phase = phase.DisplayName(definition.Name)
+			return send
+		}
 		if sk, ok := m.slashSkill(cmd); ok {
 			if m.busy {
 				m.appendBlock(errorBlock{err: fmt.Errorf("%s is unavailable while a turn is running", cmd)})
@@ -706,7 +730,7 @@ func (m *model) finishApproval(ok bool) {
 }
 
 func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBlock, bool) {
-	if !m.turn.direct && m.turn.tools == 0 && !m.turn.workflow {
+	if !m.turn.direct && m.turn.tools == 0 && !m.turn.workflow && m.turn.phase == "" {
 		return resultSummaryBlock{}, false
 	}
 	maxTurns := errors.Is(err, agent.ErrMaxTurns)
@@ -720,10 +744,18 @@ func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBl
 	// completes the turn. Direct commands and failed workflow items are final
 	// outcomes, so their receipts stay visibly incomplete.
 	failed := !maxTurns && (err != nil || (m.turn.direct && m.turn.errors > 0) || workflowFailed > 0)
-	label := "Done"
+	phaseLabel := strings.TrimSpace(m.turn.phase)
+	label := phaseLabel
+	if label == "" {
+		label = "Done"
+	}
 	if maxTurns {
-		label = "Paused"
-	} else if m.workflow != nil && strings.TrimSpace(m.workflow.title) != "" {
+		if phaseLabel != "" {
+			label = phaseLabel + " paused"
+		} else {
+			label = "Paused"
+		}
+	} else if m.turn.phase == "" && m.workflow != nil && strings.TrimSpace(m.workflow.title) != "" {
 		label = strings.TrimSpace(m.workflow.title)
 	} else if m.turn.direct {
 		label = "Command complete"
@@ -731,7 +763,11 @@ func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBl
 			label = "Command finished with issues"
 		}
 	} else if failed {
-		label = "Finished with issues"
+		if phaseLabel != "" {
+			label = phaseLabel + " finished with issues"
+		} else {
+			label = "Finished with issues"
+		}
 	}
 
 	parts := []string{}
@@ -834,10 +870,14 @@ func statusHintForWidth(available int, full, compact string, minimumActivityWidt
 }
 
 func (m *model) statusActivity() string {
-	if m.approval != nil {
-		return "Waiting for approval"
-	}
 	parts := []string{}
+	if m.turn.phase != "" {
+		parts = append(parts, m.turn.phase)
+	}
+	if m.approval != nil {
+		parts = append(parts, "Waiting for approval")
+		return strings.Join(parts, " · ")
+	}
 	if workflow := m.workflowProgress(); workflow != "" {
 		parts = append(parts, workflow)
 	}
@@ -1204,7 +1244,7 @@ func (m *model) handleEvent(e agent.Event) {
 	case agent.EventError:
 		m.appendBlock(errorBlock{err: e.Err})
 	case agent.EventMaxTurnsReached:
-		m.appendBlock(maxTurnsBlock{limit: e.MaxTurns})
+		m.appendBlock(maxTurnsBlock{limit: e.MaxTurns, phase: m.turn.phase})
 	case agent.EventDone:
 		m.settleParallel(nil)
 	}
@@ -1334,9 +1374,15 @@ func (m *model) appendTranscript(messages []llm.Message) {
 		case llm.RoleUser:
 			var toolResults []llm.ContentBlock
 			var textParts []string
+			if strings.TrimSpace(msg.DisplayText) != "" {
+				textParts = append(textParts, msg.DisplayText)
+			}
 			for _, block := range msg.Content {
 				switch block.Type {
 				case "text":
+					if strings.TrimSpace(msg.DisplayText) != "" {
+						continue
+					}
 					if strings.TrimSpace(block.Text) != "" {
 						textParts = append(textParts, block.Text)
 					}
@@ -1418,12 +1464,12 @@ func hasTranscriptToolUse(content []llm.ContentBlock) bool {
 	return false
 }
 
-func (m *model) startSend(text string, images []string) tea.Cmd {
+func (m *model) startSend(displayText, text string, images []string) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.sendCancel = cancel
 	logx.Debug("tui send start", "images", len(images), "text", logx.SafeString(text, 240))
 	return func() tea.Msg {
-		_, err := m.ag.SendWith(ctx, text, images)
+		_, err := m.ag.SendWithDisplay(ctx, text, displayText, images)
 		if m.afterSend != nil {
 			if saveErr := m.afterSend(); saveErr != nil && err == nil {
 				err = saveErr

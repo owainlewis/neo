@@ -52,6 +52,52 @@ func TestLoad_FallsBackToEmbeddedWhenNoLocalConfig(t *testing.T) {
 		if cfg.Model == "" {
 			t.Fatal("embedded config must default a model")
 		}
+		if got := cfg.NamedPhases(); len(got) != 4 {
+			t.Fatalf("default phases = %d, want 4", len(got))
+		}
+	})
+}
+
+func TestLoad_ConfiguredPhasesExtendAndOverrideDefaults(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), `phases:
+  review:
+    prompt: Apply the repository review policy.
+  security:
+    description: Review security
+    prompt: Inspect trust boundaries.
+`)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		definitions := cfg.NamedPhases()
+		if len(definitions) != 5 {
+			t.Fatalf("phases = %d, want 5", len(definitions))
+		}
+		if definitions[3].Name != "review" || definitions[3].Prompt != "Apply the repository review policy." {
+			t.Fatalf("review phase = %+v", definitions[3])
+		}
+		if definitions[4].Name != "security" || definitions[4].Description != "Review security" {
+			t.Fatalf("security phase = %+v", definitions[4])
+		}
+	})
+}
+
+func TestLoad_RejectsInvalidPhase(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "phases:\n  help:\n    prompt: replace help\n")
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected reserved phase name to fail")
+		}
+		for _, want := range []string{"neo.yaml", "phases", "help", "reserved"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error %q does not contain %q", err.Error(), want)
+			}
+		}
 	})
 }
 

@@ -16,7 +16,7 @@ If all of that is mashed into one giant string, it is harder to understand, hard
 
 Neo builds the prompt in ordered blocks:
 
-1. A stable base prompt plus the skill catalog.
+1. A stable base prompt plus the named-phase and skill catalogs.
 2. Dynamic project instructions from AGENTS.md files.
 
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use `llm.SystemBlock` values instead.
@@ -26,6 +26,7 @@ The flattened prompt is still available for providers that only accept a string.
 | Source | Purpose |
 | --- | --- |
 | Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. |
+| Named phase catalog | Names and descriptions of built-in and configured prompts. Full bodies are injected only when invoked. |
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked with `$name` or `/name args`. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
 
@@ -41,6 +42,11 @@ Run go test ./... after Go changes.
 
 Use skills for reusable workflows that should only apply when requested, such as review or commit behavior. Invoke a skill by mentioning `$name` in chat or by running `/name args` from the TUI.
 
+Use named phases for low-friction, configurable prompts that should appear as
+first-class slash commands and as the active TUI label. Phase names and
+descriptions are always advertised, while their full bodies remain outside the
+base prompt until invocation.
+
 Change the base prompt only when the default personality or operating rules of Neo itself should change.
 
 ## What To Be Careful About
@@ -51,5 +57,6 @@ Always-loaded prompt text costs tokens every turn. Keep stable instructions shor
 
 - `cmd/neo/main.go`: chat startup and prompt assembly.
 - `internal/projectctx`: AGENTS.md discovery and rendering.
+- `internal/phase`: default and configured named prompts.
 - `internal/skills`: skill catalog and expansion.
 - `internal/llm/provider.go`: `SystemBlock`.

@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/owainlewis/neo/internal/phase"
 )
 
 // Resolution paths and embedded fallback.
@@ -49,6 +51,9 @@ type Config struct {
 	// ToolApprovals lists optional interactive tool names and Bash prefixes.
 	ToolApprovals []string `yaml:"tool_approvals"`
 	Output        Output   `yaml:"output"`
+	// Phases overrides Neo's built-in named prompts by name or adds custom
+	// prompts. Resolution always retains defaults that are not overridden.
+	Phases map[string]phase.Definition `yaml:"phases"`
 
 	// source records where this config was loaded from (a file path or
 	// "embedded"); surfaced in diagnostics via Source().
@@ -210,7 +215,18 @@ func parseConfig(b []byte, source string) (*Config, error) {
 		approvals = append(approvals, entry)
 	}
 	c.ToolApprovals = approvals
+	if _, err := phase.Resolve(c.Phases); err != nil {
+		return nil, fmt.Errorf("%s: phases: %w", source, err)
+	}
 	return &c, nil
+}
+
+// NamedPhases returns Neo's defaults with configured definitions overlaid.
+// Config loading validates this data, so the error is unreachable for loaded
+// configurations. Programmatically constructed zero values still get defaults.
+func (c *Config) NamedPhases() []phase.Definition {
+	definitions, _ := phase.Resolve(c.Phases)
+	return definitions
 }
 
 func knownProvider(provider string) bool {

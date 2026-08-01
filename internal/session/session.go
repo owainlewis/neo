@@ -222,6 +222,9 @@ func TitleFromMessages(messages []llm.Message) string {
 		if msg.Role != llm.RoleUser {
 			continue
 		}
+		if strings.TrimSpace(msg.DisplayText) != "" {
+			return TitleFromText(msg.DisplayText)
+		}
 		for _, block := range msg.Content {
 			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
 				return TitleFromText(block.Text)
@@ -234,6 +237,15 @@ func TitleFromMessages(messages []llm.Message) string {
 func transcriptText(messages []llm.Message) string {
 	var parts []string
 	for _, msg := range messages {
+		if msg.Role == llm.RoleUser && strings.TrimSpace(msg.DisplayText) != "" {
+			parts = append(parts, msg.DisplayText)
+			for _, block := range msg.Content {
+				if block.Type == "tool_result" {
+					parts = append(parts, block.Content)
+				}
+			}
+			continue
+		}
 		for _, block := range msg.Content {
 			switch block.Type {
 			case "text":

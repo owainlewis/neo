@@ -20,6 +20,7 @@ import (
 	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
+	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
@@ -194,15 +195,16 @@ func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
 }
 
 // chatSystem builds the chat agent's system prompt as ordered blocks: a stable,
-// cacheable base (the static instructions plus the skill catalog) followed by
+// cacheable base (the static instructions plus phase and skill catalogs) followed by
 // uncached dynamic session context blocks. Splitting it this way lets prompt
 // caching reuse the base across turns and sessions while the project tail
 // varies. Discovery errors are non-fatal, warning and falling back to the blocks
 // built so far rather than failing to start.
 func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, errOut io.Writer) (string, []llm.SystemBlock) {
-	// Base block: static instructions + skill catalog. Stable within a session
+	// Base block: static instructions plus phase and skill catalogs. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
-	base := skills.Augment(chatSystemPrompt, sk)
+	base := phase.Augment(chatSystemPrompt, cfg.NamedPhases())
+	base = skills.Augment(base, sk)
 	cache := cfg.PromptCachingEnabled()
 	blocks := []llm.SystemBlock{{Text: base, Cache: cache}}
 	if cfg.AgentsFileEnabled() && cwd != "" {
@@ -513,6 +515,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	if err := tui.Run(ctx, ag, model, Version, sk,
 		tui.WithAfterSend(saveSession),
+		tui.WithPhases(cfg.NamedPhases()),
 		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName, streams.err), switchModel),
 		tui.WithStepEvents(stepEvents),
 		tui.WithWorkflowEvents(workflowEvents),

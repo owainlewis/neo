@@ -93,8 +93,9 @@ internal/llm          internal/tools          internal/approval
 
 Supporting leaf packages:
   internal/atomicfile   internal/auth       internal/compact
-  internal/config       internal/logx       internal/projectctx
-  internal/session      internal/skills     internal/workflow
+  internal/config       internal/logx       internal/phase
+  internal/projectctx   internal/session    internal/skills
+  internal/workflow
   internal/workspace
 ```
 
@@ -520,6 +521,7 @@ expanded into a user turn when the user references `$name` or invokes
 | `internal/llm/<provider>/` | Vendor wire conversion, HTTP transport, retry integration | Does not execute tools or own transcripts. |
 | `internal/llm/retry/` | Shared transient failure classification, backoff, and `Retry-After` handling | Does not know provider wire formats. |
 | `internal/logx/` | Optional structured debug logging with payload controls | Disabled unless configured by environment. |
+| `internal/phase/` | Built-in and configured named prompts, slash invocation expansion, and labels | One-turn prompt policy only; no workflow state or lifecycle transitions. |
 | `internal/projectctx/` | AGENTS.md discovery and prompt augmentation | Layered feature, not core behavior. |
 | `internal/session/` | Local session metadata, transcripts, usage, list and search | No provider calls. |
 | `internal/skills/` | Skill discovery, catalog, reference and slash expansion | Layered feature, not core behavior. |

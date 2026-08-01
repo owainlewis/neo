@@ -82,6 +82,20 @@ func TestStoreCreateSaveLoadList(t *testing.T) {
 	}
 }
 
+func TestVisibleMessageTextDrivesTitleAndSearchText(t *testing.T) {
+	messages := []llm.Message{{
+		Role:        llm.RoleUser,
+		DisplayText: "/review internal/auth",
+		Content:     []llm.ContentBlock{{Type: "text", Text: "[phase: review]\nprivate prompt body"}},
+	}}
+	if got := TitleFromMessages(messages); got != "/review internal/auth" {
+		t.Fatalf("title = %q", got)
+	}
+	if got := transcriptText(messages); got != "/review internal/auth" {
+		t.Fatalf("transcript search text = %q", got)
+	}
+}
+
 func TestStoreLoadOlderSessionWithoutUsage(t *testing.T) {
 	store := NewStore(t.TempDir())
 	if err := os.MkdirAll(store.Dir(), 0o755); err != nil {
