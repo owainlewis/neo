@@ -1,13 +1,15 @@
 # Named Phases
 
 Named phases are focused prompts for one interactive turn. Neo ships with
-`design`, `plan`, `build`, and `review`; users can invoke them with slash
-commands or explicitly ask Neo to run named phases:
+`design`, `plan`, `build`, and `review`; users invoke them with slash commands:
 
 ```text
 /review current branch
-Run design and plan phases for encrypted sessions.
 ```
+
+Ordinary prose never activates a phase. For example, `Run the review phase`
+is sent to the model unchanged and does not receive the configured review
+prompt or phase label.
 
 The phase prompt is sent to the model with the user's arguments. The TUI shows
 the phase name before normal workflow and tool activity, then leaves a concise
@@ -51,10 +53,10 @@ same-named skill remains available through its `$name` reference.
 
 ## Boundaries
 
-`internal/phase` owns definitions, default prompts, config overlay, explicit
-natural-language matching, prompt expansion, and display labels. The TUI owns
-the active turn label. `internal/workflow` remains the only visible checklist
-model. The core agent loop does not interpret phase names or transitions.
+`internal/phase` owns definitions, default prompts, config overlay, slash
+invocation expansion, and display labels. The TUI owns slash routing and the
+active turn label. `internal/workflow` remains the only visible checklist model.
+The core agent loop does not interpret phase names or transitions.
 
 Full prompt bodies are injected only when invoked. The saved message keeps a
 separate display value, so resume, session titles, and transcript search show

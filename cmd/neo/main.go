@@ -304,8 +304,7 @@ func runHeadless(ctx context.Context, args []string, streams stdio) int {
 			}
 		},
 	})
-	selectedPhases := phase.MatchRun(prompt, cfg.NamedPhases())
-	out, err := ag.Send(ctx, phase.Expand(prompt, selectedPhases))
+	out, err := ag.Send(ctx, prompt)
 	result := headlessResult{
 		OK:         err == nil,
 		ElapsedMS:  time.Since(started).Milliseconds(),

@@ -603,21 +603,16 @@ func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, 
 		m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
 	}
 	sent := agentText
-	var selectedPhases []phase.Definition
 	if expandSkillRefs {
 		var used []string
 		sent, used = skills.Expand(agentText, m.skills)
 		if len(used) > 0 {
 			m.appendBlock(noticeBlock{text: "applied skill: " + strings.Join(used, ", ")})
 		}
-		selectedPhases = phase.MatchRun(agentText, m.phases)
-		if len(selectedPhases) > 0 {
-			sent = phase.Expand(sent, selectedPhases)
-		}
 	}
 	m.busy = true
 	m.busySince = time.Now()
-	m.turn = turnStats{phase: phase.Label(selectedPhases)}
+	m.turn = turnStats{}
 	m.setDotColor(colDotThinking)
 	return m.startSend(displayText, sent, images)
 }
@@ -656,7 +651,7 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 			args := strings.TrimSpace(strings.TrimPrefix(line, cmd))
 			expanded := phase.ExpandInvocation(definition, args)
 			send := m.submitUserTurnWithSkillExpansion(line, expanded, nil, false)
-			m.turn.phase = phase.Label([]phase.Definition{definition})
+			m.turn.phase = phase.DisplayName(definition.Name)
 			return send
 		}
 		if sk, ok := m.slashSkill(cmd); ok {

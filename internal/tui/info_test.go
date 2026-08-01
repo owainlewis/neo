@@ -104,7 +104,7 @@ func TestPhaseSlashInvocationShowsPhaseAndPreservesVisibleTranscript(t *testing.
 	}
 }
 
-func TestNaturalPhaseInvocationComposesNamedPrompts(t *testing.T) {
+func TestPhaseLikeProseRemainsAnOrdinaryPrompt(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
 	m := makeTestModel()
 	m.ag = agent.New(agent.Config{Model: "test", Provider: prov})
@@ -112,16 +112,14 @@ func TestNaturalPhaseInvocationComposesNamedPrompts(t *testing.T) {
 	request := "Run design and plan phases for encrypted sessions"
 
 	cmd := m.submitUserTurn(request, request, nil)
-	if got := m.turn.phase; got != "Design → Plan" {
-		t.Fatalf("turn phase = %q", got)
+	if got := m.turn.phase; got != "" {
+		t.Fatalf("turn phase = %q, want no phase", got)
 	}
 	m.Update(cmd())
 
 	got := prov.Calls[0].Messages[0].Content[0].Text
-	for _, want := range []string{"[named phases: design, plan]", "[phase: design]", "[phase: plan]", request} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("provider prompt missing %q:\n%s", want, got)
-		}
+	if got != request {
+		t.Fatalf("provider prompt = %q, want unchanged request", got)
 	}
 }
 

@@ -10,7 +10,7 @@ func Defaults() []Definition {
 
 Read the repository instructions, relevant documentation, and current code. Ground every claim in the system that exists today. Resolve choices that change behavior, interfaces, data, failures, security, operations, tests, or compatibility. Define clear acceptance criteria and the smallest coherent scope.
 
-For non-trivial work, create a visible workflow before inspecting. Return a concise design in chat unless the user asks for a file. Complete this phase before any later named phase. If Design is the only requested phase, stop after the design. Do not change production code.`,
+For non-trivial work, create a visible workflow before inspecting. Return a concise design in chat unless the user asks for a file. Stop after the design. Do not change production code.`,
 		},
 		{
 			Name:        "plan",
@@ -19,7 +19,7 @@ For non-trivial work, create a visible workflow before inspecting. Return a conc
 
 Read the repository instructions, accepted design when present, and the current code needed to make the plan real. Break the outcome into small ordered tasks. Give each task one concrete result, its dependencies, and the checks that prove it complete. Keep tasks independently understandable and avoid speculative work outside the accepted scope.
 
-Create a visible workflow for the planning work when it is multi-step. Return the ordered plan in chat unless the user asks for a file. Complete this phase before any later named phase. If Plan is the only requested phase, stop before changing production code.`,
+Create a visible workflow for the planning work when it is multi-step. Return the ordered plan in chat unless the user asks for a file. Stop before changing production code.`,
 		},
 		{
 			Name:        "build",

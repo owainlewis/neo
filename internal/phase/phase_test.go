@@ -59,49 +59,11 @@ func TestResolveRejectsInvalidConfiguredPhase(t *testing.T) {
 	}
 }
 
-func TestMatchRunRecognizesSingleAndOrderedPhases(t *testing.T) {
+func TestExpandInvocationPreservesRequest(t *testing.T) {
 	definitions, _ := Resolve(nil)
-	for _, test := range []struct {
-		input string
-		want  string
-	}{
-		{input: "Run the review phase", want: "review"},
-		{input: "Please run design, plan and build phases for this feature", want: "design,plan,build"},
-		{input: "run the build plan design phases", want: "build,plan,design"},
-	} {
-		selected := MatchRun(test.input, definitions)
-		var names []string
-		for _, definition := range selected {
-			names = append(names, definition.Name)
-		}
-		if got := strings.Join(names, ","); got != test.want {
-			t.Fatalf("MatchRun(%q) = %q, want %q", test.input, got, test.want)
-		}
-	}
-}
-
-func TestMatchRunRejectsCasualOrAmbiguousMentions(t *testing.T) {
-	definitions, _ := Resolve(nil)
-	for _, input := range []string{
-		"Tell me what the review phase does",
-		"Run tests before the review phase",
-		"Review this code",
-	} {
-		if got := MatchRun(input, definitions); len(got) != 0 {
-			t.Fatalf("MatchRun(%q) = %+v, want none", input, got)
-		}
-	}
-}
-
-func TestExpandPreservesRequestAndOrdersPrompts(t *testing.T) {
-	definitions, _ := Resolve(nil)
-	design, _ := Find(definitions, "design")
-	plan, _ := Find(definitions, "plan")
-	got := Expand("add encrypted sessions", []Definition{design, plan})
-	if !strings.Contains(got, "[named phases: design, plan]") || !strings.HasSuffix(got, "add encrypted sessions") {
+	review, _ := Find(definitions, "review")
+	got := ExpandInvocation(review, "current branch")
+	if !strings.Contains(got, "[named phase: review]") || !strings.Contains(got, "[phase: review]") || !strings.HasSuffix(got, "current branch") {
 		t.Fatalf("unexpected expansion:\n%s", got)
-	}
-	if strings.Index(got, "[phase: design]") > strings.Index(got, "[phase: plan]") {
-		t.Fatalf("phase prompts out of order:\n%s", got)
 	}
 }

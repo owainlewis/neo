@@ -103,11 +103,8 @@ label beside normal workflow progress:
 | `/build <goal>` | Implement, test, self-review, and verify the change |
 | `/review [scope]` | Review and improve code, PR feedback, or CI results |
 
-You can also compose them in normal language:
-
-```text
-Run design and plan phases for encrypted sessions.
-```
+Phases activate only through these slash commands. Ordinary prose containing a
+phase name is sent unchanged and does not activate one.
 
 Add or override named prompts with the `phases` map in `neo.yaml`. The
 [configuration reference](/docs/reference/config/) includes an example.

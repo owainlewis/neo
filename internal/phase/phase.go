@@ -17,10 +17,7 @@ type Definition struct {
 	Prompt      string `yaml:"prompt"`
 }
 
-var (
-	validName  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-	runPattern = regexp.MustCompile(`(?i)\brun\s+(?:the\s+)?(.{1,120}?)\s+phases?\b`)
-)
+var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 var reservedNames = map[string]bool{
 	"clear": true,
@@ -86,89 +83,19 @@ func Find(definitions []Definition, name string) (Definition, bool) {
 	return Definition{}, false
 }
 
-// MatchRun finds explicit natural-language requests such as "run the review
-// phase" or "run design, plan and build phases". Every meaningful token in
-// the matched segment must name a configured phase, which avoids treating a
-// casual mention of a phase as an invocation.
-func MatchRun(input string, definitions []Definition) []Definition {
-	known := make(map[string]Definition, len(definitions))
-	for _, definition := range definitions {
-		known[definition.Name] = definition
-	}
-
-	var selected []Definition
-	seen := map[string]bool{}
-	for _, match := range runPattern.FindAllStringSubmatch(input, -1) {
-		if len(match) != 2 {
-			continue
-		}
-		segment := strings.NewReplacer(",", " ", ";", " ").Replace(strings.ToLower(match[1]))
-		var candidate []Definition
-		valid := true
-		for _, token := range strings.Fields(segment) {
-			switch token {
-			case "and", "then", "the":
-				continue
-			}
-			definition, ok := known[token]
-			if !ok {
-				valid = false
-				break
-			}
-			candidate = append(candidate, definition)
-		}
-		if !valid || len(candidate) == 0 {
-			continue
-		}
-		for _, definition := range candidate {
-			if !seen[definition.Name] {
-				seen[definition.Name] = true
-				selected = append(selected, definition)
-			}
-		}
-	}
-	return selected
-}
-
-// Expand prepends the selected prompt bodies to the user's request. The
-// original request remains visible at the end so task-specific scope wins.
-func Expand(input string, selected []Definition) string {
-	if len(selected) == 0 {
-		return input
-	}
-	var b strings.Builder
-	names := make([]string, len(selected))
-	for i, definition := range selected {
-		names[i] = definition.Name
-	}
-	fmt.Fprintf(&b, "[named phases: %s]\n", strings.Join(names, ", "))
-	b.WriteString("Apply these named prompts in order. Keep the normal Neo tools and workflow behavior.\n")
-	for _, definition := range selected {
-		fmt.Fprintf(&b, "\n[phase: %s]\n%s\n", definition.Name, strings.TrimSpace(definition.Prompt))
-	}
-	if strings.TrimSpace(input) != "" {
-		b.WriteString("\nUser request:\n")
-		b.WriteString(input)
-	}
-	return strings.TrimSpace(b.String())
-}
-
 // ExpandInvocation expands one slash-invoked phase with optional arguments.
 func ExpandInvocation(definition Definition, args string) string {
 	request := strings.TrimSpace(args)
 	if request == "" {
 		request = "Apply this phase to the current repository and conversation context."
 	}
-	return Expand(request, []Definition{definition})
-}
-
-// Label returns a compact display label for one or more active phases.
-func Label(definitions []Definition) string {
-	labels := make([]string, len(definitions))
-	for i, definition := range definitions {
-		labels[i] = DisplayName(definition.Name)
-	}
-	return strings.Join(labels, " → ")
+	var b strings.Builder
+	fmt.Fprintf(&b, "[named phase: %s]\n", definition.Name)
+	b.WriteString("Apply this named prompt with the normal Neo tools and workflow behavior.\n")
+	fmt.Fprintf(&b, "\n[phase: %s]\n%s\n", definition.Name, strings.TrimSpace(definition.Prompt))
+	b.WriteString("\nUser request:\n")
+	b.WriteString(request)
+	return strings.TrimSpace(b.String())
 }
 
 // DisplayName turns an invocation name into a compact UI label.
@@ -189,7 +116,7 @@ func Augment(base string, definitions []Definition) string {
 	var b strings.Builder
 	b.WriteString(base)
 	b.WriteString("\n\n# Named phases\n\n")
-	b.WriteString("Named phases are focused prompts for one turn. The user invokes one with `/name args` or asks to run named phases. They do not replace the workflow checklist.\n")
+	b.WriteString("Named phases are focused prompts for one turn. The user invokes one with `/name args` in the interactive UI. They do not replace the workflow checklist.\n")
 	for _, definition := range definitions {
 		fmt.Fprintf(&b, "\n- `/%s`: %s", definition.Name, definition.Description)
 	}

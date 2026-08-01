@@ -21,7 +21,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `internal/llm/openrouter/` | OpenRouter provider setup and defaults. |
 | `internal/llm/google/` | Google Gemini adapter. |
 | `internal/logx/` | Optional structured debug logging. |
-| `internal/phase/` | Built-in and configured named prompts, invocation matching, and prompt expansion. |
+| `internal/phase/` | Built-in and configured named prompts, slash invocation expansion, and display labels. |
 | `internal/projectctx/` | AGENTS.md discovery and prompt augmentation. |
 | `internal/session/` | File-backed session metadata and transcripts. |
 | `internal/skills/` | Skill discovery, catalog rendering, and $name or /name expansion. |
