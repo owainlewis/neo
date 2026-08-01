@@ -1,5 +1,9 @@
 # Neo Architecture
 
+> **Status:** Current implementation
+>
+> **Verification basis:** `b70f4a1` (`origin/main` on 2026-08-01)
+
 ## 1. Executive Summary
 
 Neo is a local coding agent distributed as one Go binary. It runs in a
@@ -121,17 +125,19 @@ terminate the process themselves, so all deferred cleanup runs before exit.
 `neo` and `neo chat` follow this sequence:
 
 ```text
-1. Load the first available neo.yaml configuration
-2. Select the provider and model
-3. Create or restore the local session
-4. Resolve the repository workspace root
-5. Discover skills and AGENTS.md files when enabled
-6. Build flattened and segmented system prompts
-7. Construct workflow and subagent capabilities
-8. Build the tool registry and optional interactive approval matcher
-9. Construct the core agent with restored messages and usage
-10. Start the Bubble Tea TUI
-11. Save the session after each completed user send
+1. Resolve the local session store
+2. For a resumed chat, load the session and restore its saved working directory
+3. Load the first available neo.yaml configuration
+4. Select the provider and model, preferring saved session metadata when resuming
+5. Resolve the repository workspace root
+6. Construct workflow and subagent capabilities, then build the tool registry
+7. For a new chat, create the local session
+8. Discover skills and AGENTS.md files when enabled
+9. Build flattened and segmented system prompts
+10. Build the optional interactive approval matcher
+11. Construct the core agent with restored messages and usage
+12. Start the Bubble Tea TUI
+13. Save the session after each completed user send
 ```
 
 Configuration uses first-hit semantics:

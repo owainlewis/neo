@@ -15,8 +15,9 @@ from GitHub Releases, and verifies its SHA-256 checksum before installing it. Th
 installation stops if the archive or checksum cannot be downloaded, the checksum
 entry is missing, no SHA-256 tool is available, or verification fails.
 
-It installs into the first writable directory it finds from `~/.local/bin`,
-`~/bin`, or `/usr/local/bin`.
+It uses the first existing writable directory from `~/.local/bin`, `~/bin`, or
+`/usr/local/bin`. If none qualifies, it creates and uses `~/.local/bin`. The
+installer warns when the selected directory is not on `PATH`.
 
 ```bash
 # Pin a specific version
@@ -39,7 +40,8 @@ splash screen. Run `just print-version` to preview the stamped value.
 
 ## Updating
 
-Use the same channel you installed with: rerun the one-line installer, run
-`brew upgrade --cask owainlewis/tap/neo`, or repeat the `go install` command.
+Rerun the one-line installer. It resolves the latest stable GitHub release and
+replaces the installed binary after checksum verification. Use `--version` to
+install or return to a specific release.
 
 Next: [Quick start](/docs/quick-start/).

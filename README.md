@@ -19,7 +19,7 @@ tools, tests, reviews, and delivery moving in one terminal.
   <img src="docs/screenshot.png" alt="Neo running in a terminal">
 </a>
 
-## The whole workflow, not just the edit
+## From task to verified change
 
 Neo works where engineering happens: in your repository, with your project
 instructions, tools, and git history. Give it a real task and follow the work
@@ -28,7 +28,8 @@ from first inspection to tested change.
 - **Visible by default.** See the plan, active work, tool activity, tests, and
   delegated tasks without reading a wall of chat.
 - **One coordinator, focused workers.** Delegate bounded work to subagents and
-  bring their evidence back into one coherent workflow.
+  bring their evidence back into one coherent workflow. Independent reads,
+  searches, and inspection subagents can run in parallel.
 - **Your model, your choice.** Use Anthropic, OpenAI, Google Gemini, or
   OpenRouter, and switch models for the active provider without leaving the terminal.
 - **Sandbox-first execution.** Let the runtime contain tools, and optionally

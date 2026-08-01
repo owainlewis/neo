@@ -23,6 +23,13 @@ Neo exposes a small built-in tool surface:
 - `write_file`: overwrite or create files.
 - `edit_file`: replace one exact string.
 
+Interactive chat also adds two product tools:
+
+- `workflow`: maintain the visible checklist for multi-step work.
+- `agent`: run a bounded work or read-only inspection subagent.
+
+Headless `neo run` receives only the base file, search, and shell tools.
+
 Each tool implements the same interface:
 
 ```go

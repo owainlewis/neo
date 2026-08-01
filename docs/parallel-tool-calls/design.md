@@ -1,5 +1,9 @@
 # Parallel Tool Calls
 
+> **Status:** Implemented. This records the shipped design, so descriptions of
+> earlier behavior are written as "before this change." Current behavior is documented in
+> [Tools](../developer/tools.md) and [Architecture](../../ARCHITECTURE.md).
+
 ## Outcome
 
 Neo executes independent, non-mutating tool calls concurrently when a model returns several calls in one response. Mutating and unknown tools remain serial.
@@ -8,7 +12,7 @@ The model does not decide whether a call is safe to parallelize. The runtime doe
 
 ## Why
 
-The provider adapters already preserve multiple tool calls in one response. The agent loop currently executes those calls one at a time, which wastes time on independent reads and searches.
+The provider adapters already preserved multiple tool calls in one response. Before this change, the agent loop executed those calls one at a time, which wasted time on independent reads and searches.
 
 A `parallel=true` argument on each call would put a safety decision in model output. A mistaken flag could race a write, shell command, or external side effect. It would also leak scheduler details into every tool schema.
 

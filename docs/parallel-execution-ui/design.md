@@ -1,12 +1,16 @@
 # Parallel Execution UI
 
+> **Status:** Implemented. This records the shipped design, so descriptions of
+> earlier behavior are written as "before this change." Current runtime behavior is documented in
+> [Architecture](../../ARCHITECTURE.md).
+
 ## What and why
 
 Neo should make concurrency visible without turning the terminal into a dashboard. Users need to see that several tools or subagents are active, understand what each is doing, and notice partial failure.
 
-The current TUI tracks one `currentTool` and identifies results mainly by tool name. That cannot represent concurrent calls, especially two calls to the same tool. The subagent tree can already show several roots, but it has no explicit parallel state or stable source ordering.
+Before this change, the TUI tracked one `currentTool` and identified results mainly by tool name. That could not represent concurrent calls, especially two calls to the same tool. The subagent tree could already show several roots, but it had no explicit parallel state or stable source ordering.
 
-The design adds a small amount of execution identity to events and renders parallel work as an inline group. It uses Neo's existing cyan, green, red, white, and muted-grey palette. There are no cards, borders, new panels, or new controls.
+The implementation adds a small amount of execution identity to events and renders parallel work as an inline group. It uses Neo's existing cyan, green, red, white, and muted-grey palette. There are no cards, borders, new panels, or new controls.
 
 ## Requirements
 
