@@ -80,6 +80,11 @@ func (t Tool) Run(_ context.Context, input map[string]any) (string, error) {
 	if action == "" {
 		return "", fmt.Errorf("workflow: missing action")
 	}
+	switch action {
+	case "create", "start", "complete", "fail", "skip", "clear":
+	default:
+		return "", fmt.Errorf("workflow: unknown action %q", action)
+	}
 	ev := Event{Action: action, ID: strings.TrimSpace(stringValue(input["id"])), Detail: strings.TrimSpace(stringValue(input["detail"]))}
 	if action == "create" {
 		ev.State.Title = strings.TrimSpace(stringValue(input["title"]))

@@ -263,7 +263,12 @@ func TestSlashCommand_ModelAndClear(t *testing.T) {
 	}
 
 	m = makeTestModel()
-	m.ag.SetUsage(llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4})
+	m.ag = agent.New(agent.Config{
+		Model:    "test",
+		Provider: &llmtest.FakeProvider{},
+		Tools:    tools.NewRegistry(tools.ReadFile{}),
+		Usage:    llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4},
+	})
 	m.blocks = append(m.blocks, noticeBlock{text: "x"})
 	m.handleSlashCommand("/clear")
 	if len(m.blocks) != 0 {
