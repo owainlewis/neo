@@ -24,7 +24,6 @@ var (
 	mu               sync.RWMutex
 	logger           = newLogger(io.Discard)
 	closer           io.Closer
-	enabled          bool
 	verbose          bool
 	secrets          []string
 )
@@ -46,24 +45,20 @@ func InitFromEnv() error {
 	secrets = secretValues
 	if path == "" {
 		logger = newLogger(io.Discard)
-		enabled = false
 		return nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		logger = newLogger(io.Discard)
-		enabled = false
 		return err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		logger = newLogger(io.Discard)
-		enabled = false
 		return err
 	}
 	logger = newLogger(f)
 	closer = f
-	enabled = true
 	return nil
 }
 
@@ -72,7 +67,6 @@ func Close() error {
 	defer mu.Unlock()
 
 	logger = newLogger(io.Discard)
-	enabled = false
 	secrets = nil
 	verbose = false
 	if closer == nil {
@@ -81,12 +75,6 @@ func Close() error {
 	err := closer.Close()
 	closer = nil
 	return err
-}
-
-func Enabled() bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	return enabled
 }
 
 func Verbose() bool {

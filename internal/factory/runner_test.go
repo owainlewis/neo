@@ -12,7 +12,7 @@ import (
 
 func TestRegistryHasCodingToolsWithoutNestedAgent(t *testing.T) {
 	r := &AgentRunner{Root: t.TempDir()}
-	names := r.registry(t.TempDir()).Names()
+	names := r.registryWithOptions(t.TempDir(), RunOptions{Tools: dynamicAgentTools}).Names()
 	for _, want := range dynamicAgentTools {
 		if !slices.Contains(names, want) {
 			t.Fatalf("registry %v missing %s", names, want)
@@ -39,7 +39,7 @@ func TestRunAgentReportsUsageAndUsesFixedPrompt(t *testing.T) {
 	}}}
 	r := &AgentRunner{Provider: prov, DefaultModel: "model", Root: t.TempDir()}
 	events := make(chan AgentEvent, 16)
-	out, err := r.RunAgent(context.Background(), t.TempDir(), "PR #1", events)
+	out, err := r.RunAgentWithOptions(context.Background(), t.TempDir(), "PR #1", events, RunOptions{Tools: dynamicAgentTools})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestAgentRunnerSetBackendAppliesToFutureWorkers(t *testing.T) {
 	if err := r.SetBackend(newProvider, "new-model"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := r.RunAgent(context.Background(), t.TempDir(), "task", make(chan AgentEvent, 16))
+	out, err := r.RunAgentWithOptions(context.Background(), t.TempDir(), "task", make(chan AgentEvent, 16), RunOptions{Tools: dynamicAgentTools})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -50,10 +50,6 @@ func (r *AgentRunner) backend() (llm.Provider, string) {
 	return r.Provider, r.DefaultModel
 }
 
-func (r *AgentRunner) RunAgent(ctx context.Context, dir, input string, events chan<- AgentEvent) (string, error) {
-	return r.RunAgentWithOptions(ctx, dir, input, events, RunOptions{})
-}
-
 // RunAgentWithOptions applies immutable per-run capabilities without mutating
 // the shared runner used by concurrent inspect children.
 func (r *AgentRunner) RunAgentWithOptions(ctx context.Context, dir, input string, events chan<- AgentEvent, opts RunOptions) (string, error) {
@@ -86,10 +82,6 @@ func (r *AgentRunner) RunAgentWithOptions(ctx context.Context, dir, input string
 	case <-ctx.Done():
 	}
 	return out, err
-}
-
-func (r *AgentRunner) registry(dir string) *tools.Registry {
-	return r.registryWithOptions(dir, RunOptions{})
 }
 
 func (r *AgentRunner) registryWithOptions(dir string, opts RunOptions) *tools.Registry {

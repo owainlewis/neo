@@ -171,16 +171,6 @@ func TestDoRequest_ReturnsRetryAfterHeader(t *testing.T) {
 	}
 }
 
-func TestSleep_ContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := sleep(ctx, time.Hour)
-	if err != context.Canceled {
-		t.Fatalf("sleep error = %v, want context canceled", err)
-	}
-}
-
 func TestComplete_DoesNotRetry4xxClientErrors(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,7 @@
 package logx
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,17 +15,17 @@ func TestInitFromEnv_DisabledByDefault(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Cleanup(func() { _ = Close() })
 
+	var sink bytes.Buffer
+	mu.Lock()
+	logger = newLogger(&sink)
+	mu.Unlock()
+
 	if err := InitFromEnv(); err != nil {
 		t.Fatalf("InitFromEnv: %v", err)
 	}
-	if Enabled() {
-		t.Fatal("Enabled() = true, want false")
-	}
 	Debug("disabled-default", "value", "ignored")
-	if entries, err := os.ReadDir(t.TempDir()); err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	} else if len(entries) != 0 {
-		t.Fatalf("unexpected files created while logging disabled: %v", entries)
+	if sink.Len() != 0 {
+		t.Fatalf("disabled logger wrote %q", sink.String())
 	}
 }
 

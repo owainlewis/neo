@@ -15,11 +15,9 @@
 package openai
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
 )
@@ -395,17 +393,4 @@ func toUsage(u *responseUsage) llm.Usage {
 		usage.CacheReadTokens = u.InputTokensDetails.CachedTokens
 	}
 	return usage
-}
-
-// --- shared transport / retry ----------------------------------------------
-
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
 }

@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -68,5 +69,14 @@ func TestBackoffDelayJitterDoesNotExceedCap(t *testing.T) {
 	})
 	if got != MaxDelay {
 		t.Fatalf("delay = %s, want %s", got, MaxDelay)
+	}
+}
+
+func TestSleepReturnsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := Sleep(ctx, time.Hour); err != context.Canceled {
+		t.Fatalf("Sleep() error = %v, want context canceled", err)
 	}
 }
