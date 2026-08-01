@@ -1,5 +1,9 @@
 # Parallel Subagents
 
+> **Status:** Implemented. This records the shipped design, so descriptions of
+> earlier behavior are written as "before this change." Current behavior is documented in
+> [Tools](../developer/tools.md) and [Architecture](../../ARCHITECTURE.md).
+
 ## Outcome
 
 Neo's coordinator can launch several independent inspection subagents in one response. They run concurrently with tools, return evidence-rich summaries, and cannot race changes in the shared workspace.
@@ -8,9 +12,9 @@ The parent remains the coordinator, writer, and final judge.
 
 ## Why
 
-Neo already has fresh child contexts, bounded supervision, cancellation, retries, event attribution, and a first-class `agent` tool. The missing piece is safe concurrent execution.
+Neo already had fresh child contexts, bounded supervision, cancellation, retries, event attribution, and a first-class `agent` tool. Before this change, the missing piece was safe concurrent execution.
 
-The current dynamic child receives `bash`, `read_file`, `write_file`, `edit_file`, `grep`, and `glob`. Running several such children concurrently in one worktree would allow write/write and read/write races. Worktree isolation could solve that, but it adds branch, merge, cleanup, and conflict behavior that is not needed to make parallel investigation valuable.
+Before this change, a dynamic child received `bash`, `read_file`, `write_file`, `edit_file`, `grep`, and `glob`. Running several such children concurrently in one worktree would have allowed write/write and read/write races. Worktree isolation could solve that, but it would add branch, merge, cleanup, and conflict behavior that was not needed to make parallel investigation valuable.
 
 ## Contract
 
@@ -160,4 +164,4 @@ Manual smoke test:
 - `internal/factory/runner_test.go`
 - `internal/agent/agent.go`
 - `cmd/neo/factory.go`
-- `cmd/neo-docs/main.go`
+- `docs/developer/tools.md`

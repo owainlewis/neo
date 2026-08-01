@@ -1,5 +1,12 @@
 # Robust Core Plan
 
+> **Status:** Historical plan. It does not describe the current product.
+>
+> The permission-policy proposal below was superseded by sandbox-owned
+> containment and optional interactive `tool_approvals`. See
+> [Sandbox and Tool Approvals](developer/guides/permissions.md) and the current
+> [architecture](../ARCHITECTURE.md).
+
 Neo should become a teaching-quality coding agent that is also solid enough for
 real coding sessions. The core idea is simple: keep the agent loop small and
 policy-free, then layer capabilities around it as explicit interfaces with

@@ -31,15 +31,6 @@ const providers = [
   },
 ];
 
-const currentModels = [
-  { name: 'Claude Sonnet 5', href: 'https://openrouter.ai/anthropic/claude-sonnet-5' },
-  { name: 'GPT-5.6 Sol', href: 'https://openrouter.ai/openai/gpt-5.6-sol' },
-  { name: 'Gemini 3.5 Flash', href: 'https://openrouter.ai/google/gemini-3.5-flash' },
-  { name: 'Kimi K3', href: 'https://openrouter.ai/moonshotai/kimi-k3' },
-  { name: 'DeepSeek V4 Pro', href: 'https://openrouter.ai/deepseek/deepseek-v4-pro' },
-  { name: 'Qwen3.7 Max', href: 'https://openrouter.ai/qwen/qwen3.7-max' },
-];
-
 const productWorkflow = {
   variant: 'product' as const,
   project: '~/Code/payments-api · main',
@@ -104,18 +95,18 @@ const agentWorkflow = {
       <p class="neo-label">Built for speed</p>
       <h2 id="speed-title">Less waiting. More useful work in motion.</h2>
       <p>
-        Neo already coordinates visible workflows and focused subagents. Parallel execution is the
-        next speed layer, with tool calls and subagents now in development.
+        Neo coordinates visible workflows and focused subagents. Independent reads, searches, and
+        inspection subagents run concurrently while writes stay serial.
       </p>
     </div>
     <div class="neo-speed-grid">
       <article>
-        <div class="neo-speed-card-meta"><span>01</span><small>In development</small></div>
+        <div class="neo-speed-card-meta"><span>01</span><small>Available now</small></div>
         <h3>Parallel tool calls</h3>
         <p>Run independent read, search, and inspection calls together instead of waiting on a serial queue.</p>
       </article>
       <article>
-        <div class="neo-speed-card-meta"><span>02</span><small>In development</small></div>
+        <div class="neo-speed-card-meta"><span>02</span><small>Available now</small></div>
         <h3>Parallel subagents</h3>
         <p>Give focused workers separate jobs, run them concurrently, then return their evidence to one coordinator.</p>
       </article>
@@ -148,18 +139,15 @@ const agentWorkflow = {
         </article>
       ))}
     </div>
-    <div class="neo-current-models">
-      <p>Current tool-capable models available directly or through OpenRouter</p>
-      <ul>
-        {currentModels.map((model) => <li><a href={model.href}>{model.name}<span aria-hidden="true">↗</span></a></li>)}
-      </ul>
-      <small>Model availability and names come from provider APIs and can change.</small>
-    </div>
+    <p class="neo-model-note">
+      Model availability and names come from provider APIs and can change. Neo passes your configured
+      model ID to the active provider.
+    </p>
   </section>
 
   <section class="neo-intro" aria-labelledby="difference-title">
     <p class="neo-label">From issue to merge</p>
-    <h2 id="difference-title">The whole engineering workflow, not just the edit.</h2>
+    <h2 id="difference-title">Follow the work from issue to merge.</h2>
     <p>
       Neo can inspect the issue, isolate the work, change the code, run tests, delegate review,
       open the pull request, and respond to feedback. The workflow stays visible from start to finish.

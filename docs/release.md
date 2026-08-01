@@ -80,8 +80,8 @@ archive file list should include `CHANGELOG.md` alongside `LICENSE` and
 Run the normal release-relevant checks before tagging:
 
 - Go tests.
-- Generated developer docs check.
 - Installer shell syntax check.
+- Documentation website build when user or developer docs changed.
 - GoReleaser config check, if GoReleaser is installed locally.
 
 If a check fails, fix it before continuing. If a local optional tool is missing,

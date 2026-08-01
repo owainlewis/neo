@@ -1,6 +1,6 @@
 # Neo Goal Runner - Design Spec
 
-Status: Draft.
+> **Status:** Draft. This describes proposed behavior, not the current product.
 
 This spec describes how Neo should implement `/goal`.
 
@@ -35,7 +35,7 @@ Sources reviewed:
 - Codex goal tools: https://github.com/openai/codex/blob/390b73133b0707ce877ec924b0011c06b776b9e8/codex-rs/ext/goal/src/tool.rs
 - Codex goal tool specs: https://github.com/openai/codex/blob/390b73133b0707ce877ec924b0011c06b776b9e8/codex-rs/ext/goal/src/spec.rs
 - Codex goal steering prompt: https://github.com/openai/codex/blob/390b73133b0707ce877ec924b0011c06b776b9e8/codex-rs/ext/goal/templates/goals/continuation.md
-- Codex user docs: https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex
+- Codex user guide: https://learn.chatgpt.com/use-cases/follow-goals
 
 Hermes implements goals as a session-scoped `GoalManager`.
 
@@ -550,7 +550,7 @@ Likely package boundaries:
 | `internal/session` | Persist and restore optional goal state. |
 | `internal/tui` | Slash commands, status rendering, idle continuation scheduling, interrupt handling. |
 | `internal/config` | `goals.max_attempts`. |
-| `cmd/neo-docs` | Generated docs for config and commands. |
+| `docs/developer` | Manually maintained configuration, command, session, and tool references. |
 
 Do not implement this by teaching `internal/agent` about `/goal`.
 
@@ -607,7 +607,7 @@ The Phase 1 recommendation is Codex-style goal tool plus Hermes-style TUI schedu
 8. Add the simple scheduler rule: continue only when idle, input is empty, and no modal is active.
 9. Add attempt budget handling and `budget_limited`.
 10. Add interrupt behavior so cancellation pauses the goal.
-11. Add config docs through `go run ./cmd/neo-docs`.
+11. Update the developer configuration, CLI, session, and tool docs.
 12. Add optional `/goal draft` contract generation later.
 13. Add optional wait barriers later.
 

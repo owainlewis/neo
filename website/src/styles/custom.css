@@ -739,51 +739,12 @@ body:has(.neo-home) .site-title::after {
   font-size: 0.68rem;
 }
 
-.neo-current-models {
+.neo-home .neo-model-note {
+  max-width: 46rem;
   margin-top: var(--neo-space-3);
-}
-
-.neo-current-models > p {
   color: var(--neo-faint);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.neo-current-models ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  padding: 0;
-  margin-top: 0.85rem;
-  list-style: none;
-}
-
-.neo-current-models a {
-  display: inline-flex;
-  gap: 0.45rem;
-  align-items: center;
-  padding: 0.55rem 0.75rem;
-  color: var(--neo-ink);
-  font-family: var(--sl-font-mono);
-  font-size: 0.72rem;
-  text-decoration: none;
-  background: var(--neo-paper);
-  border: 1px solid var(--neo-line);
-  border-radius: 999px;
-}
-
-.neo-current-models a:hover {
-  color: var(--neo-moss);
-  border-color: var(--neo-moss);
-}
-
-.neo-current-models > small {
-  display: block;
-  margin-top: 0.85rem;
-  color: var(--neo-faint);
-  font-size: 0.7rem;
+  font-size: 0.76rem;
+  line-height: 1.6;
 }
 
 .neo-product {

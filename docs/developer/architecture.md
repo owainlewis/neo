@@ -9,6 +9,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `cmd/neo/` | Process lifecycle, stream-injected command dispatch, and chat session startup. |
 | `internal/agent/` | Core agent loop, transcript state, event model, tool-use continuation. |
 | `internal/approval/` | Literal matcher for optional interactive tool confirmations. |
+| `internal/atomicfile/` | Atomic file replacement used by session and credential storage. |
 | `internal/auth/` | OpenAI ChatGPT/Codex device-code login, token refresh, and stored subscription credentials. |
 | `internal/compact/` | Compaction interface, summarizing compactor, and safe split helpers. |
 | `internal/config/` | Config discovery, defaults, and feature flags. |
@@ -19,21 +20,23 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `internal/llm/chatcompletions/` | Reusable OpenAI-compatible Chat Completions adapter. |
 | `internal/llm/openrouter/` | OpenRouter provider setup and defaults. |
 | `internal/llm/google/` | Google Gemini adapter. |
+| `internal/logx/` | Optional structured debug logging. |
 | `internal/projectctx/` | AGENTS.md discovery and prompt augmentation. |
 | `internal/session/` | File-backed session metadata and transcripts. |
 | `internal/skills/` | Skill discovery, catalog rendering, and $name or /name expansion. |
 | `internal/tools/` | Built-in tools exposed to the model. |
 | `internal/tui/` | Bubble Tea terminal UI and transcript rendering. |
+| `internal/workflow/` | In-memory checklist state and the chat `workflow` tool. |
 | `internal/workspace/` | Workspace helpers shared by project-context features. |
 
 ## Chat Startup Flow
 
-1. `cmd/neo` loads config.
-2. Provider construction selects Anthropic, OpenAI, OpenRouter, or Google Gemini. OpenAI defaults to API-key auth; `openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials.
-3. The CLI creates or loads a session from `internal/session`.
-4. Skills and AGENTS.md are discovered when enabled.
-5. `chatSystem` builds both flattened and segmented system prompts.
-6. `agent.New` receives the provider, tools, optional interactive approval matcher, system prompt, and restored messages.
+1. `cmd/neo` resolves the session store. For a resumed chat, it loads the session and restores its saved working directory before entering the shared chat path.
+2. It loads config and selects Anthropic, OpenAI, OpenRouter, or Google Gemini, preferring saved provider and model metadata when resuming. OpenAI defaults to API-key auth; `openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials.
+3. It resolves the project root, constructs the workflow and subagent capabilities, and builds the complete tool registry.
+4. For a new chat, it creates the session in `internal/session`.
+5. Skills and AGENTS.md are discovered when enabled, then `chatSystem` builds both flattened and segmented system prompts.
+6. `agent.New` receives the provider, tools, optional interactive approval matcher, system prompt, and restored messages and usage.
 7. `tui.Run` owns user interaction and saves the transcript after each send.
 
 ## Execution Boundary
