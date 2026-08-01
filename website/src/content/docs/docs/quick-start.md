@@ -91,6 +91,27 @@ Summarize this repository and suggest a good first change.
 
 If you built Neo locally but did not install it onto your `PATH`, run `./neo` instead.
 
+## Built-in phases
+
+Neo includes four named prompts that appear as slash commands and as the active
+label beside normal workflow progress:
+
+| Phase | What it does |
+|------|------|
+| `/design <goal>` | Design a product change, feature, or bug fix without implementing it |
+| `/plan <goal>` | Break accepted work into small tasks with checks |
+| `/build <goal>` | Implement, test, self-review, and verify the change |
+| `/review [scope]` | Review and improve code, PR feedback, or CI results |
+
+You can also compose them in normal language:
+
+```text
+Run design and plan phases for encrypted sessions.
+```
+
+Add or override named prompts with the `phases` map in `neo.yaml`. The
+[configuration reference](/docs/reference/config/) includes an example.
+
 ## Common commands
 
 | Command | What it does |

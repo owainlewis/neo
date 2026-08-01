@@ -109,6 +109,22 @@ func TestAgent_TextOnlyTurnReturnsText(t *testing.T) {
 	}
 }
 
+func TestAgent_SendWithDisplayPreservesVisibleTextAndSendsExpandedPrompt(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("done")}}
+	ag := newTestAgent(t, prov)
+
+	_, err := ag.SendWithDisplay(context.Background(), "[phase: review]\nInspect the diff.", "/review", nil)
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if got := prov.Calls[0].Messages[0].Content[0].Text; got != "[phase: review]\nInspect the diff." {
+		t.Fatalf("provider prompt = %q", got)
+	}
+	if got := ag.Transcript()[0].DisplayText; got != "/review" {
+		t.Fatalf("display text = %q, want /review", got)
+	}
+}
+
 // echoTool returns whatever was passed in the "text" field. Used to drive
 // tool_use → tool_result cycles in tests.
 type echoTool struct{}

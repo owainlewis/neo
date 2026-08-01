@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -111,6 +112,50 @@ func TestWorkflowStartsCollapsedWithProgressInStatus(t *testing.T) {
 	m.Update(keyPress(tea.KeyTab))
 	if got := plain(m.workflowPanelView()); !strings.Contains(got, "Code change") || !strings.Contains(got, "● Inspect") {
 		t.Fatalf("Tab should expand the full workflow: %q", got)
+	}
+}
+
+func TestPhaseLabelStaysAheadOfWorkflowProgress(t *testing.T) {
+	m := makeTestModel()
+	m.phases, _ = phase.Resolve(nil)
+	cmd := m.handleSlashCommand("/review")
+	if cmd == nil {
+		t.Fatal("expected review phase to start")
+	}
+	m.handleWorkflowEvent(workflow.Event{
+		Action: "create",
+		State: workflow.State{Title: "Review current change", Items: []workflow.Item{
+			{ID: "1", Text: "Inspect full diff", Status: workflow.Pending},
+			{ID: "2", Text: "Run checks", Status: workflow.Pending},
+		}},
+	})
+	m.handleWorkflowEvent(workflow.Event{Action: "start", ID: "1"})
+
+	got := plain(m.statusLine())
+	if !strings.Contains(got, "Review · 1/2 Inspect full diff") {
+		t.Fatalf("phase and workflow status = %q", got)
+	}
+
+	m.approval = &approvalState{}
+	if got := plain(m.statusLine()); !strings.Contains(got, "Review · Waiting for approval") {
+		t.Fatalf("approval status lost phase: %q", got)
+	}
+}
+
+func TestFailedPhaseWorkflowKeepsPhaseInCompletionReceipt(t *testing.T) {
+	m := makeTestModel()
+	m.turn = turnStats{phase: "Review", workflow: true}
+	m.workflow = &workflowBlock{items: []workflow.Item{
+		{ID: "1", Text: "Inspect", Status: workflow.Done},
+		{ID: "2", Text: "Verify", Status: workflow.Failed},
+	}}
+
+	summary, ok := m.resultSummary(nil, time.Second)
+	if !ok {
+		t.Fatal("expected result summary")
+	}
+	if got := plain(summary.render(80, nil)); !strings.Contains(got, "Review finished with issues") {
+		t.Fatalf("failed phase receipt = %q", got)
 	}
 }
 

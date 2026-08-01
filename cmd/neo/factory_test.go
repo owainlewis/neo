@@ -70,6 +70,18 @@ func TestChatSystemAdvertisesAgentToolWorkflowPattern(t *testing.T) {
 	}
 }
 
+func TestChatSystemAdvertisesNamedPhasesWithoutPromptBodies(t *testing.T) {
+	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, io.Discard)
+	for _, want := range []string{"# Named phases", "/design", "/plan", "/build", "/review"} {
+		if !strings.Contains(system, want) {
+			t.Fatalf("system prompt missing %q named phase catalog:\n%s", want, system)
+		}
+	}
+	if strings.Contains(system, "Design the requested change before implementation.") {
+		t.Fatalf("system prompt included named phase body:\n%s", system)
+	}
+}
+
 func TestChatSystemPreservesAgentsWorkflowInstructions(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))

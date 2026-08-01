@@ -6,6 +6,7 @@ import (
 
 	"charm.land/glamour/v2"
 
+	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
 )
 
@@ -65,6 +66,14 @@ func (m *model) slashCommands() []slashCommand {
 	for _, c := range commands {
 		used[c.cmd] = true
 	}
+	for _, definition := range m.phases {
+		cmd := "/" + definition.Name
+		if used[cmd] {
+			continue
+		}
+		used[cmd] = true
+		commands = append(commands, slashCommand{cmd: cmd, desc: definition.Description})
+	}
 	for _, s := range m.skills {
 		cmd := "/" + s.Name
 		if used[cmd] {
@@ -78,6 +87,9 @@ func (m *model) slashCommands() []slashCommand {
 
 func (m *model) slashSkill(cmd string) (skills.Skill, bool) {
 	if builtinSlashCommand(cmd) {
+		return skills.Skill{}, false
+	}
+	if _, ok := phase.Find(m.phases, cmd); ok {
 		return skills.Skill{}, false
 	}
 	name := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(cmd)), "/")

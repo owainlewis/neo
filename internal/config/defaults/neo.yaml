@@ -50,6 +50,19 @@ features:
 output:
   verbose: false
 
+# Named prompts shown as slash commands and as the active phase in the TUI.
+# Neo always provides design, plan, build, and review. Add a new phase or
+# override a default by name. Omitted default fields keep their built-in value.
+# phases:
+#   security:
+#     description: Review authentication and trust boundaries
+#     prompt: |
+#       Inspect the requested security boundary.
+#       Report and fix actionable findings, then rerun relevant checks.
+#   review:
+#     prompt: |
+#       Apply this project's review policy to the requested scope.
+
 # ----------------------------------------------------------------------------
 # Example provider configurations
 # ----------------------------------------------------------------------------

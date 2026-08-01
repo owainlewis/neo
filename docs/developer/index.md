@@ -9,5 +9,6 @@ Start here when changing Neo:
 - [Configuration](config.md) documents config loading and feature flags.
 - [Sessions](sessions.md) documents persisted conversations.
 - [Tools](tools.md) documents the built-in tool surface.
+- [Named phases](phases.md) documents built-in and configurable prompt commands.
 - [Prompt caching](prompt-caching.md) documents structured system prompt blocks.
 - [Teaching guides](guides/index.md) explain the core ideas in plain language.

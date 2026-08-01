@@ -21,6 +21,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `internal/llm/openrouter/` | OpenRouter provider setup and defaults. |
 | `internal/llm/google/` | Google Gemini adapter. |
 | `internal/logx/` | Optional structured debug logging. |
+| `internal/phase/` | Built-in and configured named prompts, invocation matching, and prompt expansion. |
 | `internal/projectctx/` | AGENTS.md discovery and prompt augmentation. |
 | `internal/session/` | File-backed session metadata and transcripts. |
 | `internal/skills/` | Skill discovery, catalog rendering, and $name or /name expansion. |
@@ -35,7 +36,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 2. It loads config and selects Anthropic, OpenAI, OpenRouter, or Google Gemini, preferring saved provider and model metadata when resuming. OpenAI defaults to API-key auth; `openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials.
 3. It resolves the project root, constructs the workflow and subagent capabilities, and builds the complete tool registry.
 4. For a new chat, it creates the session in `internal/session`.
-5. Skills and AGENTS.md are discovered when enabled, then `chatSystem` builds both flattened and segmented system prompts.
+5. Named phases, skills, and AGENTS.md are loaded, then `chatSystem` builds both flattened and segmented system prompts.
 6. `agent.New` receives the provider, tools, optional interactive approval matcher, system prompt, and restored messages and usage.
 7. `tui.Run` owns user interaction and saves the transcript after each send.
 

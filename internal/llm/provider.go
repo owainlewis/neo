@@ -42,6 +42,10 @@ type ImageSource struct {
 type Message struct {
 	Role    Role           `json:"role"`
 	Content []ContentBlock `json:"content"`
+	// DisplayText preserves the user's visible invocation when Content contains
+	// expanded named-prompt or skill instructions. Provider adapters ignore it;
+	// sessions and transcript replay use it instead of exposing prompt bodies.
+	DisplayText string `json:"display_text,omitempty"`
 }
 
 type ToolSpec struct {

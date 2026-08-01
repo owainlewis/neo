@@ -2,6 +2,14 @@
 
 All notable changes to Neo will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Added visible, configurable named phases with built-in `/design`, `/plan`,
+  `/build`, and `/review` prompts. Phases reuse the existing workflow UI and can
+  be extended or overridden through `neo.yaml`.
+
 ## [v0.5.1] - 2026-07-31
 
 ### Changed

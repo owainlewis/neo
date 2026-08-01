@@ -45,3 +45,10 @@ Session files store aggregate token usage alongside the transcript:
 Older session files without `usage` load as zero usage. Resumed
 sessions continue accumulating from the saved totals. Clearing a transcript also
 clears the saved usage for that session.
+
+## Visible Prompt Text
+
+User messages may store `display_text` when Neo sends expanded named-phase or
+skill instructions to the model. Transcript replay, session titles, and local
+search use this visible value, while provider adapters continue using the full
+text content. Older messages without `display_text` behave as before.

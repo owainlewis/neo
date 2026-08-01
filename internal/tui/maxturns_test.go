@@ -44,7 +44,7 @@ func TestModel_SendResultSuppressesGenericMaxTurnsError(t *testing.T) {
 // "Finished with issues" card.
 func TestModel_SendResultDoesNotDuplicateMaxTurnsSummary(t *testing.T) {
 	m := makeTestModel()
-	m.turn = turnStats{tools: 3}
+	m.turn = turnStats{tools: 3, phase: "Review"}
 
 	m.handleEvent(agent.Event{Kind: agent.EventMaxTurnsReached, MaxTurns: 50, Err: agent.ErrMaxTurns})
 	m.Update(sendResultMsg{err: fmt.Errorf("agent stopped: %w", agent.ErrMaxTurns)})
@@ -52,8 +52,12 @@ func TestModel_SendResultDoesNotDuplicateMaxTurnsSummary(t *testing.T) {
 	if len(m.blocks) != 1 {
 		t.Fatalf("expected only the maxTurnsBlock, got %d blocks: %#v", len(m.blocks), m.blocks)
 	}
-	if _, ok := m.blocks[0].(maxTurnsBlock); !ok {
+	block, ok := m.blocks[0].(maxTurnsBlock)
+	if !ok {
 		t.Fatalf("expected maxTurnsBlock, got %T", m.blocks[0])
+	}
+	if got := plain(block.render(80, nil)); !strings.Contains(got, "Review paused after 50 steps") {
+		t.Fatalf("max-turn block lost phase: %q", got)
 	}
 }
 

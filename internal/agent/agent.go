@@ -227,6 +227,13 @@ func (a *Agent) Send(ctx context.Context, userText string) (string, error) {
 // that can't be read are skipped with an inline note rather than aborting the
 // turn — attachments are best-effort.
 func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []string) (string, error) {
+	return a.SendWithDisplay(ctx, userText, "", imagePaths)
+}
+
+// SendWithDisplay sends promptText to the provider while preserving a shorter
+// user-visible value for transcript replay, session titles, and local search.
+// An empty displayText keeps the normal prompt text visible.
+func (a *Agent) SendWithDisplay(ctx context.Context, promptText, displayText string, imagePaths []string) (string, error) {
 	var content []llm.ContentBlock
 	var skipped []string
 	for _, p := range imagePaths {
@@ -237,7 +244,7 @@ func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []stri
 		}
 		content = append(content, blk)
 	}
-	text := userText
+	text := promptText
 	if len(skipped) > 0 {
 		text = strings.TrimSpace(text + "\n\n[could not attach: " + strings.Join(skipped, "; ") + "]")
 	}
@@ -256,7 +263,11 @@ func (a *Agent) SendWith(ctx context.Context, userText string, imagePaths []stri
 		"images", len(imagePaths),
 		"text", logx.SafeString(text, 240),
 	)
-	a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: content})
+	visibleText := strings.TrimSpace(displayText)
+	if visibleText == strings.TrimSpace(promptText) {
+		visibleText = ""
+	}
+	a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: content, DisplayText: visibleText})
 	return a.run(ctx)
 }
 
@@ -727,6 +738,7 @@ func cloneMessages(in []llm.Message) []llm.Message {
 	for i, msg := range in {
 		out[i].Role = msg.Role
 		out[i].Content = cloneContentBlocks(msg.Content)
+		out[i].DisplayText = msg.DisplayText
 	}
 	return out
 }
