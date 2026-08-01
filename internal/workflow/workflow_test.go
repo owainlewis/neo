@@ -49,3 +49,17 @@ func TestToolRequiresIDForStatusActions(t *testing.T) {
 		t.Fatal("expected missing id error")
 	}
 }
+
+func TestToolRejectsUnknownActionWithoutEmittingEvent(t *testing.T) {
+	events := make(chan Event, 1)
+	tool := Tool{Events: events}
+
+	if _, err := tool.Run(context.Background(), map[string]any{"action": "archive", "id": "1"}); err == nil {
+		t.Fatal("expected unknown action error")
+	}
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected workflow event: %+v", ev)
+	default:
+	}
+}

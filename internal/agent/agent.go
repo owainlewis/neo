@@ -188,15 +188,6 @@ func (a *Agent) backend() (llm.Provider, string, compact.Compactor) {
 	return a.cfg.Provider, a.cfg.Model, a.cfg.Compactor
 }
 
-func (a *Agent) ReplaceTranscript(messages []llm.Message) {
-	a.messages = cloneMessages(messages)
-	a.usage = llm.Usage{}
-}
-
-func (a *Agent) SetUsage(usage llm.Usage) {
-	a.usage = usage
-}
-
 func (a *Agent) Clear() {
 	a.messages = nil
 	a.usage = llm.Usage{}
