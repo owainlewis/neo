@@ -513,7 +513,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		return ag.SetBackend(prov, nextModel, chatCompactor(prov, nextModel, cfg))
 	}
 
-	if err := tui.Run(ctx, ag, model, Version, sk,
+	if err := tui.Run(ctx, ag, model, Version, cwd, sk,
 		tui.WithAfterSend(saveSession),
 		tui.WithPhases(cfg.NamedPhases()),
 		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName, streams.err), switchModel),

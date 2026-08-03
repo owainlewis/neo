@@ -26,7 +26,6 @@ import (
 	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workflow"
-	"github.com/owainlewis/neo/internal/workspace"
 )
 
 type Options struct {
@@ -92,15 +91,16 @@ func WithIO(input io.Reader, output io.Writer) Option {
 	}
 }
 
-// Run starts the Bubble Tea chat TUI. It returns when the user quits. sk is the
+// Run starts the Bubble Tea chat TUI. It returns when the user quits. cwd is
+// the effective working directory for display and file references. sk is the
 // loaded skill set used for $name expansion (nil when the feature is off).
-func Run(ctx context.Context, ag *agent.Agent, model, version string, sk []skills.Skill, options ...Option) error {
+func Run(ctx context.Context, ag *agent.Agent, model, version, cwd string, sk []skills.Skill, options ...Option) error {
 	logx.Debug("tui start", "model", model, "skills", len(sk))
 	opts := Options{}
 	for _, option := range options {
 		option(&opts)
 	}
-	m, err := newModel(ctx, ag, model, version, sk, opts)
+	m, err := newModel(ctx, ag, model, version, cwd, sk, opts)
 	if err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ type model struct {
 	verbose       bool
 }
 
-func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk []skills.Skill, opts Options) (*model, error) {
+func newModel(ctx context.Context, ag *agent.Agent, modelTag, version, workingDir string, sk []skills.Skill, opts Options) (*model, error) {
 	// Detect dark/light once, here, before Bubble Tea puts stdin in raw mode.
 	// Glamour's WithAutoStyle issues an OSC 11 query each time; doing that
 	// from inside Update (e.g. on resize) leaks the terminal's reply into the
@@ -314,7 +314,10 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 	sp.Spinner = statusSpinner
 	sp.Style = lipgloss.NewStyle().Foreground(colDotThinking)
 
-	absCWD, _ := os.Getwd()
+	absCWD := workingDir
+	if absCWD == "" {
+		absCWD, _ = os.Getwd()
+	}
 	cwd := absCWD
 	if home, err := os.UserHomeDir(); err == nil {
 		if rel, err := filepath.Rel(home, cwd); err == nil && !strings.HasPrefix(rel, "..") {
@@ -338,7 +341,7 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version string, sk
 		viewport:      vp,
 		input:         ta,
 		spin:          sp,
-		files:         newFilePicker(workspace.Root(absCWD)),
+		files:         newFilePicker(absCWD),
 		md:            md,
 		skills:        sk,
 		phases:        opts.Phases,
