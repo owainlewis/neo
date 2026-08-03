@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +19,7 @@ func TestNewModelKeepsTranscriptMouseWheelStateStable(t *testing.T) {
 	t.Parallel()
 
 	base := makeTestModel()
-	m, err := newModel(context.Background(), base.ag, "test", "dev", nil, Options{})
+	m, err := newModel(context.Background(), base.ag, "test", "dev", "", nil, Options{})
 	if err != nil {
 		t.Fatalf("new model: %v", err)
 	}
@@ -34,6 +36,36 @@ func TestNewModelKeepsTranscriptMouseWheelStateStable(t *testing.T) {
 		if got := m.viewport.XOffset(); got != 0 {
 			t.Fatalf("horizontal wheel changed X offset to %d, want 0", got)
 		}
+	}
+}
+
+func TestNewModelFilePickerUsesWorkingDirectory(t *testing.T) {
+	ancestor := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ancestor, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workingDir := filepath.Join(ancestor, "nested", "project")
+	file := filepath.Join(workingDir, "docs", "file.md")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := makeTestModel()
+	m, err := newModel(context.Background(), base.ag, "test", "dev", workingDir, nil, Options{})
+	if err != nil {
+		t.Fatalf("new model: %v", err)
+	}
+	m.input.SetValue("@docs/file")
+	m.updateFilePicker()
+
+	if m.files.root != workingDir {
+		t.Fatalf("file picker root = %q, want working directory %q", m.files.root, workingDir)
+	}
+	if len(m.files.matches) != 1 || m.files.matches[0] != "docs/file.md" {
+		t.Fatalf("file picker matches = %v, want [docs/file.md]", m.files.matches)
 	}
 }
 
