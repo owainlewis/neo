@@ -170,6 +170,8 @@ func envSecrets() []string {
 	names := []string{
 		"OPENAI_API_KEY",
 		"ANTHROPIC_API_KEY",
+		"OPENROUTER_API_KEY",
+		"GOOGLE_API_KEY",
 	}
 	out := make([]string, 0, len(names))
 	for _, name := range names {
