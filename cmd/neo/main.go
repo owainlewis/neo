@@ -495,13 +495,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	})
 
 	saveSession := func() error {
-		activeProvider, activeModel := ag.Backend()
-		sess.Messages = ag.Transcript()
-		sess.Usage = ag.Usage()
-		sess.Metadata.CWD = cwd
-		sess.Metadata.Model = activeModel
-		sess.Metadata.Provider = activeProvider
-		return store.Save(ctx, sess)
+		return saveChatSession(ctx, store, sess, ag, cwd)
 	}
 
 	switchModel := func(nextModel string) error {
@@ -526,6 +520,16 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		return 1
 	}
 	return 0
+}
+
+func saveChatSession(ctx context.Context, store *session.Store, sess *session.Session, ag *agent.Agent, cwd string) error {
+	activeProvider, activeModel := ag.Backend()
+	sess.Messages = ag.Transcript()
+	sess.Usage = ag.Usage()
+	sess.Metadata.CWD = cwd
+	sess.Metadata.Model = activeModel
+	sess.Metadata.Provider = sessionProviderID(activeProvider)
+	return store.Save(ctx, sess)
 }
 
 func chatCompactor(prov llm.Provider, model string, cfg *config.Config) compact.Compactor {

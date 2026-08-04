@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/auth"
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm/google"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
+	"github.com/owainlewis/neo/internal/llm/openai"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
 	"github.com/owainlewis/neo/internal/session"
 )
@@ -247,6 +249,104 @@ func TestSessionBackend_HonorsSavedModelForSameProvider(t *testing.T) {
 	provider, model := sessionBackend(cfg, meta, io.Discard)
 	if provider != "openai" || model != "gpt-5-mini" {
 		t.Fatalf("session backend = %s/%s, want openai/gpt-5-mini", provider, model)
+	}
+}
+
+func TestSaveChatSession_NormalizesCodexAdapterProviderForResume(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	authStore := auth.NewStore(filepath.Join(home, ".neo", "auth.json"))
+	if err := authStore.Set(auth.ProviderOpenAICodex, auth.Credentials{
+		AccessToken: "subscription-token",
+		ExpiresAt:   time.Now().Add(time.Hour),
+		AccountID:   "account-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	store := session.NewStore(t.TempDir())
+	sess, err := store.Create(ctx, session.Metadata{Model: "gpt-5-codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ag := agent.New(agent.Config{
+		Provider: openai.NewCodex(nil),
+		Model:    "gpt-5-codex",
+	})
+	if err := saveChatSession(ctx, store, sess, ag, "/workspace"); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.Load(ctx, sess.Metadata.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Metadata.Provider; got != "openai" {
+		t.Fatalf("saved provider = %q, want stable provider ID openai", got)
+	}
+
+	cfg := &config.Config{
+		Provider:   "anthropic",
+		Model:      "claude-opus-4-8",
+		OpenAIAuth: config.OpenAIAuthSubscription,
+	}
+	var warnings bytes.Buffer
+	provider, model := sessionBackend(cfg, loaded.Metadata, &warnings)
+	if provider != "openai" || model != "gpt-5-codex" {
+		t.Fatalf("session backend = %s/%s, want openai/gpt-5-codex", provider, model)
+	}
+	if warnings.Len() != 0 {
+		t.Fatalf("resume warning = %q, want none", warnings.String())
+	}
+	resumed, err := chatSessionProvider(ctx, cfg, loaded, provider)
+	if err != nil {
+		t.Fatalf("resume provider: %v", err)
+	}
+	if got := resumed.Name(); got != "openai-codex" {
+		t.Fatalf("resumed adapter = %q, want openai-codex", got)
+	}
+}
+
+func TestSaveChatSession_PreservesOpenAIAPIProvider(t *testing.T) {
+	ctx := context.Background()
+	store := session.NewStore(t.TempDir())
+	sess, err := store.Create(ctx, session.Metadata{Model: "gpt-5.2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ag := agent.New(agent.Config{
+		Provider: &openai.Client{},
+		Model:    "gpt-5.2",
+	})
+	if err := saveChatSession(ctx, store, sess, ag, "/workspace"); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.Load(ctx, sess.Metadata.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Metadata.Provider; got != "openai" {
+		t.Fatalf("saved API-key provider = %q, want openai", got)
+	}
+	if got := loaded.Metadata.Model; got != "gpt-5.2" {
+		t.Fatalf("saved API-key model = %q, want gpt-5.2", got)
+	}
+}
+
+func TestSessionBackend_NormalizesLegacyCodexProvider(t *testing.T) {
+	cfg := &config.Config{Provider: "openai", Model: "gpt-5.2"}
+	meta := session.Metadata{Provider: "openai-codex", Model: "gpt-5-codex"}
+	var warnings bytes.Buffer
+
+	provider, model := sessionBackend(cfg, meta, &warnings)
+
+	if provider != "openai" || model != "gpt-5-codex" {
+		t.Fatalf("session backend = %s/%s, want openai/gpt-5-codex", provider, model)
+	}
+	if warnings.Len() != 0 {
+		t.Fatalf("legacy resume warning = %q, want none", warnings.String())
 	}
 }
 

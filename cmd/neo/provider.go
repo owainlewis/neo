@@ -134,12 +134,24 @@ func sessionBackend(cfg *config.Config, meta session.Metadata, errOut io.Writer)
 	if meta.Provider == "" || meta.Model == "" {
 		return cfg.Provider, cfg.Model
 	}
-	if meta.Provider == cfg.Provider || providerCredentialPresent(cfg, meta.Provider) {
-		return meta.Provider, meta.Model
+	savedProvider := sessionProviderID(meta.Provider)
+	if savedProvider == cfg.Provider || providerCredentialPresent(cfg, savedProvider) {
+		return savedProvider, meta.Model
 	}
 	fmt.Fprintf(errOut, "warning: session provider %s is not configured; continuing with %s model %s\n",
 		meta.Provider, cfg.Provider, cfg.Model)
 	return cfg.Provider, cfg.Model
+}
+
+// sessionProviderID maps adapter-specific names to stable configuration
+// provider IDs suitable for session persistence and reconstruction. The Codex
+// subscription adapter historically exposed openai-codex as its diagnostic
+// name, but it is configured and resumed through the openai provider.
+func sessionProviderID(adapterName string) string {
+	if adapterName == "openai-codex" {
+		return "openai"
+	}
+	return adapterName
 }
 
 func modelChoices(ctx context.Context, cfg *config.Config, activeProvider string, errOut io.Writer) []tui.ModelChoice {
