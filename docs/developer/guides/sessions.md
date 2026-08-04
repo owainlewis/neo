@@ -20,6 +20,12 @@ Neo stores sessions under `~/.neo/sessions/`:
 - `<session-id>.json`: full transcript and metadata.
 
 The TUI saves after each user turn. Resuming a session restores the old messages into the agent.
+Session metadata stores stable configuration provider IDs. In particular, both
+OpenAI API-key and subscription sessions persist `openai`; older
+`openai-codex` metadata is normalized to `openai` during resume. The separate
+`openai_auth` value prevents Neo from restoring a model through an incompatible
+OpenAI adapter when configuration changes. Legacy `openai` sessions are treated
+as API-key sessions, and legacy `openai-codex` sessions as subscription sessions.
 
 ## Ways To Resume
 

@@ -27,7 +27,8 @@ Resume restores the session's saved provider and model when that provider's cred
 | `title` | Derived from the first non-empty user text if not set. |
 | `cwd` | Working directory captured for resume. |
 | `model` | Model used by the session. |
-| `provider` | Provider used by the session. |
+| `provider` | Stable configuration provider ID used by the session. Adapter-specific names are normalized, so both OpenAI API-key and subscription sessions store `openai`. Legacy `openai-codex` values are accepted as `openai` when resuming. |
+| `openai_auth` | OpenAI transport used by the session: `api_key` or `subscription`. Neo restores a saved OpenAI model only when this matches current configuration. Legacy `openai` metadata is treated as API-key auth, while legacy `openai-codex` metadata is treated as subscription auth. |
 | `created_at` | UTC creation timestamp. |
 | `updated_at` | UTC update timestamp. |
 
