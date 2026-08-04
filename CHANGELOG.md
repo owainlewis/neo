@@ -4,6 +4,14 @@ All notable changes to Neo will be documented in this file.
 
 ## Unreleased
 
+## [v0.6.1] - 2026-08-04
+
+### Fixed
+
+- Kept interactive `@` file references rooted at Neo's effective startup
+  working directory, including resumed sessions, instead of walking up to an
+  ancestor Git repository.
+
 ## [v0.6.0] - 2026-08-01
 
 ### Added
@@ -153,6 +161,7 @@ All notable changes to Neo will be documented in this file.
 
 - Initial public release.
 
+[v0.6.1]: https://github.com/owainlewis/neo/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/owainlewis/neo/compare/v0.5.1...v0.6.0
 [v0.5.1]: https://github.com/owainlewis/neo/compare/v0.5.0...v0.5.1
 [v0.5.0]: https://github.com/owainlewis/neo/compare/v0.4.1...v0.5.0
