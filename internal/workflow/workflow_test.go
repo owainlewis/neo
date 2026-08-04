@@ -3,13 +3,16 @@ package workflow
 import (
 	"context"
 	"testing"
+
+	"github.com/owainlewis/neo/internal/tools"
 )
 
 func TestToolCreateEmitsWorkflow(t *testing.T) {
 	events := make(chan Event, 1)
 	tool := Tool{Events: events}
 
-	out, err := tool.Run(context.Background(), map[string]any{
+	ctx := tools.WithConversationGeneration(context.Background(), 7)
+	out, err := tool.Run(ctx, map[string]any{
 		"action": "create",
 		"title":  "Release",
 		"items": []any{
@@ -26,6 +29,9 @@ func TestToolCreateEmitsWorkflow(t *testing.T) {
 
 	select {
 	case ev := <-events:
+		if ev.Generation != 7 {
+			t.Fatalf("generation = %d, want 7", ev.Generation)
+		}
 		if ev.Action != "create" {
 			t.Fatalf("action = %q, want create", ev.Action)
 		}

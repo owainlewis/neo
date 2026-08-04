@@ -93,7 +93,7 @@ func (s *Supervisor) RunAgentPrompt(ctx context.Context, dir, prompt string, opt
 	if mode == AgentModeInspect {
 		opts.Tools = append([]string(nil), inspectAgentTools...)
 	}
-	id, err := s.admitAndRegister(prompt, call)
+	id, err := s.admitAndRegister(prompt, call, tools.ConversationGenerationFrom(ctx))
 	if err != nil {
 		return fail(err.Error(), "admission_denied")
 	}
@@ -104,7 +104,7 @@ func (s *Supervisor) RunAgentPrompt(ctx context.Context, dir, prompt string, opt
 		Took: time.Since(start).Round(time.Second).String(), Code: code, Retryable: retryable}
 }
 
-func (s *Supervisor) admitAndRegister(input string, call tools.CallMetadata) (int, error) {
+func (s *Supervisor) admitAndRegister(input string, call tools.CallMetadata, generation uint64) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -113,7 +113,7 @@ func (s *Supervisor) admitAndRegister(input string, call tools.CallMetadata) (in
 	}
 	s.nextID++
 	id := s.nextID
-	s.nodes[id] = &Node{ID: id, Task: clip(input, 60), Call: call}
+	s.nodes[id] = &Node{ID: id, Task: clip(input, 60), Call: call, Generation: generation}
 	s.agents++
 	return id, nil
 }
@@ -157,7 +157,7 @@ func (s *Supervisor) attribute(id int, ev AgentEvent) {
 		return
 	}
 	select {
-	case s.Events <- Event{At: time.Now(), Node: id, Task: n.Task,
+	case s.Events <- Event{Generation: n.Generation, At: time.Now(), Node: id, Task: n.Task,
 		CallID: n.Call.ToolUseID, GroupID: n.Call.GroupID,
 		GroupSize: n.Call.GroupSize, GroupPos: n.Call.GroupPos, Ev: ev}:
 	default: // never block agents on a slow UI

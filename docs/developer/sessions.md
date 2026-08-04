@@ -44,7 +44,9 @@ Session files store aggregate token usage alongside the transcript:
 
 Older session files without `usage` load as zero usage. Resumed
 sessions continue accumulating from the saved totals. Clearing a transcript also
-clears the saved usage for that session.
+clears the saved usage and conversation-scoped TUI activity for that session.
+The selected backend, working directory, skills, named phases, and presentation
+settings remain active for the new conversation.
 
 ## Visible Prompt Text
 

@@ -55,21 +55,23 @@ type AgentEvent struct {
 
 // Event tags an agent event with the execution that produced it.
 type Event struct {
-	At        time.Time  `json:"at"`
-	Node      int        `json:"node"`
-	Task      string     `json:"task,omitempty"`
-	CallID    string     `json:"call_id,omitempty"`
-	GroupID   string     `json:"group_id,omitempty"`
-	GroupSize int        `json:"group_size,omitempty"`
-	GroupPos  int        `json:"group_pos,omitempty"`
-	Ev        AgentEvent `json:"ev"`
+	Generation uint64     `json:"generation,omitempty"`
+	At         time.Time  `json:"at"`
+	Node       int        `json:"node"`
+	Task       string     `json:"task,omitempty"`
+	CallID     string     `json:"call_id,omitempty"`
+	GroupID    string     `json:"group_id,omitempty"`
+	GroupSize  int        `json:"group_size,omitempty"`
+	GroupPos   int        `json:"group_pos,omitempty"`
+	Ev         AgentEvent `json:"ev"`
 }
 
 // Node is one subagent execution.
 type Node struct {
-	ID   int
-	Task string // clipped, for the UI
-	Call tools.CallMetadata
+	ID         int
+	Task       string // clipped, for the UI
+	Call       tools.CallMetadata
+	Generation uint64
 }
 
 // clip returns the first line of s, truncated to at most n runes.

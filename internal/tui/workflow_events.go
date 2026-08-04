@@ -10,6 +10,10 @@ import (
 )
 
 func (m *model) handleWorkflowEvent(ev workflow.Event) {
+	if ev.Generation != m.conversationGeneration {
+		logx.Debug("stale workflow event ignored", "event_generation", ev.Generation, "conversation_generation", m.conversationGeneration)
+		return
+	}
 	if ev.Action == "clear" {
 		m.workflow = nil
 		m.workflowVisible = false
@@ -76,6 +80,10 @@ func (m *model) noteWorkflowActivity(detail string) {
 
 // handleStepEvent folds the supervisor's event stream into activity blocks.
 func (m *model) handleStepEvent(ev factory.Event) {
+	if ev.Generation != m.conversationGeneration {
+		logx.Debug("stale subagent event ignored", "event_generation", ev.Generation, "conversation_generation", m.conversationGeneration)
+		return
+	}
 	if m.handleParallelStepEvent(ev) {
 		return
 	}

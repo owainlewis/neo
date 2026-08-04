@@ -25,6 +25,7 @@ import (
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
+	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -231,6 +232,9 @@ type model struct {
 	steer           func(string) bool
 	pendingSteering []string
 	queued          *queuedTurn
+	// conversationGeneration separates buffered workflow and subagent events
+	// produced before /clear from activity in the new conversation.
+	conversationGeneration uint64
 
 	// mdStyleName is the glamour style chosen at startup. We re-use it when
 	// recreating the renderer on resize so we never re-probe the terminal
@@ -635,11 +639,7 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 	case "/model":
 		m.openModelBrowser()
 	case "/clear":
-		m.ag.Clear()
-		m.blocks = nil
-		m.parallelGroups = nil
-		m.parallelCalls = nil
-		m.refreshViewport()
+		m.resetConversation()
 		if m.afterSend != nil {
 			if err := m.afterSend(); err != nil {
 				m.appendBlock(errorBlock{err: err})
@@ -1468,7 +1468,8 @@ func hasTranscriptToolUse(content []llm.ContentBlock) bool {
 }
 
 func (m *model) startSend(displayText, text string, images []string) tea.Cmd {
-	ctx, cancel := context.WithCancel(m.ctx)
+	ctx := tools.WithConversationGeneration(m.ctx, m.conversationGeneration)
+	ctx, cancel := context.WithCancel(ctx)
 	m.sendCancel = cancel
 	logx.Debug("tui send start", "images", len(images), "text", logx.SafeString(text, 240))
 	return func() tea.Msg {
@@ -1483,7 +1484,8 @@ func (m *model) startSend(displayText, text string, images []string) tea.Cmd {
 }
 
 func (m *model) startTool(name string, input map[string]any) tea.Cmd {
-	ctx, cancel := context.WithCancel(m.ctx)
+	ctx := tools.WithConversationGeneration(m.ctx, m.conversationGeneration)
+	ctx, cancel := context.WithCancel(ctx)
 	m.sendCancel = cancel
 	logx.Debug("tui tool start", "name", name, "args", logx.SafeAny(input))
 	return func() tea.Msg {

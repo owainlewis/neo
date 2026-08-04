@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/tools"
 )
 
 type Status string
@@ -32,10 +33,11 @@ type State struct {
 }
 
 type Event struct {
-	Action string `json:"action"`
-	State  State  `json:"state,omitempty"`
-	ID     string `json:"id,omitempty"`
-	Detail string `json:"detail,omitempty"`
+	Generation uint64 `json:"generation,omitempty"`
+	Action     string `json:"action"`
+	State      State  `json:"state,omitempty"`
+	ID         string `json:"id,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 type Tool struct {
@@ -75,7 +77,7 @@ func (Tool) Spec() llm.ToolSpec {
 	}
 }
 
-func (t Tool) Run(_ context.Context, input map[string]any) (string, error) {
+func (t Tool) Run(ctx context.Context, input map[string]any) (string, error) {
 	action := strings.TrimSpace(stringValue(input["action"]))
 	if action == "" {
 		return "", fmt.Errorf("workflow: missing action")
@@ -85,7 +87,12 @@ func (t Tool) Run(_ context.Context, input map[string]any) (string, error) {
 	default:
 		return "", fmt.Errorf("workflow: unknown action %q", action)
 	}
-	ev := Event{Action: action, ID: strings.TrimSpace(stringValue(input["id"])), Detail: strings.TrimSpace(stringValue(input["detail"]))}
+	ev := Event{
+		Generation: tools.ConversationGenerationFrom(ctx),
+		Action:     action,
+		ID:         strings.TrimSpace(stringValue(input["id"])),
+		Detail:     strings.TrimSpace(stringValue(input["detail"])),
+	}
 	if action == "create" {
 		ev.State.Title = strings.TrimSpace(stringValue(input["title"]))
 		items, err := parseItems(input["items"])
