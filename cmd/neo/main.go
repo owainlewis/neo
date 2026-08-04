@@ -208,9 +208,11 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, errOut io.Wri
 	cache := cfg.PromptCachingEnabled()
 	blocks := []llm.SystemBlock{{Text: base, Cache: cache}}
 	if cfg.AgentsFileEnabled() && cwd != "" {
-		if docs, err := projectctx.Load(cwd); err != nil {
+		docs, err := projectctx.Load(cwd)
+		if err != nil {
 			fmt.Fprintf(errOut, "warning: AGENTS.md: %v\n", err)
-		} else if section := projectctx.Augment("", docs); section != "" {
+		}
+		if section := projectctx.Augment("", docs); section != "" {
 			// Dynamic tail: kept uncached and after the breakpoint so it never
 			// evicts the cached base.
 			blocks = append(blocks, llm.SystemBlock{Text: section})

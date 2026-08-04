@@ -7,6 +7,7 @@
 package projectctx
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,35 +34,74 @@ type Doc struct {
 //   - AGENTS.md from the repo root down to cwd, outermost first
 //
 // The upward walk stops at the repository root (the first ancestor containing
-// .git) or the filesystem root. Missing or empty files are skipped — only a
-// genuine read error (e.g. permissions) is returned.
+// .git), or at cwd when there is no repository. Project instruction files must
+// resolve within that boundary. Missing or empty files are skipped. Read and
+// validation errors are returned alongside any documents that loaded safely.
 func Load(cwd string) ([]Doc, error) {
 	var docs []Doc
+	var loadErrs []error
 
 	// User-global, lowest priority.
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		d, ok, err := readDoc(filepath.Join(home, ".neo", fileName))
 		if err != nil {
-			return nil, err
-		}
-		if ok {
+			loadErrs = append(loadErrs, err)
+		} else if ok {
 			docs = append(docs, d)
 		}
 	}
 
 	// Ancestor chain, added outermost → cwd so the most specific file wins by
-	// appearing last.
+	// appearing last. Unlike the explicitly user-owned global file above,
+	// repository files must stay inside the workspace after resolving symlinks.
+	root := workspace.Root(cwd)
 	dirs := workspace.Ancestors(cwd)
+	for len(dirs) > 0 && filepath.Clean(dirs[len(dirs)-1]) != filepath.Clean(root) {
+		dirs = dirs[:len(dirs)-1]
+	}
+	projectRoot, err := os.OpenRoot(root)
+	if err != nil {
+		loadErrs = append(loadErrs, fmt.Errorf("open workspace root %s: %w", root, err))
+		return docs, errors.Join(loadErrs...)
+	}
+	defer projectRoot.Close()
+
 	for i := len(dirs) - 1; i >= 0; i-- {
-		d, ok, err := readDoc(filepath.Join(dirs[i], fileName))
+		path := filepath.Join(dirs[i], fileName)
+		name, err := filepath.Rel(root, path)
 		if err != nil {
-			return nil, err
+			loadErrs = append(loadErrs, fmt.Errorf("resolve project instructions %s within workspace root %s: %w", path, root, err))
+			continue
+		}
+		d, ok, err := readRootedDoc(projectRoot, name, path)
+		if err != nil {
+			loadErrs = append(loadErrs, err)
+			continue
 		}
 		if ok {
 			docs = append(docs, d)
 		}
 	}
-	return docs, nil
+	return docs, errors.Join(loadErrs...)
+}
+
+// readRootedDoc reads a project instruction through an os.Root so symlink
+// validation and the read are one rooted operation. This prevents a repository
+// from swapping an accepted symlink to an escaping target between validation
+// and use.
+func readRootedDoc(root *os.Root, name, sourcePath string) (doc Doc, ok bool, err error) {
+	b, err := root.ReadFile(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Doc{}, false, nil
+		}
+		return Doc{}, false, fmt.Errorf("read project instructions %s: path must resolve within workspace root %s: %w", sourcePath, root.Name(), err)
+	}
+	content := strings.TrimSpace(string(b))
+	if content == "" {
+		return Doc{}, false, nil
+	}
+	return Doc{Path: sourcePath, Content: content}, true, nil
 }
 
 // readDoc reads a single instruction file. A missing or whitespace-only file

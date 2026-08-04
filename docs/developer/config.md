@@ -76,7 +76,7 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `agents_file` | `true` | Load AGENTS.md into the chat system prompt. |
+| `agents_file` | `true` | Load AGENTS.md into the chat system prompt. Project files are read through a rooted workspace boundary; unsafe files are skipped with a warning while safe and explicit user-global `~/.neo/AGENTS.md` instructions remain loaded. |
 | `skills` | `true` | Discover skills and expand $name references or /name slash invocations. |
 | `prompt_caching` | `true` | Mark the stable system prompt prefix as cacheable when the provider supports it. |
 

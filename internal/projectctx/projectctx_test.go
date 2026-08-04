@@ -86,6 +86,136 @@ func TestLoad_StopsAtRepoRoot(t *testing.T) {
 	}
 }
 
+func TestLoad_SkipsProjectSymlinkOutsideWorkspaceAndPreservesSafeDocs(t *testing.T) {
+	root, cwd, home := repo(t)
+	outside := filepath.Join(t.TempDir(), "outside-AGENTS.md")
+	const sentinel = "outside sentinel must never be loaded"
+	write(t, outside, sentinel)
+	write(t, filepath.Join(home, ".neo", "AGENTS.md"), "global rules")
+	write(t, filepath.Join(cwd, "AGENTS.md"), "local rules")
+	if err := os.Symlink(outside, filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	docs, err := Load(cwd)
+	if err == nil {
+		t.Fatal("expected escaping project AGENTS.md symlink to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must resolve within workspace root") {
+		t.Fatalf("error = %q, want clear workspace boundary error", err)
+	}
+	if len(docs) != 2 || docs[0].Content != "global rules" || docs[1].Content != "local rules" {
+		t.Fatalf("safe instructions were not preserved around unsafe project file: %v", docs)
+	}
+	for _, doc := range docs {
+		if strings.Contains(doc.Content, sentinel) {
+			t.Fatalf("outside sentinel produced project instructions: %v", docs)
+		}
+	}
+}
+
+func TestLoad_AllowsProjectSymlinkWithinWorkspace(t *testing.T) {
+	root, cwd, _ := repo(t)
+	write(t, filepath.Join(root, "docs", "instructions.md"), "in-workspace rules")
+	if err := os.Symlink(filepath.Join("docs", "instructions.md"), filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	docs, err := Load(cwd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(docs) != 1 || docs[0].Content != "in-workspace rules" {
+		t.Fatalf("expected in-workspace symlink rules, got %v", docs)
+	}
+	if docs[0].Path != filepath.Join(root, "AGENTS.md") {
+		t.Fatalf("instruction source = %q, want AGENTS.md symlink path", docs[0].Path)
+	}
+}
+
+func TestLoad_RootedReadDoesNotFollowSymlinkSwapOutsideWorkspace(t *testing.T) {
+	root, cwd, _ := repo(t)
+	const sentinel = "outside sentinel must never win a symlink race"
+	outside := filepath.Join(t.TempDir(), "outside-AGENTS.md")
+	write(t, outside, sentinel)
+	link := filepath.Join(root, "AGENTS.md")
+	write(t, link, "safe rules")
+
+	stop := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				done <- nil
+				return
+			default:
+			}
+			next := link + ".next"
+			if err := os.Remove(next); err != nil && !os.IsNotExist(err) {
+				done <- err
+				return
+			}
+			if i%2 == 0 {
+				if err := os.WriteFile(next, []byte("safe rules"), 0o644); err != nil {
+					done <- err
+					return
+				}
+			} else {
+				if err := os.Symlink(outside, next); err != nil {
+					done <- err
+					return
+				}
+			}
+			if err := os.Rename(next, link); err != nil {
+				done <- err
+				return
+			}
+		}
+	}()
+
+	var leaked bool
+	for range 500 {
+		docs, _ := Load(cwd)
+		for _, doc := range docs {
+			if strings.Contains(doc.Content, sentinel) {
+				leaked = true
+				break
+			}
+		}
+		if leaked {
+			break
+		}
+	}
+	close(stop)
+	if err := <-done; err != nil {
+		t.Fatalf("swap symlink: %v", err)
+	}
+	if leaked {
+		t.Fatal("rooted read followed a raced symlink outside the workspace")
+	}
+}
+
+func TestLoad_AllowsGlobalSymlinkOutsideWorkspace(t *testing.T) {
+	_, cwd, home := repo(t)
+	outside := filepath.Join(t.TempDir(), "global-AGENTS.md")
+	write(t, outside, "global rules")
+	if err := os.MkdirAll(filepath.Join(home, ".neo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".neo", "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	docs, err := Load(cwd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(docs) != 1 || docs[0].Content != "global rules" {
+		t.Fatalf("expected explicit global rules, got %v", docs)
+	}
+}
+
 func TestLoad_SkipsEmptyFiles(t *testing.T) {
 	root, cwd, _ := repo(t)
 	write(t, filepath.Join(root, "AGENTS.md"), "   \n\t\n")
@@ -96,6 +226,29 @@ func TestLoad_SkipsEmptyFiles(t *testing.T) {
 	}
 	if len(docs) != 0 {
 		t.Fatalf("expected empty file skipped, got %v", docs)
+	}
+}
+
+func TestLoad_WithoutRepoDoesNotReadAboveWorkingDirectory(t *testing.T) {
+	base := t.TempDir()
+	cwd := filepath.Join(base, "workspace")
+	home := filepath.Join(base, "home")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	write(t, filepath.Join(base, "AGENTS.md"), "outside workspace")
+	write(t, filepath.Join(cwd, "AGENTS.md"), "workspace rules")
+
+	docs, err := Load(cwd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(docs) != 1 || docs[0].Content != "workspace rules" {
+		t.Fatalf("expected only workspace rules, got %v", docs)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -100,5 +101,58 @@ func TestChatSystemPreservesAgentsWorkflowInstructions(t *testing.T) {
 	}
 	if !strings.Contains(system, instructions) {
 		t.Fatalf("AGENTS.md workflow was not preserved:\n%s", system)
+	}
+}
+
+func TestChatSystemWarnsAndExcludesEscapingAgentsSymlink(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "repo")
+	cwd := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(base, "home")
+	t.Setenv("HOME", home)
+	const global = "safe global instructions remain loaded"
+	if err := os.MkdirAll(filepath.Join(home, ".neo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".neo", "AGENTS.md"), []byte(global), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const local = "safe local instructions remain loaded"
+	if err := os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte(local), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const sentinel = "outside sentinel must never enter the system prompt"
+	outside := filepath.Join(base, "outside-AGENTS.md")
+	if err := os.WriteFile(outside, []byte(sentinel), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	var warnings bytes.Buffer
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, &warnings)
+
+	if strings.Contains(system, sentinel) {
+		t.Fatal("escaping AGENTS.md target entered the system prompt")
+	}
+	for _, safe := range []string{global, local} {
+		if !strings.Contains(system, safe) {
+			t.Fatalf("system prompt did not preserve %q", safe)
+		}
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("system blocks = %d, want base and safe instructions blocks", len(blocks))
+	}
+	for _, want := range []string{"warning: AGENTS.md:", "must resolve within workspace root"} {
+		if !strings.Contains(warnings.String(), want) {
+			t.Fatalf("warning %q does not contain %q", warnings.String(), want)
+		}
 	}
 }
