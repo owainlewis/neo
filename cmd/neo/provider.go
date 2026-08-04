@@ -135,6 +135,15 @@ func sessionBackend(cfg *config.Config, meta session.Metadata, errOut io.Writer)
 		return cfg.Provider, cfg.Model
 	}
 	savedProvider := sessionProviderID(meta.Provider)
+	if savedProvider == "openai" {
+		savedAuth := savedOpenAIAuth(meta)
+		configuredAuth := configuredOpenAIAuth(cfg)
+		if savedAuth != configuredAuth {
+			fmt.Fprintf(errOut, "warning: session OpenAI auth mode %s does not match configured %s; continuing with %s model %s\n",
+				savedAuth, configuredAuth, cfg.Provider, cfg.Model)
+			return cfg.Provider, cfg.Model
+		}
+	}
 	if savedProvider == cfg.Provider || providerCredentialPresent(cfg, savedProvider) {
 		return savedProvider, meta.Model
 	}
@@ -152,6 +161,33 @@ func sessionProviderID(adapterName string) string {
 		return "openai"
 	}
 	return adapterName
+}
+
+func adapterOpenAIAuth(adapterName string) string {
+	switch adapterName {
+	case "openai-codex":
+		return config.OpenAIAuthSubscription
+	case "openai":
+		return config.OpenAIAuthAPIKey
+	default:
+		return ""
+	}
+}
+
+func savedOpenAIAuth(meta session.Metadata) string {
+	if meta.OpenAIAuth != "" {
+		return meta.OpenAIAuth
+	}
+	// Before auth mode was persisted, openai-codex was written only by the
+	// subscription adapter and openai only by the API-key adapter.
+	return adapterOpenAIAuth(meta.Provider)
+}
+
+func configuredOpenAIAuth(cfg *config.Config) string {
+	if cfg.OpenAIAuth == config.OpenAIAuthSubscription {
+		return config.OpenAIAuthSubscription
+	}
+	return config.OpenAIAuthAPIKey
 }
 
 func modelChoices(ctx context.Context, cfg *config.Config, activeProvider string, errOut io.Writer) []tui.ModelChoice {

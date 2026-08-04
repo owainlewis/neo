@@ -30,9 +30,12 @@ type Metadata struct {
 	// Provider records which LLM backend produced this transcript. Transcripts
 	// can carry provider-specific blocks, so resume logic uses this to decide
 	// whether the saved model still applies.
-	Provider  string    `json:"provider,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Provider string `json:"provider,omitempty"`
+	// OpenAIAuth distinguishes the API-key and subscription adapters, whose
+	// model sets are not interchangeable.
+	OpenAIAuth string    `json:"openai_auth,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type Session struct {

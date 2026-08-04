@@ -285,6 +285,9 @@ func TestSaveChatSession_NormalizesCodexAdapterProviderForResume(t *testing.T) {
 	if got := loaded.Metadata.Provider; got != "openai" {
 		t.Fatalf("saved provider = %q, want stable provider ID openai", got)
 	}
+	if got := loaded.Metadata.OpenAIAuth; got != config.OpenAIAuthSubscription {
+		t.Fatalf("saved OpenAI auth = %q, want subscription", got)
+	}
 
 	cfg := &config.Config{
 		Provider:   "anthropic",
@@ -306,9 +309,34 @@ func TestSaveChatSession_NormalizesCodexAdapterProviderForResume(t *testing.T) {
 	if got := resumed.Name(); got != "openai-codex" {
 		t.Fatalf("resumed adapter = %q, want openai-codex", got)
 	}
+
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	apiConfig := &config.Config{
+		Provider:   "openai",
+		Model:      "gpt-5.2",
+		OpenAIAuth: config.OpenAIAuthAPIKey,
+	}
+	warnings.Reset()
+	provider, model = sessionBackend(apiConfig, loaded.Metadata, &warnings)
+	if provider != "openai" || model != "gpt-5.2" {
+		t.Fatalf("changed-auth backend = %s/%s, want configured openai/gpt-5.2", provider, model)
+	}
+	if !strings.Contains(warnings.String(), "subscription does not match configured api_key") {
+		t.Fatalf("changed-auth warning = %q", warnings.String())
+	}
+	resumed, err = chatSessionProvider(ctx, apiConfig, loaded, provider)
+	if err != nil {
+		t.Fatalf("API-key fallback provider: %v", err)
+	}
+	if got := resumed.Name(); got != "openai" {
+		t.Fatalf("fallback adapter = %q, want openai", got)
+	}
 }
 
 func TestSaveChatSession_PreservesOpenAIAPIProvider(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
 	ctx := context.Background()
 	store := session.NewStore(t.TempDir())
 	sess, err := store.Create(ctx, session.Metadata{Model: "gpt-5.2"})
@@ -333,20 +361,90 @@ func TestSaveChatSession_PreservesOpenAIAPIProvider(t *testing.T) {
 	if got := loaded.Metadata.Model; got != "gpt-5.2" {
 		t.Fatalf("saved API-key model = %q, want gpt-5.2", got)
 	}
-}
+	if got := loaded.Metadata.OpenAIAuth; got != config.OpenAIAuthAPIKey {
+		t.Fatalf("saved OpenAI auth = %q, want api_key", got)
+	}
 
-func TestSessionBackend_NormalizesLegacyCodexProvider(t *testing.T) {
-	cfg := &config.Config{Provider: "openai", Model: "gpt-5.2"}
-	meta := session.Metadata{Provider: "openai-codex", Model: "gpt-5-codex"}
+	apiConfig := &config.Config{
+		Provider:   "anthropic",
+		Model:      "claude-opus-4-8",
+		OpenAIAuth: config.OpenAIAuthAPIKey,
+	}
 	var warnings bytes.Buffer
-
-	provider, model := sessionBackend(cfg, meta, &warnings)
-
-	if provider != "openai" || model != "gpt-5-codex" {
-		t.Fatalf("session backend = %s/%s, want openai/gpt-5-codex", provider, model)
+	provider, model := sessionBackend(apiConfig, loaded.Metadata, &warnings)
+	if provider != "openai" || model != "gpt-5.2" {
+		t.Fatalf("session backend = %s/%s, want openai/gpt-5.2", provider, model)
 	}
 	if warnings.Len() != 0 {
-		t.Fatalf("legacy resume warning = %q, want none", warnings.String())
+		t.Fatalf("API-key resume warning = %q, want none", warnings.String())
+	}
+	resumed, err := chatSessionProvider(ctx, apiConfig, loaded, provider)
+	if err != nil {
+		t.Fatalf("resume API-key provider: %v", err)
+	}
+	if got := resumed.Name(); got != "openai" {
+		t.Fatalf("resumed adapter = %q, want openai", got)
+	}
+
+	authStore := auth.NewStore(filepath.Join(home, ".neo", "auth.json"))
+	if err := authStore.Set(auth.ProviderOpenAICodex, auth.Credentials{
+		AccessToken: "subscription-token",
+		ExpiresAt:   time.Now().Add(time.Hour),
+		AccountID:   "account-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	subscriptionConfig := &config.Config{
+		Provider:   "openai",
+		Model:      "gpt-5-codex",
+		OpenAIAuth: config.OpenAIAuthSubscription,
+	}
+	warnings.Reset()
+	provider, model = sessionBackend(subscriptionConfig, loaded.Metadata, &warnings)
+	if provider != "openai" || model != "gpt-5-codex" {
+		t.Fatalf("changed-auth backend = %s/%s, want configured openai/gpt-5-codex", provider, model)
+	}
+	if !strings.Contains(warnings.String(), "api_key does not match configured subscription") {
+		t.Fatalf("changed-auth warning = %q", warnings.String())
+	}
+	resumed, err = chatSessionProvider(ctx, subscriptionConfig, loaded, provider)
+	if err != nil {
+		t.Fatalf("subscription fallback provider: %v", err)
+	}
+	if got := resumed.Name(); got != "openai-codex" {
+		t.Fatalf("fallback adapter = %q, want openai-codex", got)
+	}
+}
+
+func TestSessionBackend_InfersLegacyOpenAIAuthMode(t *testing.T) {
+	tests := []struct {
+		name           string
+		metaProvider   string
+		configuredAuth string
+		wantModel      string
+		wantWarning    bool
+	}{
+		{name: "Codex under subscription", metaProvider: "openai-codex", configuredAuth: config.OpenAIAuthSubscription, wantModel: "saved-model"},
+		{name: "Codex under API key", metaProvider: "openai-codex", configuredAuth: config.OpenAIAuthAPIKey, wantModel: "configured-model", wantWarning: true},
+		{name: "OpenAI under API key", metaProvider: "openai", configuredAuth: config.OpenAIAuthAPIKey, wantModel: "saved-model"},
+		{name: "OpenAI under subscription", metaProvider: "openai", configuredAuth: config.OpenAIAuthSubscription, wantModel: "configured-model", wantWarning: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{Provider: "openai", Model: "configured-model", OpenAIAuth: tt.configuredAuth}
+			meta := session.Metadata{Provider: tt.metaProvider, Model: "saved-model"}
+			var warnings bytes.Buffer
+
+			provider, model := sessionBackend(cfg, meta, &warnings)
+
+			if provider != "openai" || model != tt.wantModel {
+				t.Fatalf("session backend = %s/%s, want openai/%s", provider, model, tt.wantModel)
+			}
+			if got := warnings.Len() > 0; got != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v: %q", got, tt.wantWarning, warnings.String())
+			}
+		})
 	}
 }
 

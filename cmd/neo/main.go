@@ -462,10 +462,12 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	if sess == nil {
 		var err error
+		adapterName := prov.Name()
 		sess, err = store.Create(ctx, session.Metadata{
-			CWD:      cwd,
-			Model:    model,
-			Provider: providerName,
+			CWD:        cwd,
+			Model:      model,
+			Provider:   sessionProviderID(adapterName),
+			OpenAIAuth: adapterOpenAIAuth(adapterName),
 		})
 		if err != nil {
 			fmt.Fprintf(streams.err, "create session: %v\n", err)
@@ -529,6 +531,7 @@ func saveChatSession(ctx context.Context, store *session.Store, sess *session.Se
 	sess.Metadata.CWD = cwd
 	sess.Metadata.Model = activeModel
 	sess.Metadata.Provider = sessionProviderID(activeProvider)
+	sess.Metadata.OpenAIAuth = adapterOpenAIAuth(activeProvider)
 	return store.Save(ctx, sess)
 }
 
