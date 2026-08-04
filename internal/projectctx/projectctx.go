@@ -59,7 +59,12 @@ func Load(cwd string) ([]Doc, error) {
 	for len(dirs) > 0 && filepath.Clean(dirs[len(dirs)-1]) != filepath.Clean(root) {
 		dirs = dirs[:len(dirs)-1]
 	}
-	projectRoot, err := os.OpenRoot(root)
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		loadErrs = append(loadErrs, fmt.Errorf("resolve workspace root %s: %w", root, err))
+		return docs, errors.Join(loadErrs...)
+	}
+	projectRoot, err := os.OpenRoot(realRoot)
 	if err != nil {
 		loadErrs = append(loadErrs, fmt.Errorf("open workspace root %s: %w", root, err))
 		return docs, errors.Join(loadErrs...)
@@ -68,9 +73,14 @@ func Load(cwd string) ([]Doc, error) {
 
 	for i := len(dirs) - 1; i >= 0; i-- {
 		path := filepath.Join(dirs[i], fileName)
-		name, err := filepath.Rel(root, path)
+		resolved, err := workspace.ResolveWithin(realRoot, path)
 		if err != nil {
-			loadErrs = append(loadErrs, fmt.Errorf("resolve project instructions %s within workspace root %s: %w", path, root, err))
+			loadErrs = append(loadErrs, fmt.Errorf("validate project instructions %s: %w", path, err))
+			continue
+		}
+		name, err := filepath.Rel(realRoot, resolved)
+		if err != nil {
+			loadErrs = append(loadErrs, fmt.Errorf("resolve project instructions %s within workspace root %s: %w", path, realRoot, err))
 			continue
 		}
 		d, ok, err := readRootedDoc(projectRoot, name, path)
@@ -85,10 +95,9 @@ func Load(cwd string) ([]Doc, error) {
 	return docs, errors.Join(loadErrs...)
 }
 
-// readRootedDoc reads a project instruction through an os.Root so symlink
-// validation and the read are one rooted operation. This prevents a repository
-// from swapping an accepted symlink to an escaping target between validation
-// and use.
+// readRootedDoc reads a validated target through an os.Root. ResolveWithin
+// selects the target, including for absolute in-workspace symlinks; the rooted
+// read ensures that replacing that target before use still cannot escape.
 func readRootedDoc(root *os.Root, name, sourcePath string) (doc Doc, ok bool, err error) {
 	b, err := root.ReadFile(name)
 	if err != nil {

@@ -150,7 +150,7 @@ func TestChatSystemWarnsAndExcludesEscapingAgentsSymlink(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("system blocks = %d, want base and safe instructions blocks", len(blocks))
 	}
-	for _, want := range []string{"warning: AGENTS.md:", "must resolve within workspace root"} {
+	for _, want := range []string{"warning: AGENTS.md:", "outside workspace root"} {
 		if !strings.Contains(warnings.String(), want) {
 			t.Fatalf("warning %q does not contain %q", warnings.String(), want)
 		}

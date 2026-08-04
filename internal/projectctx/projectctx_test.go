@@ -101,7 +101,7 @@ func TestLoad_SkipsProjectSymlinkOutsideWorkspaceAndPreservesSafeDocs(t *testing
 	if err == nil {
 		t.Fatal("expected escaping project AGENTS.md symlink to be rejected")
 	}
-	if !strings.Contains(err.Error(), "must resolve within workspace root") {
+	if !strings.Contains(err.Error(), "outside workspace root") {
 		t.Fatalf("error = %q, want clear workspace boundary error", err)
 	}
 	if len(docs) != 2 || docs[0].Content != "global rules" || docs[1].Content != "local rules" {
@@ -130,6 +130,23 @@ func TestLoad_AllowsProjectSymlinkWithinWorkspace(t *testing.T) {
 	}
 	if docs[0].Path != filepath.Join(root, "AGENTS.md") {
 		t.Fatalf("instruction source = %q, want AGENTS.md symlink path", docs[0].Path)
+	}
+}
+
+func TestLoad_AllowsAbsoluteProjectSymlinkWithinWorkspace(t *testing.T) {
+	root, cwd, _ := repo(t)
+	target := filepath.Join(root, "docs", "instructions.md")
+	write(t, target, "in-workspace rules")
+	if err := os.Symlink(target, filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	docs, err := Load(cwd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(docs) != 1 || docs[0].Content != "in-workspace rules" {
+		t.Fatalf("expected absolute in-workspace symlink rules, got %v", docs)
 	}
 }
 
