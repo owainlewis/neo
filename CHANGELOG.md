@@ -4,6 +4,23 @@ All notable changes to Neo will be documented in this file.
 
 ## Unreleased
 
+## [v0.6.2] - 2026-08-04
+
+### Security
+
+- Redacted Google and OpenRouter API keys everywhere Neo sanitizes provider
+  credentials, including verbose logs and nested payloads.
+- Rejected project `AGENTS.md` symlinks that resolve outside the workspace while
+  continuing to support symlinks whose targets remain inside it.
+
+### Fixed
+
+- Updated the embedded Anthropic default model to match the documented default.
+- Preserved the OpenAI provider identity in saved sessions so resumed chats use
+  the correct authentication mode.
+- Centralized `/clear` conversation reset so it clears the full conversation,
+  workflow, tool, image, and usage state consistently.
+
 ## [v0.6.1] - 2026-08-04
 
 ### Fixed
@@ -161,6 +178,7 @@ All notable changes to Neo will be documented in this file.
 
 - Initial public release.
 
+[v0.6.2]: https://github.com/owainlewis/neo/compare/v0.6.1...v0.6.2
 [v0.6.1]: https://github.com/owainlewis/neo/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/owainlewis/neo/compare/v0.5.1...v0.6.0
 [v0.5.1]: https://github.com/owainlewis/neo/compare/v0.5.0...v0.5.1
