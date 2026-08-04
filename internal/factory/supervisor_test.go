@@ -83,8 +83,9 @@ func TestEventLifecycleCarriesCallMetadata(t *testing.T) {
 		return "done", nil
 	}, testBudget())
 	call := tools.CallMetadata{ToolUseID: "call-a", GroupID: "group", GroupSize: 2, GroupPos: 1}
+	ctx := tools.WithConversationGeneration(context.Background(), 9)
 
-	if res := sup.RunAgentPrompt(context.Background(), dir, "review", PromptOptions{Mode: AgentModeInspect, Call: call}); !res.Ok {
+	if res := sup.RunAgentPrompt(ctx, dir, "review", PromptOptions{Mode: AgentModeInspect, Call: call}); !res.Ok {
 		t.Fatalf("run=%+v", res)
 	}
 	var kinds []string
@@ -92,7 +93,7 @@ func TestEventLifecycleCarriesCallMetadata(t *testing.T) {
 		select {
 		case ev := <-sup.Events:
 			kinds = append(kinds, ev.Ev.Kind)
-			if ev.Task != "review" || ev.CallID != "call-a" || ev.GroupID != "group" || ev.GroupSize != 2 || ev.GroupPos != 1 {
+			if ev.Generation != 9 || ev.Task != "review" || ev.CallID != "call-a" || ev.GroupID != "group" || ev.GroupSize != 2 || ev.GroupPos != 1 {
 				t.Fatalf("event=%+v", ev)
 			}
 		default:
