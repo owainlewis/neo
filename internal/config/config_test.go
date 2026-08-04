@@ -49,8 +49,8 @@ func TestLoad_FallsBackToEmbeddedWhenNoLocalConfig(t *testing.T) {
 		if cfg.Source() != "embedded" {
 			t.Fatalf("expected embedded source, got %q", cfg.Source())
 		}
-		if cfg.Model == "" {
-			t.Fatal("embedded config must default a model")
+		if cfg.Model != defaultModel {
+			t.Fatalf("embedded model: got %q want %q", cfg.Model, defaultModel)
 		}
 		if got := cfg.NamedPhases(); len(got) != 4 {
 			t.Fatalf("default phases = %d, want 4", len(got))

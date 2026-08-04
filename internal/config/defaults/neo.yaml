@@ -14,7 +14,7 @@ provider: anthropic
 #   subscription → uses a ChatGPT/Codex subscription via device-code auth; run `neo login`
 # openai_auth: api_key
 
-model: claude-opus-4-8
+model: claude-opus-5
 
 # Optional backend for chat-spawned subagents. When omitted, subagents follow
 # the coordinator's active provider and model, including changes from /model.

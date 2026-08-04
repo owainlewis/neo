@@ -20,7 +20,7 @@ provider: anthropic
 # OpenAI only: api_key uses OPENAI_API_KEY; subscription uses `neo login`.
 # openai_auth: api_key
 
-model: claude-opus-4-8
+model: claude-opus-5
 
 # Optional. When omitted, subagents follow the active provider and model.
 # subagents:
