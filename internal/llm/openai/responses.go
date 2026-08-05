@@ -197,8 +197,9 @@ type outputItem struct {
 	Raw     json.RawMessage `json:"-"`
 	Role    string          `json:"role"`
 	Content []struct {
-		Type string `json:"type"` // output_text
-		Text string `json:"text"`
+		Type    string `json:"type"` // output_text | refusal
+		Text    string `json:"text"`
+		Refusal string `json:"refusal"`
 	} `json:"content"`
 
 	// type == "function_call"
@@ -333,8 +334,15 @@ func toResponse(out apiResponse) (*llm.Response, error) {
 		case "message":
 			var text strings.Builder
 			for _, p := range item.Content {
-				if p.Type == "output_text" {
+				switch p.Type {
+				case "output_text":
 					text.WriteString(p.Text)
+				case "refusal":
+					if p.Refusal != "" {
+						text.WriteString(p.Refusal)
+					} else {
+						text.WriteString("The model refused to provide a response.")
+					}
 				}
 			}
 			if text.Len() > 0 {

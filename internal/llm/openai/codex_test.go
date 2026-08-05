@@ -122,6 +122,31 @@ data: [DONE]
 	}
 }
 
+func TestCodex_StreamRefusalIsReturnedAsText(t *testing.T) {
+	raw := []byte(`event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","status":"completed","content":[{"type":"refusal","refusal":"I cannot help with that request."}]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":5,"output_tokens":4}}}
+
+data: [DONE]
+`)
+
+	resp, err := parseCodexStream(raw)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if resp.StopReason != "end_turn" {
+		t.Fatalf("stop reason: got %q want end_turn", resp.StopReason)
+	}
+	if len(resp.Content) != 1 || resp.Content[0].Type != "text" || resp.Content[0].Text != "I cannot help with that request." {
+		t.Fatalf("refusal was not surfaced as text: %+v", resp.Content)
+	}
+	if resp.Usage.InputTokens != 5 || resp.Usage.OutputTokens != 4 {
+		t.Fatalf("usage not preserved: %+v", resp.Usage)
+	}
+}
+
 func TestCodex_StreamIncompleteReturnsMaxTokens(t *testing.T) {
 	raw := []byte(`event: response.output_item.done
 data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"partial"}]}}

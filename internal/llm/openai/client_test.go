@@ -48,6 +48,41 @@ func TestComplete_HappyPath(t *testing.T) {
 	}
 }
 
+func TestComplete_RefusalIsReturnedAsText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"I cannot help with that request."}]}]}`))
+	}))
+	defer srv.Close()
+
+	resp, err := newTestClient(srv).Complete(context.Background(), llm.Request{Model: "m"})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if resp.StopReason != "end_turn" {
+		t.Fatalf("stop reason: got %q want end_turn", resp.StopReason)
+	}
+	if len(resp.Content) != 1 || resp.Content[0].Type != "text" || resp.Content[0].Text != "I cannot help with that request." {
+		t.Fatalf("refusal was not surfaced as text: %+v", resp.Content)
+	}
+}
+
+func TestToResponse_EmptyRefusalIsNotBlankSuccess(t *testing.T) {
+	raw := []byte(`{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":""}]}]}`)
+	var out apiResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	resp, err := toResponse(out)
+	if err != nil {
+		t.Fatalf("toResponse: %v", err)
+	}
+	if len(resp.Content) != 1 || resp.Content[0].Type != "text" || resp.Content[0].Text == "" {
+		t.Fatalf("empty refusal became blank success: %+v", resp.Content)
+	}
+}
+
 func TestComplete_ToolCallRoundTrip(t *testing.T) {
 	var captured apiRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
