@@ -2,9 +2,12 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,7 +19,14 @@ import (
 	"github.com/owainlewis/neo/internal/workspace"
 )
 
-const defaultSearchMax = 200
+const (
+	defaultSearchMax     = 200
+	maxGrepLineBytes     = 4 * 1024 * 1024
+	maxGrepTextBytes     = 16 * 1024
+	grepTruncationMarker = "...[truncated]..."
+)
+
+var errBinaryFile = errors.New("binary file")
 
 type grepResult struct {
 	Matches   []grepMatch `json:"matches"`
@@ -118,7 +128,10 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 				}
 				return out, ctxErr
 			}
-			continue
+			if errors.Is(err, errBinaryFile) {
+				continue
+			}
+			return "", fmt.Errorf("grep %s: %w", displayPath(displayRoot, file), err)
 		}
 		for i, line := range lines {
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -129,7 +142,8 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 				}
 				return out, ctxErr
 			}
-			if !re.MatchString(line) {
+			matchLocation := re.FindStringIndex(line)
+			if matchLocation == nil {
 				continue
 			}
 			if len(result.Matches) >= maxMatches {
@@ -140,15 +154,15 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 			match := grepMatch{
 				Path: displayPath(displayRoot, file),
 				Line: i + 1,
-				Text: line,
+				Text: boundedGrepText(line, matchLocation[0]),
 			}
 			beforeStart := max(0, i-contextLines)
 			for n := beforeStart; n < i; n++ {
-				match.ContextBefore = append(match.ContextBefore, grepContextLine{Line: n + 1, Text: lines[n]})
+				match.ContextBefore = append(match.ContextBefore, grepContextLine{Line: n + 1, Text: boundedGrepText(lines[n], -1)})
 			}
 			afterEnd := min(len(lines), i+contextLines+1)
 			for n := i + 1; n < afterEnd; n++ {
-				match.ContextAfter = append(match.ContextAfter, grepContextLine{Line: n + 1, Text: lines[n]})
+				match.ContextAfter = append(match.ContextAfter, grepContextLine{Line: n + 1, Text: boundedGrepText(lines[n], -1)})
 			}
 			result.Matches = append(result.Matches, match)
 		}
@@ -283,7 +297,7 @@ func filesUnder(ctx context.Context, path string) ([]string, error) {
 			return err
 		}
 		if err != nil {
-			return nil
+			return fmt.Errorf("walk %s: %w", displayPath(path, p), err)
 		}
 		if d.IsDir() {
 			if shouldSkipDir(d.Name()) && p != path {
@@ -307,20 +321,72 @@ func readTextLines(ctx context.Context, path string) ([]string, error) {
 		return nil, err
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024), MaxReadBytes)
+	r := bufio.NewReader(f)
 	var lines []string
-	for sc.Scan() {
+	var line []byte
+	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		line := sc.Text()
-		if strings.ContainsRune(line, 0) {
-			return nil, fmt.Errorf("binary file")
+		fragment, err := r.ReadSlice('\n')
+		if bytes.IndexByte(fragment, 0) >= 0 {
+			return nil, errBinaryFile
 		}
-		lines = append(lines, line)
+		fragmentContentBytes := len(fragment)
+		if err == nil && fragmentContentBytes > 0 && fragment[fragmentContentBytes-1] == '\n' {
+			fragmentContentBytes--
+			if fragmentContentBytes > 0 && fragment[fragmentContentBytes-1] == '\r' {
+				fragmentContentBytes--
+			}
+		}
+		if fragmentContentBytes > maxGrepLineBytes-len(line) {
+			return nil, fmt.Errorf("line %d exceeds grep limit of %d bytes", len(lines)+1, maxGrepLineBytes)
+		}
+		line = append(line, fragment...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+		if len(line) > 0 || err == nil {
+			line = bytes.TrimSuffix(line, []byte{'\n'})
+			line = bytes.TrimSuffix(line, []byte{'\r'})
+			lines = append(lines, string(line))
+			line = line[:0]
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
 	}
-	return lines, sc.Err()
+	return lines, nil
+}
+
+// boundedGrepText keeps tool output predictable while grep searches the full
+// contents of lines within its input limit. A match excerpt is centered on the
+// first match; context excerpts retain both ends of the source line.
+func boundedGrepText(line string, focus int) string {
+	if len(line) <= maxGrepTextBytes {
+		return line
+	}
+	payloadBytes := maxGrepTextBytes - 2*len(grepTruncationMarker)
+	if focus < 0 {
+		headBytes := payloadBytes / 2
+		tailBytes := payloadBytes - headBytes
+		return line[:headBytes] + grepTruncationMarker + line[len(line)-tailBytes:]
+	}
+	start := max(0, focus-payloadBytes/2)
+	start = min(start, len(line)-payloadBytes)
+	end := start + payloadBytes
+	var excerpt strings.Builder
+	if start > 0 {
+		excerpt.WriteString(grepTruncationMarker)
+	}
+	excerpt.WriteString(line[start:end])
+	if end < len(line) {
+		excerpt.WriteString(grepTruncationMarker)
+	}
+	return excerpt.String()
 }
 
 func displayPath(root, path string) string {

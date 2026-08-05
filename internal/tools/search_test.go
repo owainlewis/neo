@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -61,6 +63,109 @@ func TestGrepReturnsJSONForNoMatches(t *testing.T) {
 	got := decodeGrepResult(t, out)
 	if got.Count != 0 || got.Truncated || len(got.Matches) != 0 {
 		t.Fatalf("grep no-match result = %#v, want empty non-truncated JSON", got)
+	}
+}
+
+func TestGrepFindsMatchBeyondPreviousLineLimit(t *testing.T) {
+	root := t.TempDir()
+	longPrefix := strings.Repeat("x", MaxReadBytes+1024)
+	writeSearchFile(t, filepath.Join(root, "long.txt"), longPrefix+"needle\n")
+
+	out, err := (Grep{Root: root}).Run(context.Background(), map[string]any{"pattern": "needle"})
+	if err != nil {
+		t.Fatalf("grep long line: %v", err)
+	}
+	got := decodeGrepResult(t, out)
+	if got.Count != 1 || len(got.Matches) != 1 {
+		t.Fatalf("count/matches = %d/%d, want 1/1: %#v", got.Count, len(got.Matches), got)
+	}
+	match := got.Matches[0]
+	if match.Path != "long.txt" || match.Line != 1 || !strings.Contains(match.Text, "needle") {
+		t.Fatalf("match = %#v, want bounded line 1 excerpt containing needle", match)
+	}
+	if len(match.Text) > maxGrepTextBytes {
+		t.Fatalf("match text length = %d, want at most %d", len(match.Text), maxGrepTextBytes)
+	}
+}
+
+func TestGrepRejectsOversizedLinesWithoutUnboundedBuffering(t *testing.T) {
+	root := t.TempDir()
+	writeSearchFile(t, filepath.Join(root, "oversized.txt"), strings.Repeat("x", maxGrepLineBytes+1))
+
+	_, err := (Grep{Root: root}).Run(context.Background(), map[string]any{"pattern": "needle"})
+	if err == nil {
+		t.Fatal("expected grep to reject an oversized line")
+	}
+	for _, want := range []string{"oversized.txt", "line 1", fmt.Sprint(maxGrepLineBytes)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err, want)
+		}
+	}
+}
+
+func TestGrepBoundsLongContextLines(t *testing.T) {
+	root := t.TempDir()
+	writeSearchFile(t, filepath.Join(root, "context.txt"), strings.Repeat("x", MaxReadBytes+1024)+"\nneedle\n")
+
+	out, err := (Grep{Root: root}).Run(context.Background(), map[string]any{
+		"pattern":       "needle",
+		"context_lines": 1.0,
+	})
+	if err != nil {
+		t.Fatalf("grep long context: %v", err)
+	}
+	got := decodeGrepResult(t, out)
+	if got.Count != 1 || len(got.Matches[0].ContextBefore) != 1 {
+		t.Fatalf("grep result = %#v, want one match with one context line", got)
+	}
+	if contextText := got.Matches[0].ContextBefore[0].Text; len(contextText) > maxGrepTextBytes {
+		t.Fatalf("context text length = %d, want at most %d", len(contextText), maxGrepTextBytes)
+	}
+}
+
+func TestGrepSurfacesFileReadFailures(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "blocked.txt")
+	writeSearchFile(t, path, "needle\n")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.Open(path); err == nil {
+		f.Close()
+		t.Skip("current user can read files regardless of their mode")
+	}
+
+	_, err := (Grep{Root: root}).Run(context.Background(), map[string]any{
+		"pattern": "absent",
+		"path":    "blocked.txt",
+	})
+	if err == nil {
+		t.Fatal("expected grep to surface the file read failure")
+	}
+	if !strings.Contains(err.Error(), "blocked.txt") {
+		t.Fatalf("error = %q, want failed path", err)
+	}
+}
+
+func TestFilesUnderPropagatesRecursiveTraversalFailures(t *testing.T) {
+	root := t.TempDir()
+	blocked := filepath.Join(root, "blocked")
+	writeSearchFile(t, filepath.Join(blocked, "needle.txt"), "needle\n")
+	if err := os.Chmod(blocked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+	if entries, err := os.ReadDir(blocked); err == nil {
+		_ = entries
+		t.Skip("current user can traverse directories regardless of their mode")
+	}
+
+	_, err := filesUnder(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected recursive traversal failure")
+	}
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("error = %q, want failed directory path", err)
 	}
 }
 
