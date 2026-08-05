@@ -16,6 +16,13 @@ Neo exposes a small built-in tool surface to the model.
 Independent inspect calls issued in one model response can run concurrently.
 Inspect children receive only `read_file`, `grep`, and `glob`.
 
+Recursive `grep` discovery and file reads use a rooted filesystem handle anchored
+to the resolved workspace root. A discovered symlink that escapes that root is
+rejected with an explicit error, including when an ordinary file is replaced by
+an escaping symlink between discovery and reading. Relative and absolute
+symlinks whose targets remain inside the workspace are searched under the link's
+displayed path.
+
 ## Execution and confirmations
 
 Neo relies on its VM or sandbox for security boundaries. Interactive users can

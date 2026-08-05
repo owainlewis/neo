@@ -95,6 +95,16 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	root, err := os.OpenRoot(displayRoot)
+	if err != nil {
+		return "", fmt.Errorf("open grep workspace root %s: %w", displayRoot, err)
+	}
+	defer root.Close()
+	targetName, err := filepath.Rel(displayRoot, target)
+	if err != nil {
+		return "", fmt.Errorf("resolve grep target %s within workspace root %s: %w", target, displayRoot, err)
+	}
+	targetName = filepath.ToSlash(targetName)
 	contextLines := optInt(input, "context_lines")
 	if contextLines < 0 {
 		contextLines = 0
@@ -104,7 +114,7 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 		maxMatches = defaultSearchMax
 	}
 
-	files, err := filesUnder(ctx, target)
+	files, err := filesUnder(ctx, root, targetName)
 	if err != nil {
 		return "", err
 	}
@@ -118,7 +128,7 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 			}
 			return out, err
 		}
-		lines, err := readTextLines(ctx, file)
+		lines, err := readTextLines(ctx, root, file.openPath)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				result.Count = len(result.Matches)
@@ -131,7 +141,7 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 			if errors.Is(err, errBinaryFile) {
 				continue
 			}
-			return "", fmt.Errorf("grep %s: %w", displayPath(displayRoot, file), err)
+			return "", fmt.Errorf("grep %s: %w", file.path, err)
 		}
 		for i, line := range lines {
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -152,7 +162,7 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 				return encodeSearchResult(result)
 			}
 			match := grepMatch{
-				Path: displayPath(displayRoot, file),
+				Path: file.path,
 				Line: i + 1,
 				Text: boundedGrepText(line, matchLocation[0]),
 			}
@@ -280,43 +290,60 @@ func scopedPath(root, path string) (string, error) {
 	return workspace.ResolveWithin(root, path)
 }
 
-func filesUnder(ctx context.Context, path string) ([]string, error) {
+type grepFile struct {
+	path     string
+	openPath string
+}
+
+func filesUnder(ctx context.Context, root *os.Root, path string) ([]grepFile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(path)
+	info, err := fs.Stat(root.FS(), path)
 	if err != nil {
 		return nil, err
 	}
 	if !info.IsDir() {
-		return []string{path}, nil
+		return []grepFile{{path: path, openPath: path}}, nil
 	}
-	var files []string
-	err = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+	var files []grepFile
+	err = fs.WalkDir(root.FS(), path, func(p string, d fs.DirEntry, err error) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if err != nil {
-			return fmt.Errorf("walk %s: %w", displayPath(path, p), err)
+			return fmt.Errorf("walk %s: %w", p, err)
 		}
 		if d.IsDir() {
 			if shouldSkipDir(d.Name()) && p != path {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
-		files = append(files, p)
+		file := grepFile{path: p, openPath: p}
+		if d.Type()&fs.ModeSymlink != 0 {
+			resolved, err := workspace.ResolveWithin(root.Name(), filepath.Join(root.Name(), filepath.FromSlash(p)))
+			if err != nil {
+				return fmt.Errorf("resolve discovered path %s within workspace root %s: %w", p, root.Name(), err)
+			}
+			openPath, err := filepath.Rel(root.Name(), resolved)
+			if err != nil {
+				return fmt.Errorf("resolve discovered path %s within workspace root %s: %w", p, root.Name(), err)
+			}
+			file.openPath = filepath.ToSlash(openPath)
+		}
+		files = append(files, file)
 		return nil
 	})
-	sort.Strings(files)
+	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 	return files, err
 }
 
-func readTextLines(ctx context.Context, path string) ([]string, error) {
+func readTextLines(ctx context.Context, root *os.Root, path string) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(path)
+	f, err := root.Open(filepath.FromSlash(path))
 	if err != nil {
 		return nil, err
 	}

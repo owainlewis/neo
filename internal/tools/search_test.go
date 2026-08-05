@@ -160,7 +160,17 @@ func TestFilesUnderPropagatesRecursiveTraversalFailures(t *testing.T) {
 		t.Skip("current user can traverse directories regardless of their mode")
 	}
 
-	_, err := filesUnder(context.Background(), root)
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchRoot, err := os.OpenRoot(canonicalRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer searchRoot.Close()
+
+	_, err = filesUnder(context.Background(), searchRoot, ".")
 	if err == nil {
 		t.Fatal("expected recursive traversal failure")
 	}
@@ -249,6 +259,177 @@ func TestSearchToolsRejectSymlinkEscape(t *testing.T) {
 		"path":    filepath.Join(root, "link"),
 	}); err == nil {
 		t.Fatal("expected glob symlink escape error")
+	}
+}
+
+func TestGrepRejectsDiscoveredSymlinkOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	const sentinel = "outside sentinel must never be returned by grep"
+	writeSearchFile(t, filepath.Join(root, "safe.txt"), "safe contents")
+	writeSearchFile(t, outside, sentinel)
+	escape, err := filepath.Rel(root, outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(escape, filepath.Join(root, "leak.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (Grep{Root: root}).Run(context.Background(), map[string]any{
+		"pattern": "sentinel",
+	})
+	if err == nil {
+		t.Fatal("expected grep to reject a discovered symlink outside the workspace")
+	}
+	if !strings.Contains(err.Error(), "leak.txt") {
+		t.Fatalf("error = %q, want escaping symlink path", err)
+	}
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("grep returned outside sentinel: %q", out)
+	}
+}
+
+func TestGrepAllowsDiscoveredSymlinkWithinWorkspace(t *testing.T) {
+	root := t.TempDir()
+	writeSearchFile(t, filepath.Join(root, "data", "safe.txt"), "internal needle")
+	if err := os.Symlink(filepath.Join("data", "safe.txt"), filepath.Join(root, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (Grep{Root: root}).Run(context.Background(), map[string]any{
+		"pattern": "needle",
+	})
+	if err != nil {
+		t.Fatalf("grep internal symlink: %v", err)
+	}
+	got := decodeGrepResult(t, out)
+	if got.Count != 2 {
+		t.Fatalf("grep result = %#v, want target and internal symlink matches", got)
+	}
+	paths := []string{got.Matches[0].Path, got.Matches[1].Path}
+	if want := []string{"data/safe.txt", "link.txt"}; !reflect.DeepEqual(paths, want) {
+		t.Fatalf("match paths = %v, want %v", paths, want)
+	}
+}
+
+func TestGrepAllowsDiscoveredAbsoluteSymlinkWithinWorkspace(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "data", "safe.txt")
+	writeSearchFile(t, target, "internal needle")
+	if err := os.Symlink(target, filepath.Join(root, "absolute-link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (Grep{Root: root}).Run(context.Background(), map[string]any{
+		"pattern": "needle",
+	})
+	if err != nil {
+		t.Fatalf("grep absolute internal symlink: %v", err)
+	}
+	got := decodeGrepResult(t, out)
+	if got.Count != 2 {
+		t.Fatalf("grep result = %#v, want target and absolute internal symlink matches", got)
+	}
+	paths := []string{got.Matches[0].Path, got.Matches[1].Path}
+	if want := []string{"absolute-link.txt", "data/safe.txt"}; !reflect.DeepEqual(paths, want) {
+		t.Fatalf("match paths = %v, want %v", paths, want)
+	}
+}
+
+func TestRootedGrepReadUsesResolvedTargetAfterLinkSwap(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "safe.txt")
+	writeSearchFile(t, target, "safe contents")
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchRoot, err := os.OpenRoot(canonicalRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer searchRoot.Close()
+	files, err := filesUnder(context.Background(), searchRoot, ".")
+	if err != nil {
+		t.Fatalf("discover files: %v", err)
+	}
+	var discovered grepFile
+	for _, file := range files {
+		if file.path == "link.txt" {
+			discovered = file
+			break
+		}
+	}
+	if discovered.path == "" || discovered.openPath != "safe.txt" {
+		t.Fatalf("discovered link = %#v, want display link.txt opened as safe.txt", discovered)
+	}
+
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	const sentinel = "outside sentinel must never win a link swap"
+	writeSearchFile(t, outside, sentinel)
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	escape, err := filepath.Rel(root, outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(escape, link); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, err := readTextLines(context.Background(), searchRoot, discovered.openPath)
+	if err != nil {
+		t.Fatalf("read resolved target: %v", err)
+	}
+	if got := strings.Join(lines, "\n"); got != "safe contents" || strings.Contains(got, sentinel) {
+		t.Fatalf("rooted read = %q, want safe resolved target", got)
+	}
+}
+
+func TestRootedGrepReadRejectsFileSwappedToOutsideSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	const sentinel = "outside sentinel must never win a symlink race"
+	writeSearchFile(t, outside, sentinel)
+	victim := filepath.Join(root, "victim.txt")
+	writeSearchFile(t, victim, "safe contents")
+
+	searchRoot, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer searchRoot.Close()
+	files, err := filesUnder(context.Background(), searchRoot, ".")
+	if err != nil {
+		t.Fatalf("discover files: %v", err)
+	}
+	if want := []grepFile{{path: "victim.txt", openPath: "victim.txt"}}; !reflect.DeepEqual(files, want) {
+		t.Fatalf("discovered files = %v, want %v", files, want)
+	}
+
+	if err := os.Remove(victim); err != nil {
+		t.Fatal(err)
+	}
+	escape, err := filepath.Rel(root, outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(escape, victim); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := readTextLines(context.Background(), searchRoot, files[0].openPath)
+	if err == nil {
+		t.Fatal("expected rooted read to reject the raced symlink")
+	}
+	if strings.Contains(strings.Join(lines, "\n"), sentinel) {
+		t.Fatalf("rooted read returned outside sentinel: %q", lines)
 	}
 }
 
