@@ -144,6 +144,30 @@ func TestFailedTurnReturnsQueuedFollowUpToComposer(t *testing.T) {
 	}
 }
 
+func TestFailedSaveReturnsQueuedFollowUpToComposer(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	m.busySince = time.Now()
+	m.pendingSteering = []string{"already applied"}
+	m.queued = &queuedTurn{displayText: "review the result", agentText: "review the result"}
+	m.input.SetValue("draft")
+
+	m.Update(sendResultMsg{saveAttempted: true, saveErr: context.DeadlineExceeded})
+
+	if m.busy {
+		t.Fatal("failed save started the queued follow-up")
+	}
+	if m.queued != nil {
+		t.Fatalf("failed-save queue was not cleared: %#v", m.queued)
+	}
+	if got, want := m.input.Value(), "review the result\ndraft"; got != want {
+		t.Fatalf("composer = %q, want %q", got, want)
+	}
+	if got := plain(m.viewportContent()); !strings.Contains(got, "queued follow-up returned to the composer") {
+		t.Fatalf("failed-save queue recovery is not visible:\n%s", got)
+	}
+}
+
 func TestFailedTurnRecoversInputInSubmissionOrder(t *testing.T) {
 	m := makeTestModel()
 	m.busy = true

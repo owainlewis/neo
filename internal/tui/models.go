@@ -77,10 +77,14 @@ func (m *model) closeModelBrowser() {
 }
 
 func (m *model) handleModelBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "ctrl+d":
-		m.quitting = true
-		return m, tea.Quit
+	key := msg.String()
+	if key == "ctrl+c" || key == "ctrl+d" {
+		return m, m.requestQuit()
+	}
+	if m.quitPending {
+		return m, nil
+	}
+	switch key {
 	case "esc":
 		m.closeModelBrowser()
 	case "up":
@@ -145,11 +149,9 @@ func (m *model) selectCurrentModel() {
 		m.ag.SetModel(choice.ID)
 	}
 	m.modelTag = choice.ID
-	if m.afterSend != nil {
-		if err := m.afterSend(); err != nil {
-			m.models.err = err
-			return
-		}
+	if err := m.persistSession(); err != nil {
+		m.models.err = err
+		return
 	}
 	m.blocks = append(m.blocks, noticeBlock{text: "model: " + backendLabel(m.providerTag, choice.ID)})
 	m.closeModelBrowser()

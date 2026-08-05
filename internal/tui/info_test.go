@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -281,6 +282,7 @@ func TestSlashCommand_ModelAndClear(t *testing.T) {
 
 func TestSlashCommand_ClearSavesSession(t *testing.T) {
 	m := makeTestModel()
+	m.persistenceErr = fmt.Errorf("stale save failure")
 	calls := 0
 	m.afterSend = func() error {
 		calls++
@@ -292,12 +294,16 @@ func TestSlashCommand_ClearSavesSession(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("afterSend calls = %d, want 1", calls)
 	}
+	if m.persistenceErr != nil {
+		t.Fatalf("persistence error after successful clear save = %v, want nil", m.persistenceErr)
+	}
 }
 
 func TestSlashCommand_ClearShowsSaveError(t *testing.T) {
 	m := makeTestModel()
+	saveErr := fmt.Errorf("save failed")
 	m.afterSend = func() error {
-		return fmt.Errorf("save failed")
+		return saveErr
 	}
 
 	m.handleSlashCommand("/clear")
@@ -311,6 +317,9 @@ func TestSlashCommand_ClearShowsSaveError(t *testing.T) {
 	}
 	if !strings.Contains(eb.err.Error(), "save failed") {
 		t.Fatalf("unexpected error: %v", eb.err)
+	}
+	if !errors.Is(m.persistenceErr, saveErr) {
+		t.Fatalf("persistence error = %v, want %v", m.persistenceErr, saveErr)
 	}
 }
 

@@ -27,3 +27,15 @@ func TestPasteMsgUpdatesInputHeight(t *testing.T) {
 		t.Fatalf("expected paste to grow input height above %d, got %d", before, m.lastInputHeight)
 	}
 }
+
+func TestPasteMsgIsIgnoredWhileQuitIsPending(t *testing.T) {
+	m := makeTestModel()
+	m.input.SetValue("keep this draft")
+	m.quitPending = true
+
+	m.Update(tea.PasteMsg{Content: "discarded paste"})
+
+	if got := m.input.Value(); got != "keep this draft" {
+		t.Fatalf("composer changed during pending quit: %q", got)
+	}
+}

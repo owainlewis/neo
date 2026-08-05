@@ -37,7 +37,7 @@
 - `neo login` prints the OpenAI Codex device-code URL and one-time code, then stores refreshable subscription credentials in `~/.neo/auth.json` with file permissions intended to protect secrets.
 - `neo logout` deletes the stored OpenAI subscription credential entry.
 - Resuming a session attempts to change into the saved session cwd. If unavailable, Neo warns and stays in the current directory.
-- Session saves happen after each user turn through the TUI `WithAfterSend` callback.
+- Session saves happen after each user turn through the TUI `WithAfterSend` callback. When an interactive quit interrupts an active turn, Neo cancels the turn and waits for this save before exiting. If the save fails, Neo keeps the TUI open and lets the user retry by quitting again. A second interrupt while cancellation or a retry is pending forces an immediate exit.
 
 ## Process Boundary
 
