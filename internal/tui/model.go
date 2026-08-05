@@ -159,7 +159,12 @@ func programOptions(opts Options) []tea.ProgramOption {
 	return options
 }
 
-type sendResultMsg struct{ err error }
+type sendResultMsg struct {
+	err           error
+	saveErr       error
+	saveAttempted bool
+}
+type persistenceRetryResultMsg struct{ err error }
 type agentEventMsg struct{ ev agent.Event }
 type stepEventMsg struct{ ev factory.Event }
 type workflowEventMsg struct{ ev workflow.Event }
@@ -226,6 +231,8 @@ type model struct {
 	treeIndex       map[int]*treeBlock // supervisor node id -> the block holding it
 	approval        *approvalState
 	quitting        bool
+	quitPending     bool
+	persistenceErr  error
 
 	// cancel for the currently in-flight Send, if any.
 	sendCancel      context.CancelFunc
@@ -387,7 +394,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleKey(msg))
 
 	case tea.PasteMsg:
-		if m.models.visible || m.approval != nil {
+		if m.models.visible || m.approval != nil || m.quitPending {
 			break
 		}
 		cmds = append(cmds, m.updateInput(msg))
@@ -442,27 +449,53 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if summary, ok := m.resultSummary(msg.err, elapsed); ok {
 			m.appendBlock(summary)
 		}
+		if msg.saveAttempted {
+			m.recordPersistenceResult(msg.saveErr)
+			if msg.saveErr != nil {
+				m.appendBlock(errorBlock{err: fmt.Errorf("save session: %w", msg.saveErr)})
+			}
+		}
 		cmds = append(cmds, refreshBranch())
-		if msg.err != nil {
-			var recovered []string
-			if len(m.pendingSteering) > 0 {
-				recovered = append(recovered, m.pendingSteering...)
-				m.appendBlock(noticeBlock{text: "unapplied steering returned to the composer"})
-			}
-			if m.queued != nil {
-				recovered = append(recovered, m.queued.displayText)
-				m.queued = nil
-				m.appendBlock(noticeBlock{text: "queued follow-up returned to the composer"})
-			}
+		var recovered []string
+		if msg.err != nil && len(m.pendingSteering) > 0 {
+			recovered = append(recovered, m.pendingSteering...)
+			m.appendBlock(noticeBlock{text: "unapplied steering returned to the composer"})
+		}
+		if (msg.err != nil || msg.saveErr != nil) && m.queued != nil {
+			recovered = append(recovered, m.queued.displayText)
+			m.queued = nil
+			m.appendBlock(noticeBlock{text: "queued follow-up returned to the composer"})
+		}
+		if len(recovered) > 0 {
 			m.restoreInput(recovered...)
 		}
 		m.pendingSteering = nil
+		if m.quitPending {
+			if m.persistenceErr != nil {
+				m.quitPending = false
+				m.appendBlock(noticeBlock{text: "quit canceled because the session was not saved; press ctrl+c to retry"})
+				break
+			}
+			m.quitting = true
+			return m, tea.Quit
+		}
 		if m.queued != nil { // a successful turn starts its single follow-up
 			queued := m.queued
 			m.queued = nil
 			m.appendBlock(noticeBlock{text: "starting queued follow-up"})
 			cmds = append(cmds, m.submitUserTurn(queued.displayText, queued.agentText, queued.images))
 		}
+
+	case persistenceRetryResultMsg:
+		m.recordPersistenceResult(msg.err)
+		if msg.err != nil {
+			m.quitPending = false
+			m.appendBlock(errorBlock{err: fmt.Errorf("save session: %w", msg.err)})
+			m.appendBlock(noticeBlock{text: "quit canceled because the session was not saved; press ctrl+c to retry"})
+			break
+		}
+		m.quitting = true
+		return m, tea.Quit
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -640,10 +673,8 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 		m.openModelBrowser()
 	case "/clear":
 		m.resetConversation()
-		if m.afterSend != nil {
-			if err := m.afterSend(); err != nil {
-				m.appendBlock(errorBlock{err: err})
-			}
+		if err := m.persistSession(); err != nil {
+			m.appendBlock(errorBlock{err: err})
 		}
 	default:
 		if definition, ok := phase.Find(m.phases, cmd); ok {
@@ -1474,13 +1505,30 @@ func (m *model) startSend(displayText, text string, images []string) tea.Cmd {
 	logx.Debug("tui send start", "images", len(images), "text", logx.SafeString(text, 240))
 	return func() tea.Msg {
 		_, err := m.ag.SendWithDisplay(ctx, text, displayText, images)
-		if m.afterSend != nil {
-			if saveErr := m.afterSend(); saveErr != nil && err == nil {
-				err = saveErr
-			}
-		}
-		return sendResultMsg{err: err}
+		result := sendResultMsg{err: err}
+		result.saveAttempted, result.saveErr = runPersistence(m.afterSend)
+		return result
 	}
+}
+
+func (m *model) persistSession() error {
+	attempted, err := runPersistence(m.afterSend)
+	if !attempted {
+		return nil
+	}
+	m.recordPersistenceResult(err)
+	return err
+}
+
+func (m *model) recordPersistenceResult(err error) {
+	m.persistenceErr = err
+}
+
+func runPersistence(afterSend func() error) (bool, error) {
+	if afterSend == nil {
+		return false, nil
+	}
+	return true, afterSend()
 }
 
 func (m *model) startTool(name string, input map[string]any) tea.Cmd {

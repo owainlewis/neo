@@ -9,14 +9,14 @@ import (
 )
 
 func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "ctrl+c", "ctrl+d":
-		logx.Debug("tui quit requested", "busy", m.busy)
-		if m.sendCancel != nil {
-			m.sendCancel()
-		}
-		m.quitting = true
-		return tea.Quit
+	key := msg.String()
+	if key == "ctrl+c" || key == "ctrl+d" {
+		return m.requestQuit()
+	}
+	if m.quitPending {
+		return nil
+	}
+	switch key {
 	case "esc":
 		m.handleEscape()
 	case "ctrl+enter":
@@ -79,11 +79,7 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) tea.Cmd {
 	case "ctrl+c", "ctrl+d":
 		logx.Debug("tui quit during approval", "tool", m.approval.req.ToolName)
 		m.finishApproval(false)
-		if m.sendCancel != nil {
-			m.sendCancel()
-		}
-		m.quitting = true
-		return tea.Quit
+		return m.requestQuit()
 	case "y", "Y":
 		m.finishApproval(true)
 	case "pgup":
@@ -98,6 +94,33 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) tea.Cmd {
 		m.finishApproval(false)
 	}
 	return nil
+}
+
+func (m *model) requestQuit() tea.Cmd {
+	logx.Debug("tui quit requested", "busy", m.busy, "pending", m.quitPending)
+	if m.quitPending {
+		m.quitting = true
+		return tea.Quit
+	}
+	if m.busy {
+		m.quitPending = true
+		if m.sendCancel != nil {
+			m.sendCancel()
+		}
+		m.appendBlock(noticeBlock{text: "canceling turn and saving session; press ctrl+c again to force quit"})
+		return nil
+	}
+	if m.persistenceErr != nil && m.afterSend != nil {
+		m.quitPending = true
+		m.appendBlock(noticeBlock{text: "retrying session save; press ctrl+c again to force quit"})
+		afterSend := m.afterSend
+		return func() tea.Msg {
+			_, err := runPersistence(afterSend)
+			return persistenceRetryResultMsg{err: err}
+		}
+	}
+	m.quitting = true
+	return tea.Quit
 }
 
 func (m *model) handleEscape() {

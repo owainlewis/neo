@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -36,6 +37,7 @@ func TestSlashCommand_ModelOpensSearchableBrowser(t *testing.T) {
 
 func TestModelBrowser_EnterSelectsModelAndSaves(t *testing.T) {
 	m := makeTestModel()
+	m.persistenceErr = fmt.Errorf("stale save failure")
 	m.modelChoices = normalizeModelChoices("test", []ModelChoice{
 		{ID: "gpt-5.2", Name: "GPT-5.2"},
 	})
@@ -66,6 +68,9 @@ func TestModelBrowser_EnterSelectsModelAndSaves(t *testing.T) {
 	if saveCalls != 2 {
 		t.Fatalf("saveCalls = %d, want 2", saveCalls)
 	}
+	if m.persistenceErr != nil {
+		t.Fatalf("persistence error after successful model save = %v, want nil", m.persistenceErr)
+	}
 	out := plain(m.viewportContent())
 	if !strings.Contains(out, "model: gpt-5.2") {
 		t.Fatalf("selection notice missing: %s", out)
@@ -75,7 +80,8 @@ func TestModelBrowser_EnterSelectsModelAndSaves(t *testing.T) {
 func TestModelBrowser_SaveErrorKeepsBrowserOpen(t *testing.T) {
 	m := makeTestModel()
 	m.modelChoices = normalizeModelChoices("test", []ModelChoice{{ID: "gpt-5.2"}})
-	m.afterSend = func() error { return fmt.Errorf("save failed") }
+	saveErr := fmt.Errorf("save failed")
+	m.afterSend = func() error { return saveErr }
 
 	m.handleSlashCommand("/model")
 	m.handleModelBrowserKey(keyPress(tea.KeyDown))
@@ -86,6 +92,9 @@ func TestModelBrowser_SaveErrorKeepsBrowserOpen(t *testing.T) {
 	}
 	if m.models.err == nil || !strings.Contains(m.models.err.Error(), "save failed") {
 		t.Fatalf("expected save error, got %v", m.models.err)
+	}
+	if !errors.Is(m.persistenceErr, saveErr) {
+		t.Fatalf("persistence error = %v, want %v", m.persistenceErr, saveErr)
 	}
 }
 
