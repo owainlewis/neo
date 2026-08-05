@@ -27,9 +27,9 @@ Opaque data is owned by its destination adapter and is never assumed to be
 portable:
 
 - Anthropic rebuilds supported content blocks without any opaque replay data.
-- OpenAI only replays Responses API reasoning items with the required ID,
-  summary array, and encrypted content. Incomplete, malformed, and
-  non-reasoning raw items are ignored.
+- OpenAI only replays Responses API reasoning items with the required ID and
+  encrypted content. An optional summary must be an array. Incomplete,
+  malformed, and non-reasoning raw items are ignored.
 - Gemini only replays raw parts that decode as Gemini thought metadata or the
   matching Gemini function call.
 

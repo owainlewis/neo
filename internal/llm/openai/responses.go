@@ -126,8 +126,11 @@ func replayableRawItem(raw json.RawMessage) bool {
 	if meta.Type != "reasoning" || meta.ID == "" || meta.EncryptedContent == "" {
 		return false
 	}
+	if len(meta.Summary) == 0 {
+		return true
+	}
 	var summary []json.RawMessage
-	return len(meta.Summary) > 0 && json.Unmarshal(meta.Summary, &summary) == nil && summary != nil
+	return json.Unmarshal(meta.Summary, &summary) == nil && summary != nil
 }
 
 // apiTool is a Responses tool. Note the flat shape (name/description/parameters

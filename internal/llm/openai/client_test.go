@@ -176,6 +176,21 @@ func TestToInput_ReplaysRawReasoningBeforeToolResult(t *testing.T) {
 	}
 }
 
+func TestToInput_ReplaysEncryptedReasoningWithoutSummary(t *testing.T) {
+	reasoning := json.RawMessage(`{"type":"reasoning","id":"rs_without_summary","encrypted_content":"secret"}`)
+	items := toInput(llm.Request{Messages: []llm.Message{{
+		Role: llm.RoleAssistant,
+		Content: []llm.ContentBlock{{
+			Type: "raw",
+			Raw:  reasoning,
+		}},
+	}}})
+
+	if len(items) != 1 || string(items[0].Raw) != string(reasoning) {
+		t.Fatalf("encrypted reasoning without summary was not replayed: %+v", items)
+	}
+}
+
 func TestToInput_SkipsUnencryptedReasoning(t *testing.T) {
 	req := llm.Request{
 		Messages: []llm.Message{
@@ -209,7 +224,6 @@ func TestToInput_SkipsForeignAndMalformedRawItems(t *testing.T) {
 				{Type: "raw", Raw: json.RawMessage(`{"thought":true,"thoughtSignature":"gemini-private"}`)},
 				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning"`)},
 				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","summary":[],"encrypted_content":"secret"}`)},
-				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":"rs_missing_summary","encrypted_content":"secret"}`)},
 				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":"rs_null_summary","summary":null,"encrypted_content":"secret"}`)},
 				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":"rs_object_summary","summary":{},"encrypted_content":"secret"}`)},
 				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":123,"summary":[],"encrypted_content":"secret"}`)},
