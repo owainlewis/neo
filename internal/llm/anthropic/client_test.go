@@ -296,7 +296,8 @@ func TestComplete_StripsForeignRawBlocksFromMessages(t *testing.T) {
 		Messages []struct {
 			Role    string `json:"role"`
 			Content []struct {
-				Type string `json:"type"`
+				Type string          `json:"type"`
+				Raw  json.RawMessage `json:"raw"`
 			} `json:"content"`
 		} `json:"messages"`
 	}
@@ -309,33 +310,43 @@ func TestComplete_StripsForeignRawBlocksFromMessages(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// A transcript resumed from an OpenAI session: the assistant message
-	// carries an opaque "raw" reasoning block alongside its text, plus a
-	// raw-only message that must disappear entirely.
+	// A transcript resumed from a Gemini session: neutral text and tool blocks
+	// carry opaque Gemini replay metadata, plus a raw-only thought block. The
+	// neutral history must survive without any foreign wire data.
 	_, err := newTestClient(srv).Complete(context.Background(), llm.Request{
 		Model: "m",
 		Messages: []llm.Message{
 			{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "hi"}}},
 			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
-				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","encrypted_content":"abc"}`)},
-				{Type: "text", Text: "hello"},
+				{Type: "raw", Raw: json.RawMessage(`{"thought":true,"thoughtSignature":"private"}`)},
+				{Type: "text", Text: "hello", Raw: json.RawMessage(`{"text":"hello","thoughtSignature":"text-signature"}`)},
+				{Type: "tool_use", ID: "call_1", Name: "read", Input: map[string]any{"path": "README.md"}, Raw: json.RawMessage(`{"functionCall":{"name":"read","args":{"path":"README.md"}},"thoughtSignature":"tool-signature"}`)},
 			}},
-			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
-				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning"}`)},
+			{Role: llm.RoleUser, Content: []llm.ContentBlock{
+				{Type: "tool_result", ToolUseID: "call_1", Content: "Neo"},
 			}},
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{
+				Type: "raw", Raw: json.RawMessage(`{"thought":true,"thoughtSignature":"tail"}`),
+			}}},
 		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	if len(captured.Messages) != 2 {
-		t.Fatalf("messages sent = %d, want 2 (raw-only message dropped)", len(captured.Messages))
+	if len(captured.Messages) != 3 {
+		t.Fatalf("messages sent = %d, want 3 (raw-only message dropped)", len(captured.Messages))
 	}
 	for _, m := range captured.Messages {
 		for _, b := range m.Content {
-			if b.Type == "raw" {
-				t.Fatal("raw block leaked into the Anthropic request")
+			if b.Type == "raw" || len(b.Raw) > 0 {
+				t.Fatalf("foreign raw data leaked into the Anthropic request: %+v", b)
 			}
 		}
+	}
+	if got := captured.Messages[1].Content; len(got) != 2 || got[0].Type != "text" || got[1].Type != "tool_use" {
+		t.Fatalf("provider-neutral assistant history was not preserved: %+v", got)
+	}
+	if got := captured.Messages[2].Content; len(got) != 1 || got[0].Type != "tool_result" {
+		t.Fatalf("provider-neutral tool result was not preserved: %+v", got)
 	}
 }
