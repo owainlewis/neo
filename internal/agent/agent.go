@@ -322,13 +322,14 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			"provider", provider.Name(),
 			"model", model,
 		)
-		compacted, err := compactor.Compact(ctx, a.messages)
+		compaction, err := compactor.Compact(ctx, a.messages)
+		a.usage = addUsage(a.usage, compaction.Usage)
 		if err != nil {
 			logx.Debug("agent compaction error", "turn", turn+1, "error", err.Error())
 			a.emit(Event{Kind: EventError, Err: err})
 			return "", err
 		}
-		a.messages = compacted
+		a.messages = compaction.Messages
 		resp, err := provider.Complete(ctx, llm.Request{
 			Model:        model,
 			System:       a.cfg.System,

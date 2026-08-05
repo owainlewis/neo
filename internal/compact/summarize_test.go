@@ -29,12 +29,15 @@ func TestSummarizer_BelowTriggerIsNoOp(t *testing.T) {
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1_000_000, KeepRecent: 2}
 
 	msgs := turns(10)
-	out, err := s.Compact(context.Background(), msgs)
+	result, err := s.Compact(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(out) != len(msgs) {
-		t.Fatalf("messages changed below trigger: got %d, want %d", len(out), len(msgs))
+	if len(result.Messages) != len(msgs) {
+		t.Fatalf("messages changed below trigger: got %d, want %d", len(result.Messages), len(msgs))
+	}
+	if result.Usage != (llm.Usage{}) {
+		t.Fatalf("usage below trigger = %+v, want zero", result.Usage)
 	}
 	if len(prov.Calls) != 0 {
 		t.Fatalf("provider called %d times below trigger, want 0", len(prov.Calls))
@@ -51,13 +54,19 @@ func TestTriggerTokensForContextWindow(t *testing.T) {
 }
 
 func TestSummarizer_CompactsOldTurnsIntoSummary(t *testing.T) {
-	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("the summary")}}
+	summaryResponse := llmtest.Text("the summary")
+	summaryResponse.Usage = llm.Usage{InputTokens: 11, OutputTokens: 12, CacheCreationTokens: 13, CacheReadTokens: 14}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{summaryResponse}}
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1, KeepRecent: 4}
 
 	msgs := turns(12)
-	out, err := s.Compact(context.Background(), msgs)
+	result, err := s.Compact(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	out := result.Messages
+	if result.Usage != summaryResponse.Usage {
+		t.Fatalf("compaction usage = %+v, want %+v", result.Usage, summaryResponse.Usage)
 	}
 
 	// Split lands on the user turn at index 8: one summary message plus the
@@ -96,8 +105,12 @@ func TestSummarizer_ProviderErrorPropagates(t *testing.T) {
 	prov := &llmtest.FakeProvider{} // no scripted responses → Complete errors
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1, KeepRecent: 2}
 
-	if _, err := s.Compact(context.Background(), turns(10)); err == nil {
+	result, err := s.Compact(context.Background(), turns(10))
+	if err == nil {
 		t.Fatal("expected summarization error to propagate")
+	}
+	if result.Usage != (llm.Usage{}) {
+		t.Fatalf("provider error usage = %+v, want zero without a response", result.Usage)
 	}
 }
 
@@ -111,20 +124,26 @@ func TestSummarizer_NoSafeSplitLeavesTranscriptAlone(t *testing.T) {
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: "t1", Content: filler}}},
 		assistantText(filler),
 	}
-	out, err := s.Compact(context.Background(), msgs)
+	result, err := s.Compact(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(out) != len(msgs) || len(prov.Calls) != 0 {
+	if len(result.Messages) != len(msgs) || len(prov.Calls) != 0 {
 		t.Fatal("transcript with no safe split point should be left unchanged")
 	}
 }
 
 func TestSummarizer_EmptySummaryIsAnError(t *testing.T) {
-	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("")}}
+	response := llmtest.Text("")
+	response.Usage = llm.Usage{InputTokens: 21, OutputTokens: 1}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{response}}
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1, KeepRecent: 2}
 
-	if _, err := s.Compact(context.Background(), turns(10)); err == nil {
+	result, err := s.Compact(context.Background(), turns(10))
+	if err == nil {
 		t.Fatal("expected error when summarization returns no text")
+	}
+	if result.Usage != response.Usage {
+		t.Fatalf("failed compaction usage = %+v, want %+v", result.Usage, response.Usage)
 	}
 }

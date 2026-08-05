@@ -43,6 +43,11 @@ Session files store aggregate token usage alongside the transcript:
 | `cache_creation_tokens` | Prompt-cache tokens written by providers that report them. |
 | `cache_read_tokens` | Prompt-cache tokens read by providers that report them. |
 
+The aggregate includes usage returned by normal answer calls and
+context-compaction calls. A compaction response is counted even when its summary
+is unusable and the turn fails, because the provider call still occurred.
+Provider failures that return no response have no reported usage to add.
+
 Older session files without `usage` load as zero usage. Resumed
 sessions continue accumulating from the saved totals. Clearing a transcript also
 clears the saved usage and conversation-scoped TUI activity for that session.

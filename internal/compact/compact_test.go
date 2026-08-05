@@ -10,12 +10,15 @@ import (
 
 func TestNoCompactionPreservesMessages(t *testing.T) {
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "hi"}}}}
-	got, err := NoCompaction{}.Compact(context.Background(), msgs)
+	result, err := NoCompaction{}.Compact(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("compact: %v", err)
 	}
-	if !reflect.DeepEqual(got, msgs) {
-		t.Fatalf("NoCompaction changed messages: %#v", got)
+	if !reflect.DeepEqual(result.Messages, msgs) {
+		t.Fatalf("NoCompaction changed messages: %#v", result.Messages)
+	}
+	if result.Usage != (llm.Usage{}) {
+		t.Fatalf("NoCompaction usage = %+v, want zero", result.Usage)
 	}
 }
 

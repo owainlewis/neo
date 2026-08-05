@@ -62,7 +62,7 @@ func TriggerTokensForContextWindow(contextWindowTokens int) int {
 	return int(float64(contextWindowTokens) * triggerRatio)
 }
 
-func (s Summarizer) Compact(ctx context.Context, messages []llm.Message) ([]llm.Message, error) {
+func (s Summarizer) Compact(ctx context.Context, messages []llm.Message) (Result, error) {
 	trigger := s.TriggerTokens
 	if trigger <= 0 {
 		trigger = TriggerTokensForContextWindow(DefaultContextWindowTokens)
@@ -72,30 +72,30 @@ func (s Summarizer) Compact(ctx context.Context, messages []llm.Message) ([]llm.
 		keep = DefaultKeepRecent
 	}
 	if len(messages) <= keep || EstimateTokens(messages) < trigger {
-		return messages, nil
+		return Result{Messages: messages}, nil
 	}
 	split := SafeSplitPoint(messages, len(messages)-keep)
 	if split <= 0 {
 		// No safe boundary to cut at; leave the transcript alone rather than
 		// risk orphaning a tool_result.
-		return messages, nil
+		return Result{Messages: messages}, nil
 	}
-	summary, err := s.summarize(ctx, messages[:split])
+	summary, usage, err := s.summarize(ctx, messages[:split])
 	if err != nil {
-		return nil, fmt.Errorf("compact transcript: %w", err)
+		return Result{Usage: usage}, fmt.Errorf("compact transcript: %w", err)
 	}
 	out := make([]llm.Message, 0, len(messages)-split+1)
 	out = append(out, llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{{
 		Type: "text",
 		Text: summaryPreamble + summary,
 	}}})
-	return append(out, messages[split:]...), nil
+	return Result{Messages: append(out, messages[split:]...), Usage: usage}, nil
 }
 
 // summarize asks the provider for a summary of head by appending a user
 // instruction. head always ends just before a fresh user turn, so appending a
 // user message keeps roles alternating.
-func (s Summarizer) summarize(ctx context.Context, head []llm.Message) (string, error) {
+func (s Summarizer) summarize(ctx context.Context, head []llm.Message) (string, llm.Usage, error) {
 	msgs := make([]llm.Message, 0, len(head)+1)
 	msgs = append(msgs, head...)
 	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{{
@@ -107,7 +107,10 @@ func (s Summarizer) summarize(ctx context.Context, head []llm.Message) (string, 
 		Messages: msgs,
 	})
 	if err != nil {
-		return "", err
+		if resp != nil {
+			return "", resp.Usage, err
+		}
+		return "", llm.Usage{}, err
 	}
 	var b strings.Builder
 	for _, blk := range resp.Content {
@@ -117,9 +120,9 @@ func (s Summarizer) summarize(ctx context.Context, head []llm.Message) (string, 
 	}
 	text := strings.TrimSpace(b.String())
 	if text == "" {
-		return "", errors.New("summarization returned no text")
+		return "", resp.Usage, errors.New("summarization returned no text")
 	}
-	return text, nil
+	return text, resp.Usage, nil
 }
 
 // EstimateTokens approximates the token count of a transcript at ~4 characters

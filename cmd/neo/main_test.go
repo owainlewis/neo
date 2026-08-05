@@ -15,6 +15,7 @@ import (
 	"github.com/owainlewis/neo/internal/auth"
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
+	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/google"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/llm/openai"
@@ -413,6 +414,55 @@ func TestSaveChatSession_PreservesOpenAIAPIProvider(t *testing.T) {
 	}
 	if got := resumed.Name(); got != "openai-codex" {
 		t.Fatalf("fallback adapter = %q, want openai-codex", got)
+	}
+}
+
+func TestSaveChatSession_PersistsCompactionAndAnswerUsage(t *testing.T) {
+	ctx := context.Background()
+	store := session.NewStore(t.TempDir())
+	sess, err := store.Create(ctx, session.Metadata{Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	summary := llmtest.Text("summary")
+	summary.Usage = llm.Usage{InputTokens: 10, OutputTokens: 20, CacheCreationTokens: 30, CacheReadTokens: 40}
+	answer := llmtest.Text("answer")
+	answer.Usage = llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{summary, answer}}
+	messages := make([]llm.Message, 0, 10)
+	for i := 0; i < 10; i++ {
+		role := llm.RoleUser
+		if i%2 == 1 {
+			role = llm.RoleAssistant
+		}
+		messages = append(messages, llm.Message{Role: role, Content: []llm.ContentBlock{{Type: "text", Text: strings.Repeat("x", 400)}}})
+	}
+	ag := agent.New(agent.Config{
+		Model:    "test-model",
+		Provider: prov,
+		Messages: messages,
+		Compactor: compact.Summarizer{
+			Provider:      prov,
+			Model:         "test-model",
+			TriggerTokens: 1,
+			KeepRecent:    2,
+		},
+	})
+	if _, err := ag.Send(ctx, "continue"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if err := saveChatSession(ctx, store, sess, ag, "/workspace"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	loaded, err := store.Load(ctx, sess.Metadata.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	want := llm.Usage{InputTokens: 11, OutputTokens: 22, CacheCreationTokens: 33, CacheReadTokens: 44}
+	if loaded.Usage != want {
+		t.Fatalf("persisted usage = %+v, want summary plus answer exactly once: %+v", loaded.Usage, want)
 	}
 }
 
