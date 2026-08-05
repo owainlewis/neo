@@ -82,6 +82,21 @@ func TestCtrlEnterQueuesOneFollowUpAndStartsItAfterTurn(t *testing.T) {
 	}
 }
 
+func TestQueuedFollowUpPreservesMultilineFormatting(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	input := "review this:\n\n```go\n\treturn nil\n```"
+
+	m.queueFollowUp(input)
+
+	if m.queued == nil {
+		t.Fatal("follow-up was not queued")
+	}
+	if got := m.queued.agentText; got != input {
+		t.Fatalf("queued agent text = %q, want %q", got, input)
+	}
+}
+
 func TestEscapeCancelsAndReturnsQueuedFollowUpToComposer(t *testing.T) {
 	m := makeTestModel()
 	m.busy = true

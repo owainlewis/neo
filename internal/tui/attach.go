@@ -30,17 +30,23 @@ var dragPathToken = regexp.MustCompile(`file://\S+|'[^']+'|"[^"]+"|(?:[^\s\\]|\\
 // untouched in the returned text. This is what turns "drag an image into the
 // box" — which most terminals deliver as a pasted path — into an attachment.
 func extractImagePaths(input string) (text string, paths []string) {
-	var kept []string
-	for _, tok := range dragPathToken.FindAllString(input, -1) {
+	var kept strings.Builder
+	last := 0
+	for _, match := range dragPathToken.FindAllStringIndex(input, -1) {
+		tok := input[match[0]:match[1]]
 		p, ok := imageCandidate(tok)
 		if !ok {
-			kept = append(kept, tok)
 			continue
 		}
+		kept.WriteString(input[last:match[0]])
 		paths = append(paths, p)
+		last = match[1]
 	}
-	text = strings.TrimSpace(strings.Join(kept, " "))
-	return text, paths
+	if len(paths) == 0 {
+		return input, nil
+	}
+	kept.WriteString(input[last:])
+	return kept.String(), paths
 }
 
 // imageCandidate normalizes a single token and reports whether it points at an
