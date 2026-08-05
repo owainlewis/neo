@@ -33,20 +33,20 @@ normal Go test, so CI checks it without running timing benchmarks.
 
 ## Baseline
 
-The baseline below was captured on Go 1.25.8 on Darwin/arm64. Compare like with
+The baseline below was captured on Go 1.25.12 on Darwin/arm64. Compare like with
 like: the same Go version, OS, architecture, and an otherwise idle machine.
 To reproduce it when another Go version is active, run
-`GOTOOLCHAIN=go1.25.8 just performance`.
+`GOTOOLCHAIN=go1.25.12 just performance`.
 
 | Measurement | Baseline |
 | --- | ---: |
-| Stripped binary | 16,322,418 bytes |
-| Base prompt size | 1,519 bytes |
-| Base prompt | ~575 ns/op |
-| Base prompt allocation | 1,560 B/op, 2 allocs/op |
-| Workflow render | ~256,000 ns/op |
-| Workflow render allocation | 20,851 B/op, 548 allocs/op |
-| Tool catalogue | ~3,230 ns/op |
+| Stripped binary | 16,273,714 bytes |
+| Base prompt size | 2,013 bytes |
+| Base prompt | ~2,480 ns/op |
+| Base prompt allocation | 6,973 B/op, 15 allocs/op |
+| Workflow render | ~249,000 ns/op |
+| Workflow render allocation | 24,277 B/op, 664 allocs/op |
+| Tool catalogue | ~3,980 ns/op |
 | Tool catalogue allocation | 10,032 B/op, 70 allocs/op |
 
 Timing and allocation numbers are informational. There are no timing thresholds
