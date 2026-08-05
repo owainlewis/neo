@@ -53,6 +53,11 @@ output:
 #       Inspect the requested security boundary and verify any fixes.
 ```
 
+The compaction window applies consistently to the coordinator and child
+agents. Children that follow the coordinator use the active model after a
+`/model` switch while retaining this configured window. Omitting the setting
+keeps the built-in 200,000-token estimate for both.
+
 The embedded source, including annotated provider examples, is
 [`internal/config/defaults/neo.yaml`](https://github.com/owainlewis/neo/blob/main/internal/config/defaults/neo.yaml).
 

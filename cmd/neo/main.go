@@ -457,7 +457,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		var at factory.AgentTool
 		workerProvider, workerModel, followsCoordinator := subagentBackend(ctx, cfg, prov, model)
 		agentRunnerFollowsCoordinator = followsCoordinator
-		at, stepEvents, agentRunner = chatAgentTool(workerProvider, workerModel, cwd, root)
+		at, stepEvents, agentRunner = chatAgentTool(workerProvider, workerModel, cwd, root, cfg)
 		extra = append(extra, at)
 	}
 	reg := newRegistry(cwd, root, extra...)
@@ -538,11 +538,11 @@ func saveChatSession(ctx context.Context, store *session.Store, sess *session.Se
 }
 
 func chatCompactor(prov llm.Provider, model string, cfg *config.Config) compact.Compactor {
-	s := compact.NewSummarizer(prov, model)
-	if cfg != nil && cfg.Compaction.ContextWindowTokens > 0 {
-		s.TriggerTokens = compact.TriggerTokensForContextWindow(cfg.Compaction.ContextWindowTokens)
+	contextWindowTokens := 0
+	if cfg != nil {
+		contextWindowTokens = cfg.Compaction.ContextWindowTokens
 	}
-	return s
+	return compact.NewSummarizerForContextWindow(prov, model, contextWindowTokens)
 }
 
 func sessionMetadata(sess *session.Session) session.Metadata {

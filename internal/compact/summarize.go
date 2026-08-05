@@ -53,6 +53,17 @@ func NewSummarizer(p llm.Provider, model string) Summarizer {
 	return Summarizer{Provider: p, Model: model}
 }
 
+// NewSummarizerForContextWindow builds a Summarizer whose trigger is derived
+// from an optional context-window override. A non-positive override preserves
+// NewSummarizer's default behavior.
+func NewSummarizerForContextWindow(p llm.Provider, model string, contextWindowTokens int) Summarizer {
+	s := NewSummarizer(p, model)
+	if contextWindowTokens > 0 {
+		s.TriggerTokens = TriggerTokensForContextWindow(contextWindowTokens)
+	}
+	return s
+}
+
 // TriggerTokensForContextWindow returns the estimated transcript size at which
 // compaction should run for a model context window.
 func TriggerTokensForContextWindow(contextWindowTokens int) int {
@@ -92,18 +103,27 @@ func (s Summarizer) Compact(ctx context.Context, messages []llm.Message) (Result
 	return Result{Messages: append(out, messages[split:]...), Usage: usage}, nil
 }
 
-// summarize asks the provider for a summary of head by appending a user
-// instruction. head always ends just before a fresh user turn, so appending a
-// user message keeps roles alternating.
+// summarize asks the provider for a summary of head. A head ending before a
+// fresh user turn gets a user instruction. A head ending in a completed tool
+// exchange gets the instruction through the system prompt so its role sequence
+// remains provider-valid.
 func (s Summarizer) summarize(ctx context.Context, head []llm.Message) (string, llm.Usage, error) {
 	msgs := make([]llm.Message, 0, len(head)+1)
 	msgs = append(msgs, head...)
-	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{{
-		Type: "text", Text: summaryInstruction,
-	}}})
+	system := summarySystem
+	if len(head) > 0 && hasToolResult(head[len(head)-1]) {
+		// A completed tool exchange already ends in a user-role tool_result.
+		// Put the instruction in the system prompt so the summary request keeps
+		// the provider-valid assistant tool_use/user tool_result sequence.
+		system += "\n\n" + summaryInstruction
+	} else {
+		msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{{
+			Type: "text", Text: summaryInstruction,
+		}}})
+	}
 	resp, err := s.Provider.Complete(ctx, llm.Request{
 		Model:    s.Model,
-		System:   summarySystem,
+		System:   system,
 		Messages: msgs,
 	})
 	if err != nil {
