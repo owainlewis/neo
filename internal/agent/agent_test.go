@@ -896,6 +896,185 @@ func TestAgent_MaxOutputTokensEndsTurnWithPartialText(t *testing.T) {
 	}
 }
 
+func TestAgent_RefusalEndsTurnAfterOneProviderCall(t *testing.T) {
+	toolCalled := false
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content: []llm.ContentBlock{
+				{Type: "text", Text: "I cannot help with that request."},
+				{Type: "tool_use", ID: "call_1", Name: "mutate", Input: map[string]any{}},
+			},
+			StopReason: "refusal",
+		},
+		llmtest.Text("Follow-up response."),
+	}}
+	ag := newTestAgent(t, prov, recordingTool{name: "mutate", called: &toolCalled})
+
+	out, err := ag.Send(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "I cannot help with that request." {
+		t.Fatalf("refusal text = %q", out)
+	}
+	if got := len(prov.Calls); got != 1 {
+		t.Fatalf("provider calls = %d, want 1", got)
+	}
+	if toolCalled {
+		t.Fatal("tool from refusal response was executed")
+	}
+	transcript := ag.Transcript()
+	assertToolUseResultsPaired(t, transcript)
+	if got := transcript[len(transcript)-1].Content[0].Text; got != out {
+		t.Fatalf("transcript refusal = %q, want %q", got, out)
+	}
+
+	followUp, err := ag.Send(context.Background(), "safe follow-up")
+	if err != nil {
+		t.Fatalf("follow-up send: %v", err)
+	}
+	if followUp != "Follow-up response." {
+		t.Fatalf("follow-up response = %q", followUp)
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_RefusalAppliesAcceptedSteering(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	prov := &blockingFirstProvider{
+		started: started,
+		release: release,
+		responses: []llm.Response{
+			{
+				Content:    []llm.ContentBlock{{Type: "text", Text: "I cannot help with that request."}},
+				StopReason: "refusal",
+			},
+			llmtest.Text("Revised answer."),
+		},
+	}
+	ag := newTestAgent(t, prov)
+	done := make(chan error, 1)
+	go func() {
+		_, err := ag.Send(context.Background(), "start")
+		done <- err
+	}()
+
+	<-started
+	if !ag.Steer("answer a safe version instead") {
+		t.Fatal("active refusal turn rejected steering")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if got := len(prov.calls); got != 2 {
+		t.Fatalf("provider calls = %d, want 2", got)
+	}
+	messages := prov.calls[1].Messages
+	last := messages[len(messages)-1]
+	if last.Role != llm.RoleUser || len(last.Content) != 1 || last.Content[0].Text != "answer a safe version instead" {
+		t.Fatalf("last continuation message = %#v", last)
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+	if ag.Steer("too late") {
+		t.Fatal("completed turn accepted steering")
+	}
+}
+
+func TestAgent_PauseTurnContinuesWithAssistantResponse(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content:    []llm.ContentBlock{{Type: "text", Text: "Still working."}},
+			StopReason: "pause_turn",
+		},
+		llmtest.Text("Done."),
+	}}
+	ag := newTestAgent(t, prov)
+
+	out, err := ag.Send(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "Still working.\nDone." {
+		t.Fatalf("response text = %q", out)
+	}
+	if got := len(prov.Calls); got != 2 {
+		t.Fatalf("provider calls = %d, want 2", got)
+	}
+	messages := prov.Calls[1].Messages
+	if len(messages) != 2 || messages[1].Role != llm.RoleAssistant || messages[1].Content[0].Text != "Still working." {
+		t.Fatalf("continuation messages = %#v", messages)
+	}
+}
+
+func TestAgent_UnexpectedStopReasonFailsWithoutRepeating(t *testing.T) {
+	toolCalled := false
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content: []llm.ContentBlock{
+				{Type: "text", Text: "Partial response."},
+				{Type: "tool_use", ID: "call_1", Name: "mutate", Input: map[string]any{}},
+			},
+			StopReason: "new_provider_reason",
+		},
+		llmtest.Text("Follow-up response."),
+	}}
+	ag := newTestAgent(t, prov, recordingTool{name: "mutate", called: &toolCalled})
+
+	out, err := ag.Send(context.Background(), "hi")
+	if !errors.Is(err, ErrUnexpectedStopReason) {
+		t.Fatalf("error = %v, want ErrUnexpectedStopReason", err)
+	}
+	if out != "Partial response." {
+		t.Fatalf("partial response = %q", out)
+	}
+	if got := len(prov.Calls); got != 1 {
+		t.Fatalf("provider calls = %d, want 1", got)
+	}
+	if toolCalled {
+		t.Fatal("tool from response with unknown stop reason was executed")
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+
+	followUp, followUpErr := ag.Send(context.Background(), "safe follow-up")
+	if followUpErr != nil {
+		t.Fatalf("follow-up send: %v", followUpErr)
+	}
+	if followUp != "Follow-up response." {
+		t.Fatalf("follow-up response = %q", followUp)
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
+func TestAgent_ContextWindowExceededReturnsPartialText(t *testing.T) {
+	toolCalled := false
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{{
+		Content: []llm.ContentBlock{
+			{Type: "text", Text: "Partial response."},
+			{Type: "tool_use", ID: "call_1", Name: "mutate", Input: map[string]any{}},
+		},
+		StopReason: "model_context_window_exceeded",
+	}}}
+	ag := newTestAgent(t, prov, recordingTool{name: "mutate", called: &toolCalled})
+
+	out, err := ag.Send(context.Background(), "hi")
+	if !errors.Is(err, ErrContextWindowExceeded) {
+		t.Fatalf("error = %v, want ErrContextWindowExceeded", err)
+	}
+	if out != "Partial response." {
+		t.Fatalf("partial response = %q", out)
+	}
+	if got := len(prov.Calls); got != 1 {
+		t.Fatalf("provider calls = %d, want 1", got)
+	}
+	if toolCalled {
+		t.Fatal("tool from context-limit response was executed")
+	}
+	assertToolUseResultsPaired(t, ag.Transcript())
+}
+
 func TestAgent_MaxTokensWithToolCallsStillRunsTools(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
 		{

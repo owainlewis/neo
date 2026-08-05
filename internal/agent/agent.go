@@ -29,6 +29,16 @@ const (
 
 var ErrMaxTurns = errors.New("max turns reached")
 
+// ErrUnexpectedStopReason is returned when a provider reports a stop reason
+// the agent does not know how to handle safely. Failing the turn prevents an
+// unrecognized response from silently re-calling the provider until MaxTurns.
+var ErrUnexpectedStopReason = errors.New("unexpected provider stop reason")
+
+// ErrContextWindowExceeded is returned when the provider stops generation
+// because the model's context window is full. The partial response remains
+// available to the caller and in the transcript.
+var ErrContextWindowExceeded = errors.New("response truncated: model context window exceeded")
+
 // ErrMaxOutputTokens is returned when the model stops because it hit its
 // output-token limit with no tool calls to continue on. Ending the turn (with
 // the partial text) beats silently re-calling the provider until MaxTurns.
@@ -355,6 +365,39 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 		// the transcript never contains a tool_use without its tool_result, even
 		// if a tool panics or an early return is added later.
 		assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: resp.Content}
+		if !knownStopReason(resp.StopReason) {
+			a.appendSafeAssistantMessage(resp.Content)
+			a.processResponseText(resp.Content, &finalText)
+			err := fmt.Errorf("%w %q from %s", ErrUnexpectedStopReason, resp.StopReason, provider.Name())
+			logx.Debug("agent unexpected stop reason", "turn", turn+1, "stop_reason", resp.StopReason)
+			a.emit(Event{Kind: EventError, Err: err})
+			return strings.TrimSpace(finalText.String()), err
+		}
+		if resp.StopReason == "refusal" {
+			a.appendSafeAssistantMessage(resp.Content)
+			a.processResponseText(resp.Content, &finalText)
+			if err := ctx.Err(); err != nil {
+				logx.Debug("agent turn canceled after provider refusal", "turn", turn+1, "error", err.Error())
+				a.emit(Event{Kind: EventError, Err: err})
+				return strings.TrimSpace(finalText.String()), err
+			}
+			steering, closed := a.takeSteering(true)
+			if !closed {
+				content := a.appendSteering(nil, steering)
+				a.messages = append(a.messages, llm.Message{Role: llm.RoleUser, Content: content})
+				continue
+			}
+			logx.Debug("agent turn refused", "turn", turn+1)
+			a.emit(Event{Kind: EventDone})
+			return strings.TrimSpace(finalText.String()), nil
+		}
+		if resp.StopReason == "model_context_window_exceeded" {
+			a.appendSafeAssistantMessage(resp.Content)
+			a.processResponseText(resp.Content, &finalText)
+			logx.Debug("agent model context window exceeded", "turn", turn+1)
+			a.emit(Event{Kind: EventError, Err: ErrContextWindowExceeded})
+			return strings.TrimSpace(finalText.String()), ErrContextWindowExceeded
+		}
 		toolResults, steering := a.processResponseContent(ctx, resp.Content, &finalText)
 
 		a.messages = append(a.messages, assistantMsg)
@@ -394,10 +437,44 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			a.emit(Event{Kind: EventError, Err: ErrMaxOutputTokens})
 			return strings.TrimSpace(finalText.String()), ErrMaxOutputTokens
 		}
+		if resp.StopReason == "pause_turn" {
+			if err := ctx.Err(); err != nil {
+				logx.Debug("agent turn canceled while paused", "turn", turn+1, "error", err.Error())
+				a.emit(Event{Kind: EventError, Err: err})
+				return strings.TrimSpace(finalText.String()), err
+			}
+			logx.Debug("agent provider requested continuation", "turn", turn+1)
+			continue
+		}
 	}
 	logx.Debug("agent max turns reached", "max_turns", a.cfg.MaxTurns)
 	a.emit(Event{Kind: EventMaxTurnsReached, MaxTurns: a.cfg.MaxTurns, Err: ErrMaxTurns})
 	return strings.TrimSpace(finalText.String()), ErrMaxTurns
+}
+
+func knownStopReason(reason string) bool {
+	switch reason {
+	case "", "end_turn", "stop_sequence", "tool_use", "max_tokens", "refusal", "pause_turn", "model_context_window_exceeded":
+		return true
+	default:
+		return false
+	}
+}
+
+// appendSafeAssistantMessage records the non-tool content of a terminal or
+// rejected response. Tool calls are excluded because these branches do not run
+// them, and persisting an unmatched tool_use would make the next request invalid.
+func (a *Agent) appendSafeAssistantMessage(content []llm.ContentBlock) {
+	safe := make([]llm.ContentBlock, 0, len(content))
+	for _, block := range content {
+		if block.Type != "tool_use" {
+			safe = append(safe, block)
+		}
+	}
+	if len(safe) == 0 {
+		return
+	}
+	a.messages = append(a.messages, llm.Message{Role: llm.RoleAssistant, Content: safe})
 }
 
 func skippedToolResults(content []llm.ContentBlock, reason string) []llm.ContentBlock {
@@ -437,15 +514,7 @@ func (a *Agent) processResponseContent(ctx context.Context, content []llm.Conten
 	for i := 0; i < len(content); {
 		block := content[i]
 		if block.Type == "text" {
-			if block.Text != "" {
-				kind := EventAssistantText
-				if hasTools {
-					kind = EventAssistantCommentary
-				}
-				a.emit(Event{Kind: kind, Text: block.Text})
-				finalText.WriteString(block.Text)
-				finalText.WriteString("\n")
-			}
+			a.appendResponseText(block.Text, hasTools, finalText)
 			i++
 			continue
 		}
@@ -491,6 +560,30 @@ func (a *Agent) processResponseContent(ctx context.Context, content []llm.Conten
 		i = j
 	}
 	return results, nil
+}
+
+// processResponseText preserves useful text from a response whose tool calls
+// must not run, such as a refusal, context limit, or unknown stop reason.
+func (a *Agent) processResponseText(content []llm.ContentBlock, finalText *strings.Builder) {
+	hasTools := hasToolUse(content)
+	for _, block := range content {
+		if block.Type == "text" {
+			a.appendResponseText(block.Text, hasTools, finalText)
+		}
+	}
+}
+
+func (a *Agent) appendResponseText(text string, commentary bool, finalText *strings.Builder) {
+	if text == "" {
+		return
+	}
+	kind := EventAssistantText
+	if commentary {
+		kind = EventAssistantCommentary
+	}
+	a.emit(Event{Kind: kind, Text: text})
+	finalText.WriteString(text)
+	finalText.WriteString("\n")
 }
 
 // executePreparedCalls splits a run of parallel-safe calls around approval

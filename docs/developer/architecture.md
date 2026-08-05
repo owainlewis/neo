@@ -58,4 +58,9 @@ transcript and that call's usage. The agent aggregates compaction and normal
 response usage exactly once. Each normal provider response becomes an assistant
 message. If the assistant requests tools, Neo runs them, caps oversized output
 before it enters user `tool_result` blocks, and continues the provider loop until
-the assistant ends the turn or max turns is reached.
+the assistant ends the turn or max turns is reached. A provider refusal ends the
+turn with its refusal text unless accepted steering requests a continuation,
+while `pause_turn` explicitly replays the assistant response and continues.
+Unknown stop reasons fail the turn instead of repeating provider calls.
+Anthropic's `model_context_window_exceeded` ends the turn with a typed truncation
+error and preserves any partial response text.
