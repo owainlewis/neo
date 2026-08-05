@@ -2,10 +2,13 @@ package factory
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/owainlewis/neo/internal/agent"
+	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 )
@@ -73,6 +76,93 @@ func TestAgentRunnerSetBackendAppliesToFutureWorkers(t *testing.T) {
 	}
 	if out != "new backend" || len(oldProvider.Calls) != 0 || newProvider.Calls[0].Model != "new-model" {
 		t.Fatalf("out=%q old=%d new=%+v", out, len(oldProvider.Calls), newProvider.Calls)
+	}
+}
+
+func TestAgentRunnerCompactorUsesConfiguredContextWindow(t *testing.T) {
+	prov := &llmtest.FakeProvider{}
+	r := &AgentRunner{
+		Provider:            prov,
+		DefaultModel:        "small-model",
+		ContextWindowTokens: 100,
+	}
+
+	compactor, ok := r.compactor(prov, "small-model").(compact.Summarizer)
+	if !ok {
+		t.Fatalf("compactor = %T, want compact.Summarizer", r.compactor(prov, "small-model"))
+	}
+	if compactor.TriggerTokens != 70 {
+		t.Fatalf("trigger tokens = %d, want 70", compactor.TriggerTokens)
+	}
+}
+
+type toolLoopProvider struct {
+	mainCalls      int
+	summaryCalls   int
+	summaryRequest llm.Request
+}
+
+func (*toolLoopProvider) Name() string { return "tool-loop" }
+
+func (p *toolLoopProvider) Complete(_ context.Context, req llm.Request) (*llm.Response, error) {
+	if len(req.Tools) == 0 {
+		p.summaryCalls++
+		p.summaryRequest = req
+		resp := llmtest.Text("compacted child history")
+		return &resp, nil
+	}
+	p.mainCalls++
+	if p.mainCalls <= 11 {
+		payload := strings.Repeat("x", 400)
+		resp := llmtest.ToolUse(
+			fmt.Sprintf("tool-%d", p.mainCalls),
+			"bash",
+			map[string]any{"command": "printf '" + payload + "'"},
+		)
+		return &resp, nil
+	}
+	resp := llmtest.Text("child complete")
+	return &resp, nil
+}
+
+func TestRunAgentCompactsToolHistoryWithConfiguredWindowAfterBackendSwitch(t *testing.T) {
+	oldProvider := &llmtest.FakeProvider{}
+	newProvider := &toolLoopProvider{}
+	r := &AgentRunner{
+		Provider:            oldProvider,
+		DefaultModel:        "old-model",
+		ContextWindowTokens: 100,
+		Root:                t.TempDir(),
+	}
+	if err := r.SetBackend(newProvider, "small-model"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := r.RunAgentWithOptions(
+		context.Background(),
+		t.TempDir(),
+		"exercise a tool-heavy child",
+		make(chan AgentEvent, 64),
+		RunOptions{Tools: dynamicAgentTools},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "child complete" {
+		t.Fatalf("output = %q, want child complete", out)
+	}
+	if len(oldProvider.Calls) != 0 {
+		t.Fatalf("old provider calls = %d, want 0", len(oldProvider.Calls))
+	}
+	if newProvider.summaryCalls != 1 || newProvider.mainCalls != 12 {
+		t.Fatalf("provider calls: summary=%d main=%d", newProvider.summaryCalls, newProvider.mainCalls)
+	}
+	req := newProvider.summaryRequest
+	if req.Model != "small-model" {
+		t.Fatalf("summary model = %q, want small-model", req.Model)
+	}
+	if len(req.Messages) != 3 || req.Messages[2].Content[0].Type != "tool_result" {
+		t.Fatalf("summary request does not contain one completed tool exchange: %+v", req.Messages)
 	}
 }
 

@@ -33,8 +33,26 @@ func TestSafeSplitPointAvoidsToolResults(t *testing.T) {
 	if got := SafeSplitPoint(msgs, 2); got != 0 {
 		t.Fatalf("split at 2 = %d, want 0", got)
 	}
+	if got := SafeSplitPoint(msgs, 3); got != 3 {
+		t.Fatalf("split at 3 = %d, want 3", got)
+	}
 	if got := SafeSplitPoint(msgs, 4); got != 3 {
 		t.Fatalf("split at 4 = %d, want 3", got)
+	}
+}
+
+func TestSafeSplitPointRequiresCompleteToolExchange(t *testing.T) {
+	msgs := []llm.Message{
+		userText("first"),
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: "tool_use", ID: "t1"},
+			{Type: "tool_use", ID: "t2"},
+		}},
+		userToolResult("t1"),
+		assistantText("next"),
+	}
+	if got := SafeSplitPoint(msgs, 3); got != 0 {
+		t.Fatalf("split after incomplete exchange = %d, want 0", got)
 	}
 }
 

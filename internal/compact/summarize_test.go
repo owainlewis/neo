@@ -53,6 +53,20 @@ func TestTriggerTokensForContextWindow(t *testing.T) {
 	}
 }
 
+func TestNewSummarizerForContextWindow(t *testing.T) {
+	prov := &llmtest.FakeProvider{}
+
+	overridden := NewSummarizerForContextWindow(prov, "configured", 1_000_000)
+	if overridden.Provider != prov || overridden.Model != "configured" || overridden.TriggerTokens != 700_000 {
+		t.Fatalf("configured summarizer = %+v", overridden)
+	}
+
+	defaulted := NewSummarizerForContextWindow(prov, "default", 0)
+	if defaulted.Provider != prov || defaulted.Model != "default" || defaulted.TriggerTokens != 0 {
+		t.Fatalf("default summarizer changed: %+v", defaulted)
+	}
+}
+
 func TestSummarizer_CompactsOldTurnsIntoSummary(t *testing.T) {
 	summaryResponse := llmtest.Text("the summary")
 	summaryResponse.Usage = llm.Usage{InputTokens: 11, OutputTokens: 12, CacheCreationTokens: 13, CacheReadTokens: 14}
@@ -98,6 +112,37 @@ func TestSummarizer_CompactsOldTurnsIntoSummary(t *testing.T) {
 	}
 	if req.System != summarySystem {
 		t.Fatal("summary request does not carry the summary system prompt")
+	}
+}
+
+func TestSummarizer_CompactsCompletedToolExchange(t *testing.T) {
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("tool summary")}}
+	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1, KeepRecent: 2}
+	msgs := []llm.Message{
+		userText(strings.Repeat("x", 400)),
+		assistantTool("t1"),
+		userToolResult("t1"),
+		assistantText(strings.Repeat("y", 400)),
+		userText("continue"),
+	}
+
+	result, err := s.Compact(context.Background(), msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.Messages
+	if len(out) != 3 || !strings.Contains(out[0].Content[0].Text, "tool summary") {
+		t.Fatalf("compacted transcript = %+v", out)
+	}
+	if len(prov.Calls) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(prov.Calls))
+	}
+	req := prov.Calls[0]
+	if len(req.Messages) != 3 || req.Messages[2].Content[0].Type != "tool_result" {
+		t.Fatalf("summary request did not preserve completed tool exchange: %+v", req.Messages)
+	}
+	if !strings.Contains(req.System, summaryInstruction) {
+		t.Fatalf("summary instruction missing from system prompt: %q", req.System)
 	}
 }
 

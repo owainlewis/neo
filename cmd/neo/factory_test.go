@@ -50,6 +50,14 @@ func TestSubagentBackendCredentialFailureDoesNotBreakCoordinator(t *testing.T) {
 	}
 }
 
+func TestChatAgentToolPassesCompactionContextWindowToRunner(t *testing.T) {
+	cfg := &config.Config{Compaction: config.Compaction{ContextWindowTokens: 1_000_000}}
+	_, _, runner := chatAgentTool(&llmtest.FakeProvider{}, "worker-model", t.TempDir(), t.TempDir(), cfg)
+	if runner.ContextWindowTokens != 1_000_000 {
+		t.Fatalf("runner context window = %d, want 1000000", runner.ContextWindowTokens)
+	}
+}
+
 func TestChatSystemAdvertisesAgentToolWorkflowPattern(t *testing.T) {
 	system, blocks := chatSystem(&config.Config{}, t.TempDir(), nil, io.Discard)
 	for _, want := range []string{

@@ -23,8 +23,11 @@ type AgentRunner struct {
 	backendMu    sync.RWMutex
 	Provider     llm.Provider
 	DefaultModel string
-	Root         string
-	BashTimeout  time.Duration
+	// ContextWindowTokens applies the configured compaction window to each
+	// fresh worker. Zero preserves compact.NewSummarizer's default behavior.
+	ContextWindowTokens int
+	Root                string
+	BashTimeout         time.Duration
 }
 
 // SetBackend updates the default provider and model used by future workers.
@@ -60,7 +63,7 @@ func (r *AgentRunner) RunAgentWithOptions(ctx context.Context, dir, input string
 		System:    dynamicAgentSystemPrompt,
 		Provider:  provider,
 		Tools:     r.registryWithOptions(dir, opts),
-		Compactor: compact.NewSummarizer(provider, model),
+		Compactor: r.compactor(provider, model),
 		MaxTurns:  agent.DefaultMaxTurns,
 		OnEvent: func(e agent.Event) {
 			if ev, ok := translate(e); ok {
@@ -82,6 +85,10 @@ func (r *AgentRunner) RunAgentWithOptions(ctx context.Context, dir, input string
 	case <-ctx.Done():
 	}
 	return out, err
+}
+
+func (r *AgentRunner) compactor(provider llm.Provider, model string) compact.Compactor {
+	return compact.NewSummarizerForContextWindow(provider, model, r.ContextWindowTokens)
 }
 
 func (r *AgentRunner) registryWithOptions(dir string, opts RunOptions) *tools.Registry {
