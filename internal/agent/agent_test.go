@@ -1081,6 +1081,74 @@ func TestAgent_AccumulatesUsage(t *testing.T) {
 	}
 }
 
+func TestAgent_AccumulatesCompactionAndAnswerUsageExactlyOnce(t *testing.T) {
+	summary := llmtest.Text("summary")
+	summary.Usage = llm.Usage{InputTokens: 10, OutputTokens: 20, CacheCreationTokens: 30, CacheReadTokens: 40}
+	answer := llmtest.Text("answer")
+	answer.Usage = llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{summary, answer}}
+
+	messages := make([]llm.Message, 0, 10)
+	for i := 0; i < 10; i++ {
+		role := llm.RoleUser
+		if i%2 == 1 {
+			role = llm.RoleAssistant
+		}
+		messages = append(messages, llm.Message{Role: role, Content: []llm.ContentBlock{{Type: "text", Text: strings.Repeat("x", 400)}}})
+	}
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Tools:    tools.NewRegistry(),
+		Messages: messages,
+		Compactor: compact.Summarizer{
+			Provider:      prov,
+			Model:         "test-model",
+			TriggerTokens: 1,
+			KeepRecent:    2,
+		},
+	})
+
+	if _, err := ag.Send(context.Background(), "continue"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	want := llm.Usage{InputTokens: 11, OutputTokens: 22, CacheCreationTokens: 33, CacheReadTokens: 44}
+	if got := ag.Usage(); got != want {
+		t.Fatalf("usage = %+v, want summary plus answer exactly once: %+v", got, want)
+	}
+	if len(prov.Calls) != 2 {
+		t.Fatalf("provider calls = %d, want summary and answer", len(prov.Calls))
+	}
+}
+
+func TestAgent_CountsUsageFromUnusableCompactionResponse(t *testing.T) {
+	response := llmtest.Text("")
+	response.Usage = llm.Usage{InputTokens: 7, OutputTokens: 1}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{response}}
+	messages := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: strings.Repeat("x", 400)}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "text", Text: strings.Repeat("x", 400)}}},
+	}
+	ag := New(Config{
+		Model:    "test-model",
+		Provider: prov,
+		Messages: messages,
+		Compactor: compact.Summarizer{
+			Provider:      prov,
+			Model:         "test-model",
+			TriggerTokens: 1,
+			KeepRecent:    1,
+		},
+	})
+
+	if _, err := ag.Send(context.Background(), "continue"); err == nil {
+		t.Fatal("expected unusable summary to fail the turn")
+	}
+	if got := ag.Usage(); got != response.Usage {
+		t.Fatalf("usage = %+v, want failed compaction response usage %+v", got, response.Usage)
+	}
+}
+
 func TestAgent_RestoresAndContinuesUsage(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{
 		{Content: []llm.ContentBlock{{Type: "text", Text: "next"}}, StopReason: "end_turn", Usage: llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}},
@@ -1349,10 +1417,10 @@ type countingCompactor struct {
 	calls int
 }
 
-func (c *countingCompactor) Compact(ctx context.Context, messages []llm.Message) ([]llm.Message, error) {
+func (c *countingCompactor) Compact(ctx context.Context, messages []llm.Message) (compact.Result, error) {
 	c.calls++
 	if len(messages) == 0 {
-		return nil, fmt.Errorf("expected user message before compaction")
+		return compact.Result{}, fmt.Errorf("expected user message before compaction")
 	}
-	return messages, nil
+	return compact.Result{Messages: messages}, nil
 }

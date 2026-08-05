@@ -7,13 +7,21 @@ import (
 )
 
 type Compactor interface {
-	Compact(ctx context.Context, messages []llm.Message) ([]llm.Message, error)
+	Compact(ctx context.Context, messages []llm.Message) (Result, error)
+}
+
+// Result contains the transcript and provider usage produced by a compaction
+// attempt. Usage can be non-zero even when compaction returns an error, because
+// a provider response may still be billable even if its summary is unusable.
+type Result struct {
+	Messages []llm.Message
+	Usage    llm.Usage
 }
 
 type NoCompaction struct{}
 
-func (NoCompaction) Compact(_ context.Context, messages []llm.Message) ([]llm.Message, error) {
-	return messages, nil
+func (NoCompaction) Compact(_ context.Context, messages []llm.Message) (Result, error) {
+	return Result{Messages: messages}, nil
 }
 
 // SafeSplitPoint walks backward from desired until it finds a fresh user turn.
