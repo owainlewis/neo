@@ -115,16 +115,19 @@ func (i inputItem) MarshalJSON() ([]byte, error) {
 
 func replayableRawItem(raw json.RawMessage) bool {
 	var meta struct {
-		Type             string `json:"type"`
-		EncryptedContent string `json:"encrypted_content"`
+		Type             string          `json:"type"`
+		ID               string          `json:"id"`
+		Summary          json.RawMessage `json:"summary"`
+		EncryptedContent string          `json:"encrypted_content"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return true
+		return false
 	}
-	if meta.Type != "reasoning" {
-		return true
+	if meta.Type != "reasoning" || meta.ID == "" || meta.EncryptedContent == "" {
+		return false
 	}
-	return meta.EncryptedContent != ""
+	var summary []json.RawMessage
+	return len(meta.Summary) > 0 && json.Unmarshal(meta.Summary, &summary) == nil && summary != nil
 }
 
 // apiTool is a Responses tool. Note the flat shape (name/description/parameters

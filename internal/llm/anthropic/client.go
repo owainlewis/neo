@@ -105,10 +105,9 @@ func systemPayload(req llm.Request) any {
 	return blocks
 }
 
-// wireMessages strips content blocks the Messages API does not accept — for
-// example "raw" reasoning items persisted by the OpenAI provider, which would
-// otherwise 400 when a session is resumed under this provider. Messages left
-// with no content are dropped entirely.
+// wireMessages strips content blocks the Messages API does not accept, and
+// removes provider-specific replay data from the neutral blocks it does accept.
+// Messages left with no content are dropped entirely.
 func wireMessages(in []llm.Message) []llm.Message {
 	out := make([]llm.Message, 0, len(in))
 	for _, m := range in {
@@ -116,6 +115,7 @@ func wireMessages(in []llm.Message) []llm.Message {
 		for _, b := range m.Content {
 			switch b.Type {
 			case "text", "tool_use", "tool_result", "image":
+				b.Raw = nil
 				blocks = append(blocks, b)
 			}
 		}

@@ -19,6 +19,24 @@ Session files are written atomically with a sibling temp file and rename.
 
 Resume restores the session's saved provider and model when that provider's credential is still available. Otherwise Neo warns and continues with the configured default backend. Provider adapters ignore opaque history blocks they cannot safely replay, so the transcript remains usable after a backend switch.
 
+## Provider-Specific History
+
+Neo persists provider-neutral text, images, tool calls, and tool results alongside
+opaque `raw` data that some providers require for a same-provider continuation.
+Opaque data is owned by its destination adapter and is never assumed to be
+portable:
+
+- Anthropic rebuilds supported content blocks without any opaque replay data.
+- OpenAI only replays Responses API reasoning items with the required ID,
+  summary array, and encrypted content. Incomplete, malformed, and
+  non-reasoning raw items are ignored.
+- Gemini only replays raw parts that decode as Gemini thought metadata or the
+  matching Gemini function call.
+
+Dropping incompatible raw data does not remove the provider-neutral content, so
+text and tool history remains available when a session falls back to a different
+backend.
+
 ## Metadata
 
 | Field | Meaning |

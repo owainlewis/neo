@@ -144,7 +144,7 @@ func TestComplete_ToolCallRoundTrip(t *testing.T) {
 }
 
 func TestToInput_ReplaysRawReasoningBeforeToolResult(t *testing.T) {
-	reasoning := json.RawMessage(`{"type":"reasoning","id":"rs_1","encrypted_content":"secret"}`)
+	reasoning := json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"secret"}`)
 	req := llm.Request{
 		Messages: []llm.Message{
 			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
@@ -198,6 +198,43 @@ func TestToInput_SkipsUnencryptedReasoning(t *testing.T) {
 	}
 	if items[1].Type != "function_call_output" || items[1].CallID != "call_1" {
 		t.Fatalf("tool result should remain after skipping reasoning: %+v", items[1])
+	}
+}
+
+func TestToInput_SkipsForeignAndMalformedRawItems(t *testing.T) {
+	req := llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+				{Type: "raw", Raw: json.RawMessage(`{"type":"thinking","thinking":"anthropic-private"}`)},
+				{Type: "raw", Raw: json.RawMessage(`{"thought":true,"thoughtSignature":"gemini-private"}`)},
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning"`)},
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","summary":[],"encrypted_content":"secret"}`)},
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":"rs_missing_summary","encrypted_content":"secret"}`)},
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":"rs_null_summary","summary":null,"encrypted_content":"secret"}`)},
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":"rs_object_summary","summary":{},"encrypted_content":"secret"}`)},
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","id":123,"summary":[],"encrypted_content":"secret"}`)},
+				{Type: "raw", Raw: json.RawMessage(`{"type":"reasoning","encrypted_content":123}`)},
+				{Type: "text", Text: "I will check."},
+				{Type: "tool_use", ID: "call_1", Name: "bash", Input: map[string]any{"cmd": "pwd"}},
+			}},
+			{Role: llm.RoleUser, Content: []llm.ContentBlock{
+				{Type: "tool_result", ToolUseID: "call_1", Content: "/repo"},
+			}},
+		},
+	}
+
+	items := toInput(req)
+	if len(items) != 3 {
+		t.Fatalf("expected only provider-neutral history, got %d items: %+v", len(items), items)
+	}
+	if items[0].Type != "message" || len(items[0].Content) != 1 || items[0].Content[0].Text != "I will check." {
+		t.Fatalf("assistant text was not preserved: %+v", items[0])
+	}
+	if items[1].Type != "function_call" || items[1].CallID != "call_1" {
+		t.Fatalf("tool call was not preserved: %+v", items[1])
+	}
+	if items[2].Type != "function_call_output" || items[2].CallID != "call_1" || items[2].Output != "/repo" {
+		t.Fatalf("tool result was not preserved: %+v", items[2])
 	}
 }
 
