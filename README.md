@@ -100,7 +100,8 @@ go run ./cmd/neo
 ```
 
 Start with the [developer documentation](docs/developer/index.md) before
-changing the agent loop, providers, tools, or TUI.
+changing the agent loop, providers, tools, or TUI. Planned work follows the
+[issue workflow](WORKFLOW.md).
 
 ## License
 
