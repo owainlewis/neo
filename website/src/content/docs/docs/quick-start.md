@@ -17,6 +17,7 @@ Neo defaults to Anthropic. Set `provider` when you want OpenAI, OpenRouter, or G
 | OpenAI subscription | ChatGPT/Codex subscription | `provider: openai` and `openai_auth: subscription` | Run `neo login` once |
 | OpenRouter | `OPENROUTER_API_KEY` | `provider: openrouter` | None |
 | Google Gemini | `GOOGLE_API_KEY` | `provider: google` | None |
+| Custom endpoint | API key in an env var you name | `provider: custom` + `custom.base_url` and `model` | None |
 
 If you are using OpenAI with an API key, you do not need `neo login`. `neo login` is only for the
 device-code subscription flow.
@@ -56,6 +57,15 @@ Google Gemini:
 export GOOGLE_API_KEY="..."
 ```
 
+Custom OpenAI-compatible endpoint (any gateway that speaks the Chat Completions API):
+
+```bash
+export MY_API_KEY="..."
+```
+
+The env var name is yours to choose; `custom.api_key_env` below tells Neo where to look, and
+`CUSTOM_API_KEY` is the default when you leave it unset.
+
 ## 3. Create `neo.yaml` only if you need a non-default provider
 
 Anthropic users can skip this step because `provider: anthropic` is the default.
@@ -67,6 +77,18 @@ openai_auth: api_key
 
 For an OpenAI subscription, use `openai_auth: subscription`. For OpenRouter or Gemini, set
 `provider: openrouter` or `provider: google` respectively.
+
+For any other OpenAI-compatible endpoint (a gateway, proxy, or alternative host that speaks the
+Chat Completions API), use the `custom` provider. `model` is required — an arbitrary endpoint has
+no default:
+
+```yaml
+provider: custom
+model: your-model-id
+custom:
+  base_url: https://example.com/v1
+  api_key_env: MY_API_KEY
+```
 
 Neo reads the first config file it finds in this order:
 

@@ -37,17 +37,22 @@ var embeddedConfigYAML []byte
 
 // Config is the parsed neo.yaml.
 type Config struct {
-	// Provider selects the LLM backend: "anthropic" (default), "openai", "openrouter", or "google".
+	// Provider selects the LLM backend: "anthropic" (default), "openai",
+	// "openrouter", "google", or "custom" (any OpenAI-compatible endpoint).
 	Provider string `yaml:"provider"`
 	// OpenAIAuth selects how the "openai" provider authenticates: "api_key"
 	// (default, uses OPENAI_API_KEY) or "subscription" (ChatGPT/Codex
 	// device-code credentials via `neo login`). This also applies when OpenAI
 	// is selected through /model while another provider is the startup default.
-	OpenAIAuth string     `yaml:"openai_auth"`
-	Model      string     `yaml:"model"`
-	Subagents  Backend    `yaml:"subagents"`
-	Features   Features   `yaml:"features"`
-	Compaction Compaction `yaml:"compaction"`
+	OpenAIAuth string  `yaml:"openai_auth"`
+	Model      string  `yaml:"model"`
+	Subagents  Backend `yaml:"subagents"`
+	// Custom points the "custom" provider at an arbitrary OpenAI-compatible
+	// Chat Completions endpoint. BaseURL is required; the API key is read
+	// from the env var named by APIKeyEnv.
+	Custom     CustomBackend `yaml:"custom"`
+	Features   Features      `yaml:"features"`
+	Compaction Compaction    `yaml:"compaction"`
 	// ToolApprovals lists optional interactive tool names and Bash prefixes.
 	ToolApprovals []string `yaml:"tool_approvals"`
 	Output        Output   `yaml:"output"`
@@ -59,6 +64,29 @@ type Config struct {
 	// "embedded"); surfaced in diagnostics via Source().
 	source string
 }
+
+// CustomBackend configures the "custom" provider: any endpoint speaking the
+// OpenAI-compatible Chat Completions API. The key is read from the env var
+// named by APIKeyEnv (never stored in the config file).
+type CustomBackend struct {
+	BaseURL   string `yaml:"base_url"`
+	APIKeyEnv string `yaml:"api_key_env"`
+}
+
+// CustomAPIKeyEnvName returns the env var the custom provider reads, falling
+// back to the default when custom.api_key_env is unset. Callers that build
+// configs programmatically skip load-time normalization, so the fallback
+// lives here rather than only in parseConfig.
+func (c *Config) CustomAPIKeyEnvName() string {
+	if c.Custom.APIKeyEnv == "" {
+		return DefaultCustomAPIKeyEnv
+	}
+	return c.Custom.APIKeyEnv
+}
+
+// DefaultCustomAPIKeyEnv names the env var the custom provider reads when
+// custom.api_key_env is not set.
+const DefaultCustomAPIKeyEnv = "CUSTOM_API_KEY"
 
 // Backend optionally pins chat-spawned subagents to a provider and model.
 // A zero value means subagents follow the coordinator's active backend.
@@ -183,8 +211,21 @@ func parseConfig(b []byte, source string) (*Config, error) {
 	if c.Provider == "openai" && c.OpenAIAuth == "" {
 		c.OpenAIAuth = OpenAIAuthAPIKey
 	}
+	if c.Custom.APIKeyEnv == "" {
+		c.Custom.APIKeyEnv = DefaultCustomAPIKeyEnv
+	}
 	if err := validateOpenAIAuth(c.OpenAIAuth, source); err != nil {
 		return nil, err
+	}
+	// custom is validated before the model defaulting below: an arbitrary
+	// endpoint has no sensible default model, so an omitted one is an error.
+	if c.Provider == "custom" {
+		if strings.TrimSpace(c.Custom.BaseURL) == "" {
+			return nil, fmt.Errorf("%s: custom provider requires custom.base_url", source)
+		}
+		if strings.TrimSpace(c.Model) == "" {
+			return nil, fmt.Errorf("%s: custom provider requires model", source)
+		}
 	}
 	if c.Model == "" {
 		c.Model = defaultModelFor(c.Provider, c.OpenAIAuth)
@@ -194,8 +235,8 @@ func parseConfig(b []byte, source string) (*Config, error) {
 			c.Subagents.Provider = c.Provider
 		}
 		if !knownProvider(c.Subagents.Provider) {
-			return nil, fmt.Errorf("%s: subagents.provider must be one of %q, %q, %q, %q (got %q)",
-				source, "anthropic", "openai", "openrouter", "google", c.Subagents.Provider)
+			return nil, fmt.Errorf("%s: subagents.provider must be one of %q, %q, %q, %q, %q (got %q)",
+				source, "anthropic", "openai", "openrouter", "google", "custom", c.Subagents.Provider)
 		}
 		if c.Subagents.Model == "" {
 			c.Subagents.Model = defaultModelFor(c.Subagents.Provider, c.OpenAIAuth)
@@ -231,7 +272,7 @@ func (c *Config) NamedPhases() []phase.Definition {
 
 func knownProvider(provider string) bool {
 	switch provider {
-	case "anthropic", "openai", "openrouter", "google":
+	case "anthropic", "openai", "openrouter", "google", "custom":
 		return true
 	default:
 		return false

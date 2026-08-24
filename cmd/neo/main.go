@@ -156,17 +156,27 @@ USAGE:
 
 CONFIG:
   Reads neo.yaml (cwd) → ~/.neo/config.yaml → embedded defaults.
-  Select a backend with the "provider" key: "anthropic" (default), "openai", "openrouter", or "google".
+  Select a backend with the "provider" key: "anthropic" (default), "openai",
+  "openrouter", "google", or "custom" (any OpenAI-compatible endpoint).
 
   ANTHROPIC_API_KEY    required when provider is "anthropic"
   OPENAI_API_KEY       required when provider is "openai" with api_key auth
   OPENROUTER_API_KEY   required when provider is "openrouter"
   GOOGLE_API_KEY       required when provider is "google"
+  CUSTOM_API_KEY       required when provider is "custom" (or the env var
+                       named by custom.api_key_env)
 
   To use a ChatGPT subscription instead of an API key, set in neo.yaml:
     provider: openai
     openai_auth: subscription
   then run "neo login".
+
+  To use any OpenAI-compatible endpoint, set in neo.yaml:
+    provider: custom
+    model: <endpoint-model-id>
+    custom:
+      base_url: https://example.com/v1
+      api_key_env: MY_API_KEY
 
 HEADLESS RUN:
   neo run --json --timeout 10m "Review this repo without changing files"

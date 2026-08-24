@@ -70,6 +70,22 @@ The embedded source, including annotated provider examples, is
 | `provider: openai` with `openai_auth: subscription` | ChatGPT/Codex device-code credentials from `~/.neo/auth.json` | `internal/llm/openai.CodexClient` |
 | `provider: openrouter` | `OPENROUTER_API_KEY` | `internal/llm/openrouter` |
 | `provider: google` | `GOOGLE_API_KEY` | `internal/llm/google` |
+| `provider: custom` | env var named by `custom.api_key_env` (default `CUSTOM_API_KEY`) | `internal/llm/custom` |
+
+The `custom` provider targets any OpenAI-compatible Chat Completions endpoint. `custom.base_url` and a top-level `model` are both required — there is no sensible default model for an arbitrary endpoint:
+
+```yaml
+provider: custom
+model: <endpoint-model-id>
+custom:
+  # Endpoint base; neo appends /chat/completions and /models.
+  base_url: https://example.com/v1
+  # Env var holding the API key. Default: CUSTOM_API_KEY. Keys are never
+  # stored in the config file.
+  api_key_env: MY_API_KEY
+```
+
+In the TUI, `/model` lists the endpoint's own `GET base_url/models` response, falling back to the configured model when the endpoint does not serve that route. `subagents` may pin `provider: custom` (the same `custom:` block applies).
 
 Subscription credentials are created with `neo login` and removed with `neo logout`. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 

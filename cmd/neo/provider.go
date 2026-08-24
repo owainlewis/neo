@@ -12,6 +12,7 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/anthropic"
+	"github.com/owainlewis/neo/internal/llm/custom"
 	"github.com/owainlewis/neo/internal/llm/google"
 	"github.com/owainlewis/neo/internal/llm/openai"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
@@ -28,12 +29,14 @@ func newProvider(cfg *config.Config, name string) (llm.Provider, error) {
 		return openai.New()
 	case "openrouter":
 		return openrouter.New()
+	case "custom":
+		return custom.New(cfg.Custom.BaseURL, cfg.Custom.APIKeyEnv, cfg.Model)
 	case "google":
 		return google.New()
 	case "anthropic", "":
 		return anthropic.New()
 	default:
-		return nil, fmt.Errorf("unknown provider %q (expected \"anthropic\", \"openai\", \"openrouter\", or \"google\")", name)
+		return nil, fmt.Errorf("unknown provider %q (expected \"anthropic\", \"openai\", \"openrouter\", \"google\", or \"custom\")", name)
 	}
 }
 
@@ -216,6 +219,8 @@ func providerCredentialPresent(cfg *config.Config, provider string) bool {
 		return strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
 	case "openrouter":
 		return strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) != ""
+	case "custom":
+		return strings.TrimSpace(os.Getenv(cfg.CustomAPIKeyEnvName())) != ""
 	case "google":
 		return strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")) != ""
 	default:
@@ -246,6 +251,8 @@ func providerModelChoices(ctx context.Context, cfg *config.Config, provider stri
 		}
 	case "openrouter":
 		return openRouterModelChoices(ctx, errOut)
+	case "custom":
+		return customModelChoices(ctx, cfg, errOut)
 	case "google":
 		return []tui.ModelChoice{
 			{ID: google.DefaultModel, Name: "Gemini 3.5 Flash", Description: "Stable Google Gemini model for coding and agentic tasks"},
@@ -288,6 +295,32 @@ func openRouterModelChoices(ctx context.Context, errOut io.Writer) []tui.ModelCh
 			name = m.ID
 		}
 		choices = append(choices, tui.ModelChoice{ID: m.ID, Name: name, Description: m.Description})
+	}
+	return choices
+}
+
+// customModelChoices populates the picker from the endpoint's own
+// GET base_url/models listing. Endpoints are free to deviate from the
+// OpenAI-compatible shape, so on any failure (offline, timeout, missing
+// route) the picker falls back to the configured model. The fetch is
+// time-boxed so startup never hangs on a slow endpoint.
+func customModelChoices(ctx context.Context, cfg *config.Config, errOut io.Writer) []tui.ModelChoice {
+	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	models, err := custom.Models(fetchCtx, nil, cfg.Custom.BaseURL, cfg.CustomAPIKeyEnvName())
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			fmt.Fprintf(errOut, "warning: could not fetch models from %s (%v); using configured model\n", cfg.Custom.BaseURL, err)
+		}
+		return []tui.ModelChoice{
+			{ID: cfg.Model, Name: cfg.Model, Description: "Configured custom provider model"},
+		}
+	}
+
+	choices := make([]tui.ModelChoice, 0, len(models))
+	for _, m := range models {
+		choices = append(choices, tui.ModelChoice{ID: m.ID, Name: m.Name, Description: m.Description})
 	}
 	return choices
 }

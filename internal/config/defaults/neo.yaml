@@ -2,11 +2,14 @@
 # Override by creating ./neo.yaml in a project, or ~/.neo/config.yaml globally.
 # The first file found wins — config files are NOT merged.
 
-# LLM backend: "anthropic" (default), "openai", "openrouter", or "google".
+# LLM backend: "anthropic" (default), "openai", "openrouter", "google", or
+# "custom" (any OpenAI-compatible endpoint).
 # anthropic  → requires ANTHROPIC_API_KEY
 # openai     → uses the Responses API; auth via openai_auth (below)
 # openrouter → uses Chat Completions via OPENROUTER_API_KEY
 # google     → uses Gemini via GOOGLE_API_KEY
+# custom     → uses Chat Completions against custom.base_url; auth via the
+#              env var named by custom.api_key_env (CUSTOM_API_KEY by default)
 provider: anthropic
 
 # How OpenAI authenticates when it is the configured provider:
@@ -113,4 +116,16 @@ output:
 #
 # provider: google
 # model: gemini-3.5-flash
+#
+# --- Custom (any OpenAI-compatible endpoint) ---------------------------------
+# Speaks the OpenAI Chat Completions API. model is required. The key is read
+# from the env var named by api_key_env (CUSTOM_API_KEY when omitted) — never
+# stored in this file. List the endpoint's models:
+#   curl -H "Authorization: Bearer $MY_API_KEY" https://example.com/v1/models
+#
+# provider: custom
+# model: <endpoint-model-id>
+# custom:
+#   base_url: https://example.com/v1
+#   api_key_env: MY_API_KEY
 # ----------------------------------------------------------------------------

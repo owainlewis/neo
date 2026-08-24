@@ -546,3 +546,87 @@ func TestPermissions_RejectsRemovedConfigWithMigration(t *testing.T) {
 		}
 	})
 }
+
+func TestLoad_CustomProviderRequiresBaseURL(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: custom\nmodel: m\n")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "custom provider requires custom.base_url") {
+			t.Fatalf("error = %v, want custom.base_url requirement", err)
+		}
+	})
+}
+
+func TestLoad_CustomProviderRequiresModel(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: custom\ncustom:\n  base_url: https://example.com/v1\n")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "custom provider requires model") {
+			t.Fatalf("error = %v, want model requirement", err)
+		}
+	})
+}
+
+func TestLoad_CustomProviderAcceptsBaseURLAndModel(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: custom\nmodel: some-model\ncustom:\n  base_url: https://example.com/v1\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Provider != "custom" || cfg.Model != "some-model" || cfg.Custom.BaseURL != "https://example.com/v1" {
+			t.Fatalf("config = %s/%s/%s", cfg.Provider, cfg.Model, cfg.Custom.BaseURL)
+		}
+	})
+}
+
+func TestLoad_CustomAPIKeyEnvDefaults(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Custom.APIKeyEnv != DefaultCustomAPIKeyEnv {
+			t.Fatalf("api_key_env = %q, want default %q", cfg.Custom.APIKeyEnv, DefaultCustomAPIKeyEnv)
+		}
+	})
+}
+
+func TestLoad_CustomAPIKeyEnvOverride(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\ncustom:\n  api_key_env: Z_AI_API_KEY\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Custom.APIKeyEnv != "Z_AI_API_KEY" {
+			t.Fatalf("api_key_env = %q, want Z_AI_API_KEY", cfg.Custom.APIKeyEnv)
+		}
+	})
+}
+
+func TestKnownProviderAcceptsCustom(t *testing.T) {
+	if !knownProvider("custom") {
+		t.Fatal("knownProvider(custom) = false, want true")
+	}
+}
+
+func TestLoad_SubagentsAcceptsCustomProvider(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: m\nsubagents:\n  provider: custom\n  model: worker\ncustom:\n  base_url: https://example.com/v1\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Subagents.Provider != "custom" || cfg.Subagents.Model != "worker" {
+			t.Fatalf("subagents = %s/%s", cfg.Subagents.Provider, cfg.Subagents.Model)
+		}
+	})
+}

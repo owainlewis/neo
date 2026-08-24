@@ -66,7 +66,7 @@ func doctorChecks() []doctorCheck {
 
 func doctorProviderCheck(cfg *config.Config) doctorCheck {
 	switch cfg.Provider {
-	case "anthropic", "openai", "openrouter", "google":
+	case "anthropic", "openai", "openrouter", "google", "custom":
 		return doctorCheck{Status: doctorPass, Name: "provider", Detail: cfg.Provider}
 	default:
 		return doctorCheck{Status: doctorFail, Name: "provider", Detail: fmt.Sprintf("unknown provider %q", cfg.Provider)}
@@ -79,6 +79,8 @@ func doctorCredentialCheck(cfg *config.Config) doctorCheck {
 		return envCredentialCheck("ANTHROPIC_API_KEY")
 	case "openrouter":
 		return envCredentialCheck("OPENROUTER_API_KEY")
+	case "custom":
+		return envCredentialCheck(cfg.CustomAPIKeyEnvName())
 	case "google":
 		return envCredentialCheck("GOOGLE_API_KEY")
 	case "openai":

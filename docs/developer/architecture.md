@@ -20,6 +20,7 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 | `internal/llm/chatcompletions/` | Reusable OpenAI-compatible Chat Completions adapter. |
 | `internal/llm/openrouter/` | OpenRouter provider setup and defaults. |
 | `internal/llm/google/` | Google Gemini adapter. |
+| `internal/llm/custom/` | Setup for user-configured OpenAI-compatible endpoints. |
 | `internal/logx/` | Optional structured debug logging. |
 | `internal/phase/` | Built-in and configured named prompts, slash invocation expansion, and display labels. |
 | `internal/projectctx/` | AGENTS.md discovery and prompt augmentation. |
@@ -33,7 +34,8 @@ Neo is a small Go coding agent. The core agent loop is policy-free: it owns mess
 ## Chat Startup Flow
 
 1. `cmd/neo` resolves the session store. For a resumed chat, it loads the session and restores its saved working directory before entering the shared chat path.
-2. It loads config and selects Anthropic, OpenAI, OpenRouter, or Google Gemini, preferring saved provider and model metadata when resuming. OpenAI defaults to API-key auth; `openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials.
+2. It loads config and selects Anthropic, OpenAI, OpenRouter, Google Gemini, or a custom
+OpenAI-compatible endpoint, preferring saved provider and model metadata when resuming. OpenAI defaults to API-key auth; `openai_auth: subscription` builds the Codex subscription provider from stored device-code credentials.
 3. It resolves the project root, constructs the workflow and subagent capabilities, and builds the complete tool registry.
 4. For a new chat, it creates the session in `internal/session`.
 5. Named phases, skills, and AGENTS.md are loaded, then `chatSystem` builds both flattened and segmented system prompts.
