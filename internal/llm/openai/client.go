@@ -106,6 +106,9 @@ func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry
 		return nil, 0, retry.Absent(), err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	return raw, resp.StatusCode, retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()), nil
+	// Propagate the read error. Discarding it turns a cancelled request into an
+	// apparently successful empty body, which then surfaces as a confusing
+	// decode failure instead of the cancellation that actually happened.
+	raw, err := io.ReadAll(resp.Body)
+	return raw, resp.StatusCode, retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()), err
 }

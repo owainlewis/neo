@@ -23,6 +23,26 @@ type Provider interface {
 
 The core loop sends an `llm.Request`. The provider returns an `llm.Response`. Everything provider-specific stays behind the adapter.
 
+## Streaming
+
+`Complete` is blocking by design and always returns a finished response, but the
+Anthropic adapter uses the streaming endpoint underneath and reassembles the
+events in `stream.go`. Nothing is emitted as it arrives: Neo renders completed
+blocks, so streaming here is a transport decision, not a UI one.
+
+Two reasons for it:
+
+- No fixed client deadline. A `http.Client.Timeout` caps how long one generation
+  may take regardless of progress. The Anthropic client sets no timeout and lets
+  the caller's context bound the request; every caller has one (Ctrl-C in chat,
+  `--timeout` headless).
+- The Messages API requires streaming above a `max_tokens` threshold, so raising
+  `defaultMaxTokens` will not need another transport change.
+
+Adapters must propagate the error from reading a response body. Discarding it
+turns a cancelled request into an apparently successful empty body, which then
+surfaces as a decode failure rather than the cancellation that happened.
+
 ## Current Providers
 
 | Provider config | Auth | Adapter |

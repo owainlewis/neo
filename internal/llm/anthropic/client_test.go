@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,69 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/llm/retry"
 )
+
+// sseResponse renders a finished response as the event stream the Messages API
+// sends, so tests can keep describing responses by their final shape.
+func sseResponse(blocks []llm.ContentBlock, stopReason string, usage *apiUsage) string {
+	var b strings.Builder
+	start := map[string]any{"type": "message_start", "message": map[string]any{}}
+	if usage != nil {
+		start["message"] = map[string]any{"usage": usage}
+	}
+	writeEvent(&b, start)
+	for i, blk := range blocks {
+		// The API opens a block empty and fills it with deltas; only the
+		// envelope (type, id, name) is present at content_block_start.
+		input, full := blk.Input, blk.Text
+		blk.Input, blk.Text = nil, ""
+		writeEvent(&b, map[string]any{"type": "content_block_start", "index": i, "content_block": blk})
+		blk.Text = full
+		if blk.Type == "text" {
+			// Split the text so the test exercises delta accumulation rather
+			// than a single whole-value event.
+			for _, chunk := range splitHalf(blk.Text) {
+				writeEvent(&b, map[string]any{"type": "content_block_delta", "index": i,
+					"delta": map[string]any{"type": "text_delta", "text": chunk}})
+			}
+		}
+		if blk.Type == "tool_use" && input != nil {
+			raw, _ := json.Marshal(input)
+			for _, chunk := range splitHalf(string(raw)) {
+				writeEvent(&b, map[string]any{"type": "content_block_delta", "index": i,
+					"delta": map[string]any{"type": "input_json_delta", "partial_json": chunk}})
+			}
+		}
+		writeEvent(&b, map[string]any{"type": "content_block_stop", "index": i})
+	}
+	delta := map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason}}
+	if usage != nil {
+		delta["usage"] = map[string]any{"output_tokens": usage.OutputTokens}
+	}
+	writeEvent(&b, delta)
+	writeEvent(&b, map[string]any{"type": "message_stop"})
+	return b.String()
+}
+
+func writeEvent(b *strings.Builder, payload map[string]any) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintf(b, "event: %s\ndata: %s\n\n", payload["type"], raw)
+}
+
+func splitHalf(s string) []string {
+	if len(s) < 2 {
+		return []string{s}
+	}
+	return []string{s[:len(s)/2], s[len(s)/2:]}
+}
+
+func text(s string) string {
+	return sseResponse([]llm.ContentBlock{{Type: "text", Text: s}}, "end_turn", nil)
+}
 
 func newTestClient(srv *httptest.Server) *Client {
 	return &Client{
@@ -30,7 +93,7 @@ func TestComplete_HappyPath(t *testing.T) {
 			t.Errorf("missing api key header, got %q", got)
 		}
 		w.WriteHeader(200)
-		w.Write([]byte(`{"content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn"}`))
+		w.Write([]byte(text("hi")))
 	}))
 	defer srv.Close()
 
@@ -49,7 +112,10 @@ func TestComplete_PreservesParallelCallsAndOrderedResults(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte(`{"content":[{"type":"tool_use","id":"call_a","name":"read","input":{"path":"a"}},{"type":"tool_use","id":"call_b","name":"read","input":{"path":"b"}}],"stop_reason":"tool_use"}`))
+		_, _ = w.Write([]byte(sseResponse([]llm.ContentBlock{
+			{Type: "tool_use", ID: "call_a", Name: "read", Input: map[string]any{"path": "a"}},
+			{Type: "tool_use", ID: "call_b", Name: "read", Input: map[string]any{"path": "b"}},
+		}, "tool_use", nil)))
 	}))
 	defer srv.Close()
 
@@ -87,7 +153,7 @@ func TestComplete_RetriesOn5xxThenSucceeds(t *testing.T) {
 			return
 		}
 		w.WriteHeader(200)
-		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+		w.Write([]byte(text("ok")))
 	}))
 	defer srv.Close()
 
@@ -113,7 +179,7 @@ func TestComplete_RetriesOn429(t *testing.T) {
 			return
 		}
 		w.WriteHeader(200)
-		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+		w.Write([]byte(text("ok")))
 	}))
 	defer srv.Close()
 
@@ -136,7 +202,7 @@ func TestComplete_RetryAfterHeaderOverridesBodyHint(t *testing.T) {
 			return
 		}
 		w.WriteHeader(200)
-		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+		w.Write([]byte(text("ok")))
 	}))
 	defer srv.Close()
 
@@ -150,7 +216,7 @@ func TestComplete_RetryAfterHeaderOverridesBodyHint(t *testing.T) {
 	}
 }
 
-func TestDoRequest_ReturnsRetryAfterHeader(t *testing.T) {
+func TestSend_ReturnsRetryAfterHeader(t *testing.T) {
 	when := time.Now().UTC().Add(5 * time.Second).Truncate(time.Second)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", when.Format(http.TimeFormat))
@@ -159,10 +225,12 @@ func TestDoRequest_ReturnsRetryAfterHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _, retryAfter, err := newTestClient(srv).doRequest(context.Background(), []byte(`{}`))
+	resp, err := newTestClient(srv).send(context.Background(), []byte(`{}`))
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
+	defer resp.Body.Close()
+	retryAfter := retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now())
 	if !retryAfter.Present {
 		t.Fatal("expected Retry-After header")
 	}
@@ -224,7 +292,7 @@ func TestComplete_SystemBlocksCarryCacheControl(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		w.WriteHeader(200)
-		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+		w.Write([]byte(text("ok")))
 	}))
 	defer srv.Close()
 
@@ -258,7 +326,7 @@ func TestComplete_FallsBackToSystemString(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		w.WriteHeader(200)
-		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+		w.Write([]byte(text("ok")))
 	}))
 	defer srv.Close()
 
@@ -277,7 +345,8 @@ func TestComplete_FallsBackToSystemString(t *testing.T) {
 func TestComplete_ParsesCacheUsage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":7,"cache_creation_input_tokens":100,"cache_read_input_tokens":200}}`))
+		w.Write([]byte(sseResponse([]llm.ContentBlock{{Type: "text", Text: "ok"}}, "end_turn",
+			&apiUsage{InputTokens: 5, OutputTokens: 7, CacheCreationInputTokens: 100, CacheReadInputTokens: 200})))
 	}))
 	defer srv.Close()
 
@@ -306,7 +375,7 @@ func TestComplete_StripsForeignRawBlocksFromMessages(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		w.WriteHeader(200)
-		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+		w.Write([]byte(text("ok")))
 	}))
 	defer srv.Close()
 
@@ -369,7 +438,7 @@ func TestComplete_MaxTokens(t *testing.T) {
 					t.Errorf("decode request: %v", err)
 				}
 				w.WriteHeader(200)
-				w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+				w.Write([]byte(text("ok")))
 			}))
 			defer srv.Close()
 
@@ -419,7 +488,7 @@ func TestComplete_CachesTheConversationPrefix(t *testing.T) {
 					t.Errorf("decode request: %v", err)
 				}
 				w.WriteHeader(200)
-				w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+				w.Write([]byte(text("ok")))
 			}))
 			defer srv.Close()
 
