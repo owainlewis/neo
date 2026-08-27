@@ -95,6 +95,9 @@ type Agent struct {
 	cfg      Config
 	messages []llm.Message
 	usage    llm.Usage
+	// promptTokens is the full prompt size the provider reported for the last
+	// request, used to decide when to compact.
+	promptTokens int
 
 	backendMu sync.RWMutex
 
@@ -201,6 +204,7 @@ func (a *Agent) backend() (llm.Provider, string, compact.Compactor) {
 func (a *Agent) Clear() {
 	a.messages = nil
 	a.usage = llm.Usage{}
+	a.promptTokens = 0
 }
 
 func (a *Agent) Usage() llm.Usage {
@@ -332,7 +336,7 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			"provider", provider.Name(),
 			"model", model,
 		)
-		compaction, err := compactor.Compact(ctx, a.messages)
+		compaction, err := compactor.Compact(ctx, a.messages, a.promptTokens)
 		a.usage = addUsage(a.usage, compaction.Usage)
 		if err != nil {
 			logx.Debug("agent compaction error", "turn", turn+1, "error", err.Error())
@@ -353,6 +357,7 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			return "", err
 		}
 		a.usage = addUsage(a.usage, resp.Usage)
+		a.promptTokens = promptTokens(resp.Usage)
 		logx.Debug("agent provider response",
 			"turn", turn+1,
 			"stop_reason", resp.StopReason,
@@ -804,6 +809,13 @@ func (a *Agent) runPreparedTool(ctx context.Context, call preparedToolCall) tool
 	}
 	logx.Debug("tool result", "name", name, "output", logx.PayloadValue(out))
 	return toolOutcome{text: out}
+}
+
+// promptTokens is the size of the prompt the provider actually received. With
+// prompt caching, InputTokens counts only the uncached remainder, so the cache
+// fields have to be added back to get the real total.
+func promptTokens(u llm.Usage) int {
+	return u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens
 }
 
 func addUsage(a, b llm.Usage) llm.Usage {

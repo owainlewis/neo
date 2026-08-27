@@ -10,7 +10,7 @@ import (
 
 func TestNoCompactionPreservesMessages(t *testing.T) {
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "hi"}}}}
-	result, err := NoCompaction{}.Compact(context.Background(), msgs)
+	result, err := NoCompaction{}.Compact(context.Background(), msgs, 0)
 	if err != nil {
 		t.Fatalf("compact: %v", err)
 	}
