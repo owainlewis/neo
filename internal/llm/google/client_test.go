@@ -120,8 +120,13 @@ func TestComplete_ParsesTextResponse(t *testing.T) {
 	if resp.StopReason != "end_turn" || len(resp.Content) != 1 || resp.Content[0].Type != "text" || resp.Content[0].Text != "hi" {
 		t.Fatalf("bad response: %+v", resp)
 	}
-	if resp.Usage.InputTokens != 7 || resp.Usage.OutputTokens != 5 || resp.Usage.CacheReadTokens != 4 {
+	// promptTokenCount is 7 with 4 of it cached; llm.Usage partitions them, so
+	// InputTokens carries only the uncached 3 and the total is still 7.
+	if resp.Usage.InputTokens != 3 || resp.Usage.OutputTokens != 5 || resp.Usage.CacheReadTokens != 4 {
 		t.Fatalf("bad usage: %+v", resp.Usage)
+	}
+	if got := resp.Usage.PromptTokens(); got != 7 {
+		t.Fatalf("prompt tokens = %d, want 7", got)
 	}
 }
 

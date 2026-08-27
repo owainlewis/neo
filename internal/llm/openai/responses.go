@@ -404,7 +404,10 @@ func toUsage(u *responseUsage) llm.Usage {
 	}
 	usage := llm.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 	if u.InputTokensDetails != nil {
+		// The Responses API reports cached tokens as a subset of input_tokens.
+		// llm.Usage partitions them, so take the cached count back out.
 		usage.CacheReadTokens = u.InputTokensDetails.CachedTokens
+		usage.InputTokens = max(0, usage.InputTokens-usage.CacheReadTokens)
 	}
 	return usage
 }

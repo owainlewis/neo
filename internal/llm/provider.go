@@ -77,11 +77,22 @@ type Request struct {
 
 // Usage reports token accounting for a single completion. Cache fields are
 // zero for providers that don't support prompt caching.
+//
+// The three prompt fields partition the prompt: they never overlap, so the
+// total size of the prompt is InputTokens + CacheCreationTokens +
+// CacheReadTokens, and each is billed at its own rate. Providers whose APIs
+// report the cached counts as a subset of the total must subtract them before
+// filling these in.
 type Usage struct {
-	InputTokens         int `json:"input_tokens"`
+	InputTokens         int `json:"input_tokens"` // prompt tokens neither read from nor written to the cache
 	OutputTokens        int `json:"output_tokens"`
 	CacheCreationTokens int `json:"cache_creation_tokens"` // tokens written to the cache on this request
 	CacheReadTokens     int `json:"cache_read_tokens"`     // tokens served from the cache on this request
+}
+
+// PromptTokens is the full size of the prompt the provider received.
+func (u Usage) PromptTokens() int {
+	return u.InputTokens + u.CacheCreationTokens + u.CacheReadTokens
 }
 
 type Response struct {

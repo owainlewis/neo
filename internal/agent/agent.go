@@ -357,7 +357,7 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			return "", err
 		}
 		a.usage = addUsage(a.usage, resp.Usage)
-		a.promptTokens = promptTokens(resp.Usage)
+		a.promptTokens = resp.Usage.PromptTokens()
 		logx.Debug("agent provider response",
 			"turn", turn+1,
 			"stop_reason", resp.StopReason,
@@ -809,13 +809,6 @@ func (a *Agent) runPreparedTool(ctx context.Context, call preparedToolCall) tool
 	}
 	logx.Debug("tool result", "name", name, "output", logx.PayloadValue(out))
 	return toolOutcome{text: out}
-}
-
-// promptTokens is the size of the prompt the provider actually received. With
-// prompt caching, InputTokens counts only the uncached remainder, so the cache
-// fields have to be added back to get the real total.
-func promptTokens(u llm.Usage) int {
-	return u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens
 }
 
 func addUsage(a, b llm.Usage) llm.Usage {

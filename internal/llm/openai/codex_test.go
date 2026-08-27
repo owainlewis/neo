@@ -89,8 +89,13 @@ func TestCodex_StreamAssembly(t *testing.T) {
 	if tc.Type != "tool_use" || tc.ID != "call_1" || tc.Name != "bash" || tc.Input["cmd"] != "ls" {
 		t.Fatalf("bad tool_use block: %+v", tc)
 	}
-	if resp.Usage.InputTokens != 5 || resp.Usage.OutputTokens != 3 || resp.Usage.CacheReadTokens != 2 {
+	// input_tokens is 5 with 2 of it cached; llm.Usage partitions them, so
+	// InputTokens carries only the uncached 3 and the total is still 5.
+	if resp.Usage.InputTokens != 3 || resp.Usage.OutputTokens != 3 || resp.Usage.CacheReadTokens != 2 {
 		t.Fatalf("bad usage: %+v", resp.Usage)
+	}
+	if got := resp.Usage.PromptTokens(); got != 5 {
+		t.Fatalf("prompt tokens = %d, want 5", got)
 	}
 }
 

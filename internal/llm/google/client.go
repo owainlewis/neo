@@ -424,7 +424,9 @@ func toLLMResponse(out response) (*llm.Response, error) {
 	resp := &llm.Response{Content: blocks, StopReason: stopReason(cand)}
 	if out.Usage != nil {
 		resp.Usage = llm.Usage{
-			InputTokens:     out.Usage.PromptTokenCount,
+			// promptTokenCount includes cachedContentTokenCount; llm.Usage
+			// partitions them, so take the cached count back out.
+			InputTokens:     max(0, out.Usage.PromptTokenCount-out.Usage.CachedTokenCount),
 			OutputTokens:    out.Usage.CandidatesTokenCount + out.Usage.ThoughtsTokenCount,
 			CacheReadTokens: out.Usage.CachedTokenCount,
 		}
