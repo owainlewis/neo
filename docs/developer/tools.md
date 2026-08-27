@@ -48,10 +48,28 @@ which honours `.gitignore`, skips binaries, and is far faster than a hand-rolled
 walk. `--no-require-git` is passed so ignore rules apply whether or not the
 workspace is a git checkout.
 
-If `rg` is not on `PATH`, both tools return an error telling the model to use
-`bash` with `grep` or `find` instead. There is deliberately no Go fallback: a
-second implementation would mean two sets of ignore rules and two output shapes.
-`neo doctor` reports ripgrep as a warning, not a failure, for the same reason.
+Hidden files are searched (`--hidden`), because `.github/workflows` and the like
+are ordinary project files; `.git/` is excluded explicitly, since
+`--no-require-git` turns off ripgrep's own handling of it.
+
+Output is read incrementally and ripgrep is stopped once `max_matches` lines
+have been collected. A broad pattern over a large workspace can produce far more
+than will ever be returned, and buffering it first would let a model-chosen
+pattern decide how much memory Neo uses. The consequence is that truncation is
+reported without a total: counting the rest means reading it.
+
+`max_matches` bounds output lines, not matches. With `context_lines` set, the
+context counts toward it.
+
+If `rg` is not on `PATH`, both tools return an error naming the missing
+dependency. It deliberately does not tell the model to use `bash`: the
+coordinator will reach for it anyway, and an inspect subagent has no shell, so
+suggesting one would only waste a turn. Inspect subagents therefore lose search
+entirely on a machine without ripgrep and will say so.
+
+There is no Go fallback: a second implementation would mean two sets of ignore
+rules and two output shapes. `neo doctor` reports ripgrep as a warning, not a
+failure, for the same reason.
 
 They stay separate tools rather than folding into `bash` because they are
 classified parallel-safe, which `bash` cannot be without interpreting shell

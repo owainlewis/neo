@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 
@@ -24,17 +26,28 @@ const (
 	defaultSearchMax = 200
 )
 
-// errNoRipgrep tells the model what to do instead. Reimplementing search in Go
-// as a fallback would mean two code paths with different ignore rules and
-// different output, which is worse than one clear message.
+// errNoRipgrep names the missing dependency without prescribing a workaround.
+// An agent holding bash will reach for it; an inspect subagent, whose registry
+// is read_file/grep/glob with no shell, cannot, and telling it to would just
+// waste a turn.
 var errNoRipgrep = fmt.Errorf(
-	"%s is not installed, so grep and glob are unavailable; use bash with grep or find instead, or install ripgrep", SearchBinary)
+	"grep and glob require ripgrep (%s), which is not installed on this machine", SearchBinary)
 
 // baseArgs are shared by both tools. --no-require-git makes .gitignore apply
 // even when the workspace is not a git checkout, so discovery does not silently
 // change behaviour depending on whether the directory happens to be a repo.
 func baseArgs() []string {
-	return []string{"--color", "never", "--no-require-git"}
+	return []string{
+		"--color", "never",
+		// Apply .gitignore even outside a git checkout, so discovery does not
+		// change behaviour based on whether the directory happens to be a repo.
+		"--no-require-git",
+		// Dotfiles are ordinary project files: .github/workflows and
+		// .devcontainer are exactly the sort of thing an agent is asked about.
+		// --no-require-git disables ripgrep's own .git handling, so exclude it
+		// explicitly rather than walking the object store.
+		"--hidden", "--glob", "!.git/",
+	}
 }
 
 type Grep struct {
@@ -55,7 +68,7 @@ func (Grep) Spec() llm.ToolSpec {
 				"pattern":       map[string]any{"type": "string", "description": "Regular expression to search for"},
 				"path":          map[string]any{"type": "string", "description": "File or directory to search (optional, defaults to the workspace root)"},
 				"context_lines": map[string]any{"type": "integer", "description": "Lines of context before and after each match (optional)"},
-				"max_matches":   map[string]any{"type": "integer", "description": "Maximum matching lines to return (optional, default 200)"},
+				"max_matches":   map[string]any{"type": "integer", "description": "Maximum output lines to return; context lines count toward it (optional, default 200)"},
 			},
 			"required": []string{"pattern"},
 		},
@@ -114,39 +127,93 @@ func (g Glob) Run(ctx context.Context, input map[string]any) (string, error) {
 	return runSearch(ctx, g.Root, args, optInt(input, "max_matches"), "paths")
 }
 
-// runSearch executes ripgrep and returns at most maxMatches lines. rg exits 1
-// when nothing matched, which is a result rather than a failure.
+// runSearch executes ripgrep and returns at most maxMatches lines. Output is
+// read incrementally and the process is stopped once the limit is reached: a
+// broad pattern over a large workspace can produce far more than we will ever
+// return, and buffering all of it first would let a model-chosen pattern decide
+// how much memory Neo uses.
+//
+// rg exits 1 when nothing matched, which is a result rather than a failure.
 func runSearch(ctx context.Context, root string, args []string, maxMatches int, unit string) (string, error) {
 	if maxMatches <= 0 {
 		maxMatches = defaultSearchMax
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, SearchBinary, args...)
 	cmd.Dir = root
-	out, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return "", err
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return "", errNoRipgrep
 		}
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			if exit.ExitCode() == 1 {
-				return "no matches", nil
-			}
-			return "", fmt.Errorf("%s: %s", SearchBinary, strings.TrimSpace(string(exit.Stderr)))
-		}
 		return "", err
 	}
-	return truncateLines(strings.TrimRight(string(out), "\n"), maxMatches, unit), nil
+
+	lines, total := readLines(stdout, maxMatches)
+	if total > maxMatches {
+		// Stop ripgrep rather than draining output we have already decided to
+		// discard. The wait below then reports a signal, which is expected.
+		cancel()
+	}
+	waitErr := cmd.Wait()
+
+	if total <= maxMatches {
+		if err := searchExitError(ctx, waitErr, stderr.String()); err != nil {
+			return "", err
+		}
+	}
+	if len(lines) == 0 {
+		return "no matches", nil
+	}
+	out := strings.Join(lines, "\n")
+	if total > maxMatches {
+		out += fmt.Sprintf("\n\n[showing the first %d %s; narrow the pattern or raise max_matches]", maxMatches, unit)
+	}
+	return out, nil
 }
 
-func truncateLines(out string, limit int, unit string) string {
-	if out == "" {
-		return "no matches"
+// readLines reads up to limit lines, plus one more to detect that there were
+// others. It returns the kept lines and how many were seen.
+func readLines(r io.Reader, limit int) ([]string, int) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), MaxOutputBytes)
+	var lines []string
+	total := 0
+	for scanner.Scan() {
+		total++
+		if total > limit {
+			break
+		}
+		lines = append(lines, scanner.Text())
 	}
-	lines := strings.Split(out, "\n")
-	if len(lines) <= limit {
-		return out
+	return lines, total
+}
+
+// searchExitError maps ripgrep's exit status. Status 1 means no matches, which
+// is a legitimate answer, not an error.
+func searchExitError(ctx context.Context, err error, stderr string) error {
+	if err == nil {
+		return nil
 	}
-	return strings.Join(lines[:limit], "\n") +
-		fmt.Sprintf("\n\n[showing the first %d of %d %s; narrow the pattern or raise max_matches]", limit, len(lines), unit)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(err, exec.ErrNotFound) {
+		return errNoRipgrep
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		if exit.ExitCode() == 1 {
+			return nil
+		}
+		return fmt.Errorf("%s: %s", SearchBinary, strings.TrimSpace(stderr))
+	}
+	return err
 }
