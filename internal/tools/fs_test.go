@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,8 +20,8 @@ func TestReadFile_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if out != "hi\nthere\n" {
-		t.Fatalf("got %q", out)
+	if want := "     1\thi\n     2\tthere\n"; out != want {
+		t.Fatalf("got %q, want %q", out, want)
 	}
 }
 
@@ -38,8 +39,8 @@ func TestReadFile_OffsetLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if out != "b\nc" {
-		t.Fatalf("got %q, want %q", out, "b\nc")
+	if want := "     2\tb\n     3\tc"; out != want {
+		t.Fatalf("got %q, want %q", out, want)
 	}
 }
 
@@ -63,7 +64,7 @@ func TestReadFile_LargePaginatedRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	want := "line-00250\nline-00251\nline-00252"
+	want := "   250\tline-00250\n   251\tline-00251\n   252\tline-00252"
 	if out != want {
 		t.Fatalf("got %q, want %q", out, want)
 	}
@@ -334,4 +335,31 @@ func fileMode(t *testing.T, path string) os.FileMode {
 		t.Fatal(err)
 	}
 	return info.Mode().Perm()
+}
+
+func TestReadFile_NumbersMatchGrep(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbravo\nneedle\ndelta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	read, err := ReadFile{}.Run(context.Background(), map[string]any{"path": path})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	raw, err := Grep{Root: dir}.Run(context.Background(), map[string]any{"pattern": "needle"})
+	if err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	var got grepResult
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode grep: %v", err)
+	}
+	if len(got.Matches) != 1 {
+		t.Fatalf("grep matches = %d, want 1", len(got.Matches))
+	}
+	if want := lineNumberPrefix(got.Matches[0].Line) + "needle"; !strings.Contains(read, want) {
+		t.Fatalf("read_file line %d is not numbered to match grep:\n%s", got.Matches[0].Line, read)
+	}
 }
