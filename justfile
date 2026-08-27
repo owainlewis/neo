@@ -29,6 +29,10 @@ test-verbose:
 performance:
     ./scripts/performance.sh
 
+# Run codex in a Docker Sandbox for this repo, with host skills mounted
+sandbox *args:
+    ./scripts/sandbox.sh {{ args }}
+
 # Install neo into a runnable bin directory (stamps Version)
 install:
     #!/usr/bin/env bash

@@ -19,6 +19,12 @@ import (
 const defaultEndpoint = "https://api.anthropic.com/v1/messages"
 const defaultVersion = "2023-06-01"
 
+// defaultMaxTokens caps output for a single completion. Current Claude models
+// allow far more, but Neo sends non-streaming requests, so the ceiling is what
+// fits comfortably inside the HTTP timeout rather than what the model supports.
+// Raise this once responses stream.
+const defaultMaxTokens = 16384
+
 type Client struct {
 	APIKey     string
 	Endpoint   string
@@ -129,7 +135,7 @@ func wireMessages(in []llm.Message) []llm.Message {
 
 func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	if req.MaxTokens == 0 {
-		req.MaxTokens = 8192
+		req.MaxTokens = defaultMaxTokens
 	}
 	body, err := json.Marshal(apiRequest{
 		Model:     req.Model,
