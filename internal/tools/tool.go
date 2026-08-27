@@ -32,6 +32,14 @@ type Registry struct {
 	tools map[string]Tool
 }
 
+// NewFileTools builds the filesystem tools that share one view of what the
+// agent has read. Each agent gets its own set, so a subagent's reads never
+// satisfy the coordinator's edits.
+func NewFileTools() []Tool {
+	state := newFileState()
+	return []Tool{ReadFile{State: state}, WriteFile{State: state}, EditFile{State: state}}
+}
+
 func NewRegistry(ts ...Tool) *Registry {
 	r := &Registry{tools: map[string]Tool{}}
 	for _, t := range ts {

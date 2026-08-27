@@ -184,14 +184,11 @@ func printVersion(w io.Writer) {
 }
 
 func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
-	base := []tools.Tool{
+	base := append([]tools.Tool{
 		tools.Bash{Timeout: 2 * time.Minute, CWD: cwd},
-		tools.ReadFile{},
-		tools.WriteFile{},
-		tools.EditFile{},
 		tools.Grep{Root: root},
 		tools.Glob{Root: root},
-	}
+	}, tools.NewFileTools()...)
 	return tools.NewRegistry(append(base, extra...)...)
 }
 

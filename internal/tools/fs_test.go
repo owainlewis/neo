@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadFile_Basic(t *testing.T) {
@@ -361,5 +362,91 @@ func TestReadFile_NumbersMatchGrep(t *testing.T) {
 	}
 	if want := lineNumberPrefix(got.Matches[0].Line) + "needle"; !strings.Contains(read, want) {
 		t.Fatalf("read_file line %d is not numbered to match grep:\n%s", got.Matches[0].Line, read)
+	}
+}
+
+func TestEditFile_RejectsExternalChangeSinceRead(t *testing.T) {
+	files := NewFileTools()
+	read, write, edit := files[0].(ReadFile), files[1].(WriteFile), files[2].(EditFile)
+	ctx := context.Background()
+
+	path := filepath.Join(t.TempDir(), "code.go")
+	if err := os.WriteFile(path, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := read.Run(ctx, map[string]any{"path": path}); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// Something outside the agent rewrites the file. The unique-match check
+	// would still pass, so only the stamp catches this.
+	if err := os.WriteFile(path, []byte("original\nadded by the user\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	touch(t, path)
+
+	_, err := edit.Run(ctx, map[string]any{"path": path, "old_string": "original", "new_string": "edited"})
+	if err == nil {
+		t.Fatal("expected the stale edit to be rejected")
+	}
+	if !strings.Contains(err.Error(), "changed since you read it") {
+		t.Fatalf("error does not tell the agent what to do: %v", err)
+	}
+
+	// Re-reading clears it.
+	if _, err := read.Run(ctx, map[string]any{"path": path}); err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if _, err := edit.Run(ctx, map[string]any{"path": path, "old_string": "original", "new_string": "edited"}); err != nil {
+		t.Fatalf("edit after re-read: %v", err)
+	}
+
+	// The agent's own edits and writes are not external changes.
+	if _, err := edit.Run(ctx, map[string]any{"path": path, "old_string": "edited", "new_string": "again"}); err != nil {
+		t.Fatalf("consecutive edit: %v", err)
+	}
+	if _, err := write.Run(ctx, map[string]any{"path": path, "content": "replaced\n"}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := edit.Run(ctx, map[string]any{"path": path, "old_string": "replaced", "new_string": "final"}); err != nil {
+		t.Fatalf("edit after write: %v", err)
+	}
+}
+
+func TestEditFile_UnreadFileIsNotStale(t *testing.T) {
+	files := NewFileTools()
+	edit := files[2].(EditFile)
+
+	path := filepath.Join(t.TempDir(), "never-read.txt")
+	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := edit.Run(context.Background(), map[string]any{"path": path, "old_string": "hello", "new_string": "bye"}); err != nil {
+		t.Fatalf("editing a file the agent never read must work: %v", err)
+	}
+}
+
+func TestFileState_IsPerAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.txt")
+	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	coordinator, subagent := NewFileTools(), NewFileTools()
+	if _, err := subagent[0].(ReadFile).Run(context.Background(), map[string]any{"path": path}); err != nil {
+		t.Fatalf("subagent read: %v", err)
+	}
+	if coordinator[2].(EditFile).State.changedSinceRead(path) {
+		t.Fatal("a subagent's read must not register as the coordinator having read the file")
+	}
+}
+
+// touch advances the modification time past the filesystem's timestamp
+// granularity so the change is observable regardless of how fast the test runs.
+func touch(t *testing.T, path string) {
+	t.Helper()
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
 	}
 }
