@@ -236,8 +236,8 @@ func TestChatSystem_IgnoresProjectMemoryFile(t *testing.T) {
 
 	system, blocks := chatSystem(&config.Config{}, cwd, nil, io.Discard)
 
-	if len(blocks) != 1 {
-		t.Fatalf("system blocks = %d, want 1", len(blocks))
+	if n := blocksContaining(blocks, "# Project instructions"); n != 0 {
+		t.Fatalf("project instruction blocks = %d, want 0", n)
 	}
 	if strings.Contains(system, "must not enter the prompt") {
 		t.Fatal("memory.md should not enter the system prompt")

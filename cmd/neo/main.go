@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -207,14 +208,17 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, errOut io.Wri
 	base = skills.Augment(base, sk)
 	cache := cfg.PromptCachingEnabled()
 	blocks := []llm.SystemBlock{{Text: base, Cache: cache}}
+	// Dynamic tail: everything below is kept uncached and after the breakpoint
+	// so it never evicts the cached base.
+	if section := environmentSection(cwd, time.Now()); section != "" {
+		blocks = append(blocks, llm.SystemBlock{Text: section})
+	}
 	if cfg.AgentsFileEnabled() && cwd != "" {
 		docs, err := projectctx.Load(cwd)
 		if err != nil {
 			fmt.Fprintf(errOut, "warning: AGENTS.md: %v\n", err)
 		}
 		if section := projectctx.Augment("", docs); section != "" {
-			// Dynamic tail: kept uncached and after the breakpoint so it never
-			// evicts the cached base.
 			blocks = append(blocks, llm.SystemBlock{Text: section})
 		}
 	}
@@ -223,6 +227,25 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, errOut io.Wri
 		b.WriteString(blk.Text)
 	}
 	return b.String(), blocks
+}
+
+// environmentSection states where the agent is running. Without it the model
+// has to spend a bash call on pwd and has no idea what today's date is. These
+// facts are fixed for the session, so a branch name is deliberately absent: it
+// changes underneath us and the model can ask git when it matters.
+func environmentSection(cwd string, now time.Time) string {
+	if cwd == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n# Environment\n\n")
+	fmt.Fprintf(&b, "Working directory: %s\n", cwd)
+	if root := workspace.Root(cwd); root != cwd {
+		fmt.Fprintf(&b, "Repository root: %s\n", root)
+	}
+	fmt.Fprintf(&b, "Platform: %s\n", runtime.GOOS)
+	fmt.Fprintf(&b, "Today's date: %s\n", now.Format("2006-01-02"))
+	return b.String()
 }
 
 func loadConfig(errOut io.Writer) (*config.Config, bool) {
