@@ -54,9 +54,24 @@ func (c *Client) Name() string { return "anthropic" }
 type apiRequest struct {
 	Model     string         `json:"model"`
 	System    any            `json:"system,omitempty"` // string or []systemBlock
-	Messages  []llm.Message  `json:"messages"`
+	Messages  []wireMessage  `json:"messages"`
 	Tools     []llm.ToolSpec `json:"tools,omitempty"`
 	MaxTokens int            `json:"max_tokens"`
+}
+
+// wireMessage and wireBlock are the Messages API shapes. They exist so a
+// content block can carry a cache_control breakpoint, which the neutral
+// llm.ContentBlock has no reason to know about. The embedded block's fields are
+// promoted, so a wireBlock marshals exactly like a ContentBlock plus the
+// optional breakpoint.
+type wireMessage struct {
+	Role    llm.Role    `json:"role"`
+	Content []wireBlock `json:"content"`
+}
+
+type wireBlock struct {
+	llm.ContentBlock
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
 }
 
 // systemBlock is an Anthropic system content block. A non-nil CacheControl marks
@@ -111,26 +126,50 @@ func systemPayload(req llm.Request) any {
 	return blocks
 }
 
-// wireMessages strips content blocks the Messages API does not accept, and
-// removes provider-specific replay data from the neutral blocks it does accept.
-// Messages left with no content are dropped entirely.
-func wireMessages(in []llm.Message) []llm.Message {
-	out := make([]llm.Message, 0, len(in))
+// wireMessages strips content blocks the Messages API does not accept, removes
+// provider-specific replay data from the neutral blocks it does accept, and
+// places the conversation cache breakpoint. Messages left with no content are
+// dropped entirely.
+//
+// The breakpoint goes on the very last block, so the cached prefix is tools +
+// system + the whole conversation. Next turn the server matches that prefix and
+// only the new messages are written. One rolling breakpoint is enough: a cache
+// entry outlives the request that created it, so the earlier entry is still
+// matched after the breakpoint has moved on.
+func wireMessages(in []llm.Message, cache bool) []wireMessage {
+	out := make([]wireMessage, 0, len(in))
 	for _, m := range in {
-		blocks := make([]llm.ContentBlock, 0, len(m.Content))
+		blocks := make([]wireBlock, 0, len(m.Content))
 		for _, b := range m.Content {
 			switch b.Type {
 			case "text", "tool_use", "tool_result", "image":
 				b.Raw = nil
-				blocks = append(blocks, b)
+				blocks = append(blocks, wireBlock{ContentBlock: b})
 			}
 		}
 		if len(blocks) == 0 {
 			continue
 		}
-		out = append(out, llm.Message{Role: m.Role, Content: blocks})
+		out = append(out, wireMessage{Role: m.Role, Content: blocks})
+	}
+	if cache && len(out) > 0 {
+		last := out[len(out)-1].Content
+		last[len(last)-1].CacheControl = &cacheControl{Type: "ephemeral"}
 	}
 	return out
+}
+
+// cacheRequested reports whether the caller asked for prompt caching. It is
+// derived from the system blocks rather than carried as its own request field:
+// the same features.prompt_caching flag governs both, so one signal keeps the
+// two breakpoints from drifting apart.
+func cacheRequested(req llm.Request) bool {
+	for _, b := range req.SystemBlocks {
+		if b.Cache {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
@@ -140,7 +179,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 	body, err := json.Marshal(apiRequest{
 		Model:     req.Model,
 		System:    systemPayload(req),
-		Messages:  wireMessages(req.Messages),
+		Messages:  wireMessages(req.Messages, cacheRequested(req)),
 		Tools:     req.Tools,
 		MaxTokens: req.MaxTokens,
 	})
