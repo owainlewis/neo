@@ -121,7 +121,9 @@ func TestGrep_TruncatesAtMaxMatches(t *testing.T) {
 	if got := strings.Count(out, "many.txt:"); got != 5 {
 		t.Fatalf("returned %d matches, want 5:\n%s", got, out)
 	}
-	if !strings.Contains(out, "showing the first 5 of 50") {
+	// No total: reporting one would mean reading every match, which is exactly
+	// what the early stop avoids.
+	if !strings.Contains(out, "showing the first 5 matching lines") {
 		t.Fatalf("truncation was not reported:\n%s", out)
 	}
 }
@@ -183,5 +185,58 @@ func TestSearchToolsAreParallelSafe(t *testing.T) {
 	}
 	if registry.ParallelSafe("bash", nil) {
 		t.Fatal("bash must remain serial")
+	}
+}
+
+func TestSearch_IncludesHiddenFilesButNotGitInternals(t *testing.T) {
+	requireRipgrep(t)
+	root := searchWorkspace(t)
+	if err := os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".github", "workflows", "ci.yml"), []byte("needle: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A real checkout has a .git directory full of files nobody wants matched.
+	if err := os.MkdirAll(filepath.Join(root, ".git", "objects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "objects", "blob"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Grep{Root: root}.Run(context.Background(), map[string]any{"pattern": "needle"})
+	if err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	if !strings.Contains(out, filepath.Join(".github", "workflows", "ci.yml")) {
+		t.Fatalf("dotfiles are ordinary project files and must be searched:\n%s", out)
+	}
+	if strings.Contains(out, ".git/objects") {
+		t.Fatalf("git internals must stay out:\n%s", out)
+	}
+}
+
+// A huge result set must not be buffered in full before the limit applies.
+func TestGrep_DoesNotBufferBeyondTheLimit(t *testing.T) {
+	requireRipgrep(t)
+	root := t.TempDir()
+	var body strings.Builder
+	for i := range 20000 {
+		fmt.Fprintf(&body, "needle %d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(body.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Grep{Root: root}.Run(context.Background(), map[string]any{"pattern": "needle", "max_matches": 3})
+	if err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	if got := strings.Count(out, "huge.txt:"); got != 3 {
+		t.Fatalf("returned %d lines, want 3", got)
+	}
+	if len(out) > 1000 {
+		t.Fatalf("output is %d bytes; the limit should apply before buffering", len(out))
 	}
 }
