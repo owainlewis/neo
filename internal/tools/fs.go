@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/owainlewis/neo/internal/atomicfile"
 	"github.com/owainlewis/neo/internal/llm"
@@ -16,7 +19,79 @@ import (
 // Files larger than this must be paged via offset/limit.
 const MaxReadBytes = MaxOutputBytes
 
-type ReadFile struct{}
+// fileState remembers what a file looked like when the agent last read it.
+// edit_file consults it so a write cannot land on content the agent never saw:
+// the user saving in their editor, a git checkout, or a concurrent work-mode
+// subagent all change a file without the agent being able to observe it.
+//
+// A nil *fileState tracks nothing, which keeps the zero-value tools usable.
+type fileState struct {
+	mu   sync.Mutex
+	seen map[string]fileStamp
+}
+
+// fileStamp is enough to catch a real external write. Hashing would be exact
+// but a stat is free and the difference does not come up in practice.
+type fileStamp struct {
+	modTime time.Time
+	size    int64
+}
+
+func newFileState() *fileState { return &fileState{seen: map[string]fileStamp{}} }
+
+func stamp(path string) (fileStamp, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}, false
+	}
+	return fileStamp{modTime: info.ModTime(), size: info.Size()}, true
+}
+
+func stateKey(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
+// record notes the file's current state as what the agent has seen.
+func (s *fileState) record(path string) {
+	if s == nil {
+		return
+	}
+	current, ok := stamp(path)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.seen[stateKey(path)] = current
+	s.mu.Unlock()
+}
+
+// changedSinceRead reports whether the file differs from what the agent last
+// read. A path the agent has never read is not stale: trusting the model to
+// read before it edits is fine, because that is a decision it can make. This
+// guard is only for changes it cannot see.
+func (s *fileState) changedSinceRead(path string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	previous, tracked := s.seen[stateKey(path)]
+	s.mu.Unlock()
+	if !tracked {
+		return false
+	}
+	current, ok := stamp(path)
+	if !ok {
+		return false
+	}
+	return current != previous
+}
+
+type ReadFile struct {
+	State *fileState
+}
 
 func (ReadFile) Name() string { return "read_file" }
 
@@ -38,12 +113,19 @@ func (ReadFile) Spec() llm.ToolSpec {
 	}
 }
 
-func (ReadFile) Run(ctx context.Context, input map[string]any) (string, error) {
+func (r ReadFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	path, err := mustString(input, "path")
 	if err != nil {
 		return "", err
 	}
-	return readFileWindow(ctx, path, optInt(input, "offset"), optInt(input, "limit"))
+	out, err := readFileWindow(ctx, path, optInt(input, "offset"), optInt(input, "limit"))
+	if err != nil {
+		return "", err
+	}
+	// A partial read still counts: the stamp records that the agent looked at
+	// this file, not that it saw all of it.
+	r.State.record(path)
+	return out, nil
 }
 
 // lineNumberPrefix renders the gutter for one line. The tab keeps the content
@@ -154,7 +236,9 @@ func appendReadFileChunk(out *strings.Builder, chunk string) error {
 	return nil
 }
 
-type WriteFile struct{}
+type WriteFile struct {
+	State *fileState
+}
 
 func (WriteFile) Name() string { return "write_file" }
 
@@ -173,7 +257,7 @@ func (WriteFile) Spec() llm.ToolSpec {
 	}
 }
 
-func (WriteFile) Run(ctx context.Context, input map[string]any) (string, error) {
+func (w WriteFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	path, err := mustString(input, "path")
 	if err != nil {
 		return "", err
@@ -185,10 +269,14 @@ func (WriteFile) Run(ctx context.Context, input map[string]any) (string, error) 
 	if err := atomicWrite(path, []byte(content)); err != nil {
 		return "", err
 	}
+	// Re-stamp so this write does not read as an external change later.
+	w.State.record(path)
 	return fmt.Sprintf("wrote %d bytes to %s", len(content), path), nil
 }
 
-type EditFile struct{}
+type EditFile struct {
+	State *fileState
+}
 
 func (EditFile) Name() string { return "edit_file" }
 
@@ -208,7 +296,7 @@ func (EditFile) Spec() llm.ToolSpec {
 	}
 }
 
-func (EditFile) Run(ctx context.Context, input map[string]any) (string, error) {
+func (e EditFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	path, err := mustString(input, "path")
 	if err != nil {
 		return "", err
@@ -223,6 +311,9 @@ func (EditFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	newStr, err := mustString(input, "new_string")
 	if err != nil {
 		return "", err
+	}
+	if e.State.changedSinceRead(path) {
+		return "", fmt.Errorf("edit_file: %s changed since you read it; read it again and redo the edit against its current contents", path)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -240,6 +331,8 @@ func (EditFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	if err := atomicWrite(path, []byte(out)); err != nil {
 		return "", err
 	}
+	// The agent has seen the result of its own edit, so it is not stale.
+	e.State.record(path)
 	return fmt.Sprintf("edited %s", path), nil
 }
 

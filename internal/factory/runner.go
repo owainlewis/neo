@@ -96,14 +96,11 @@ func (r *AgentRunner) registryWithOptions(dir string, opts RunOptions) *tools.Re
 	if bashTimeout <= 0 {
 		bashTimeout = 2 * time.Minute
 	}
-	all := tools.NewRegistry(
+	all := tools.NewRegistry(append([]tools.Tool{
 		tools.Bash{Timeout: bashTimeout, CWD: dir},
-		tools.ReadFile{},
-		tools.WriteFile{},
-		tools.EditFile{},
 		tools.Grep{Root: r.Root},
 		tools.Glob{Root: r.Root},
-	)
+	}, tools.NewFileTools()...)...)
 	if len(opts.Tools) == 0 {
 		return all
 	}
