@@ -11,9 +11,10 @@ import (
 )
 
 // MaxBashOutputBytes bounds command output in memory while leaving enough of
-// both ends to diagnose failures. The agent applies its own final transcript
-// cap, but the tool must not buffer an unbounded command before reaching it.
-const MaxBashOutputBytes = 256 * 1024
+// both ends to diagnose failures. Keeping it at MaxOutputBytes means bash does
+// its own head+tail truncation rather than being cut to a prefix later, which
+// would drop the error a failing command prints last.
+const MaxBashOutputBytes = MaxOutputBytes
 
 type Bash struct {
 	Timeout time.Duration
