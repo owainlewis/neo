@@ -386,3 +386,92 @@ func TestComplete_MaxTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestComplete_CachesTheConversationPrefix(t *testing.T) {
+	transcript := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "first"}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "tool_use", ID: "t1", Name: "bash"}}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{
+			{Type: "tool_result", ToolUseID: "t1", Content: "out"},
+			{Type: "text", Text: "keep going"},
+		}},
+	}
+
+	for _, tc := range []struct {
+		name         string
+		systemBlocks []llm.SystemBlock
+		wantCached   bool
+	}{
+		{"caching enabled", []llm.SystemBlock{{Text: "base", Cache: true}, {Text: "tail"}}, true},
+		{"caching disabled", []llm.SystemBlock{{Text: "base"}, {Text: "tail"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured struct {
+				Messages []struct {
+					Content []struct {
+						Type         string         `json:"type"`
+						CacheControl map[string]any `json:"cache_control"`
+					} `json:"content"`
+				} `json:"messages"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				w.WriteHeader(200)
+				w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+			}))
+			defer srv.Close()
+
+			_, err := newTestClient(srv).Complete(context.Background(), llm.Request{
+				Model:        "m",
+				SystemBlocks: tc.systemBlocks,
+				Messages:     transcript,
+			})
+			if err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+
+			var marked []string
+			for _, m := range captured.Messages {
+				for _, b := range m.Content {
+					if b.CacheControl != nil {
+						marked = append(marked, b.Type)
+					}
+				}
+			}
+			if !tc.wantCached {
+				if len(marked) != 0 {
+					t.Fatalf("caching disabled but blocks were marked: %v", marked)
+				}
+				return
+			}
+			// Exactly one breakpoint, on the final block of the final message.
+			if len(marked) != 1 || marked[0] != "text" {
+				t.Fatalf("breakpoints = %v, want one on the last block", marked)
+			}
+			last := captured.Messages[len(captured.Messages)-1].Content
+			if last[len(last)-1].CacheControl["type"] != "ephemeral" {
+				t.Fatalf("last block not marked ephemeral: %+v", last)
+			}
+		})
+	}
+}
+
+func TestWireMessages_DropsRawAndUnsupportedBlocks(t *testing.T) {
+	out := wireMessages([]llm.Message{
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: "reasoning", Raw: json.RawMessage(`{"x":1}`)},
+		}},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{
+			{Type: "text", Text: "hi", Raw: json.RawMessage(`{"x":1}`)},
+		}},
+	}, false)
+
+	if len(out) != 1 {
+		t.Fatalf("messages = %d, want the reasoning-only message dropped", len(out))
+	}
+	if out[0].Content[0].Raw != nil {
+		t.Fatalf("raw replay data must not reach the wire: %+v", out[0].Content[0])
+	}
+}
