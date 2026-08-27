@@ -1639,3 +1639,24 @@ func TestCompactorReceivesReportedPromptSize(t *testing.T) {
 		}
 	}
 }
+
+// llm.Usage partitions the prompt across InputTokens, CacheReadTokens and
+// CacheCreationTokens, so the compactor sees the same total whether a provider
+// served the prompt from cache or not. Getting this wrong makes a well-cached
+// session look tiny (Anthropic) or oversized (OpenAI, Google).
+func TestPromptTokensIsIndependentOfCaching(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage llm.Usage
+	}{
+		{"uncached", llm.Usage{InputTokens: 10000}},
+		{"warm cache", llm.Usage{InputTokens: 100, CacheReadTokens: 9900}},
+		{"cold cache", llm.Usage{InputTokens: 100, CacheCreationTokens: 9900}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.usage.PromptTokens(); got != 10000 {
+				t.Fatalf("prompt tokens = %d, want 10000", got)
+			}
+		})
+	}
+}
