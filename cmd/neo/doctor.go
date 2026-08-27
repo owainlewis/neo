@@ -13,6 +13,7 @@ import (
 	"github.com/owainlewis/neo/internal/auth"
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/session"
+	"github.com/owainlewis/neo/internal/tools"
 )
 
 type doctorStatus string
@@ -60,8 +61,20 @@ func doctorChecks() []doctorCheck {
 		checks = append(checks, doctorModelCheck(cfg))
 	}
 	checks = append(checks, doctorSessionStoreCheck())
+	checks = append(checks, doctorRipgrepCheck())
 	checks = append(checks, doctorGitChecks()...)
 	return checks
+}
+
+// doctorRipgrepCheck reports whether the grep and glob tools will work. Their
+// absence is a warning rather than a failure: the agent still has bash.
+func doctorRipgrepCheck() doctorCheck {
+	path, err := exec.LookPath(tools.SearchBinary)
+	if err != nil {
+		return doctorCheck{Status: doctorWarn, Name: "ripgrep",
+			Detail: "not found: the grep and glob tools are unavailable; the agent will fall back to bash"}
+	}
+	return doctorCheck{Status: doctorPass, Name: "ripgrep", Detail: path}
 }
 
 func doctorProviderCheck(cfg *config.Config) doctorCheck {

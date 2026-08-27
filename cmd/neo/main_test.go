@@ -205,7 +205,7 @@ func TestDoctorChecksContinueAfterConfigFailure(t *testing.T) {
 	}
 
 	checks := doctorChecks()
-	want := []string{"config", "provider", "credentials", "model", "sessions", "git", "workspace"}
+	want := []string{"config", "provider", "credentials", "model", "sessions", "ripgrep", "git", "workspace"}
 	if len(checks) != len(want) {
 		t.Fatalf("checks = %d, want %d: %#v", len(checks), len(want), checks)
 	}

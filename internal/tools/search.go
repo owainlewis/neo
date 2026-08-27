@@ -1,56 +1,40 @@
 package tools
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"regexp"
-	"sort"
+	"os/exec"
 	"strings"
 
 	"github.com/owainlewis/neo/internal/llm"
-	"github.com/owainlewis/neo/internal/workspace"
 )
 
+// Search tools shell out to ripgrep rather than walking the tree themselves.
+// rg respects .gitignore, skips binaries, and is an order of magnitude faster
+// than anything worth hand-rolling here.
+//
+// They remain distinct tools rather than folding into bash for two reasons:
+// they are classified parallel-safe, which bash cannot be without interpreting
+// shell commands, and they give inspect-mode subagents a read-only search
+// capability that does not require handing them a shell.
 const (
-	defaultSearchMax     = 200
-	maxGrepLineBytes     = 4 * 1024 * 1024
-	maxGrepTextBytes     = 16 * 1024
-	grepTruncationMarker = "...[truncated]..."
+	// SearchBinary is exported so `neo doctor` can report whether search works.
+	SearchBinary     = "rg"
+	defaultSearchMax = 200
 )
 
-var errBinaryFile = errors.New("binary file")
+// errNoRipgrep tells the model what to do instead. Reimplementing search in Go
+// as a fallback would mean two code paths with different ignore rules and
+// different output, which is worse than one clear message.
+var errNoRipgrep = fmt.Errorf(
+	"%s is not installed, so grep and glob are unavailable; use bash with grep or find instead, or install ripgrep", SearchBinary)
 
-type grepResult struct {
-	Matches   []grepMatch `json:"matches"`
-	Truncated bool        `json:"truncated"`
-	Count     int         `json:"count"`
-}
-
-type grepMatch struct {
-	Path          string            `json:"path"`
-	Line          int               `json:"line"`
-	Text          string            `json:"text"`
-	ContextBefore []grepContextLine `json:"context_before,omitempty"`
-	ContextAfter  []grepContextLine `json:"context_after,omitempty"`
-}
-
-type grepContextLine struct {
-	Line int    `json:"line"`
-	Text string `json:"text"`
-}
-
-type globResult struct {
-	Matches   []string `json:"matches"`
-	Truncated bool     `json:"truncated"`
-	Count     int      `json:"count"`
+// baseArgs are shared by both tools. --no-require-git makes .gitignore apply
+// even when the workspace is not a git checkout, so discovery does not silently
+// change behaviour depending on whether the directory happens to be a repo.
+func baseArgs() []string {
+	return []string{"--color", "never", "--no-require-git"}
 }
 
 type Grep struct {
@@ -64,14 +48,14 @@ func (Grep) ParallelSafe(map[string]any) bool { return true }
 func (Grep) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "grep",
-		Description: "Search text files under the workspace with a regular expression. Returns JSON: {matches:[{path,line,text,context_before?,context_after?}],truncated,count}.",
+		Description: "Search the workspace with a regular expression, honouring .gitignore. Returns matching lines as path:line:text.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"pattern":       map[string]any{"type": "string", "description": "Regular expression to search for"},
-				"path":          map[string]any{"type": "string", "description": "File or directory under the workspace root (optional)"},
-				"context_lines": map[string]any{"type": "integer", "description": "Number of context lines before and after each match (optional)"},
-				"max_matches":   map[string]any{"type": "integer", "description": "Maximum matches to return (optional, default 200)"},
+				"path":          map[string]any{"type": "string", "description": "File or directory to search (optional, defaults to the workspace root)"},
+				"context_lines": map[string]any{"type": "integer", "description": "Lines of context before and after each match (optional)"},
+				"max_matches":   map[string]any{"type": "integer", "description": "Maximum matching lines to return (optional, default 200)"},
 			},
 			"required": []string{"pattern"},
 		},
@@ -83,110 +67,15 @@ func (g Grep) Run(ctx context.Context, input map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return "", err
+	args := append(baseArgs(), "--line-number", "--no-heading")
+	if n := optInt(input, "context_lines"); n > 0 {
+		args = append(args, "--context", fmt.Sprint(n))
 	}
-	target, err := scopedPath(g.Root, optString(input, "path"))
-	if err != nil {
-		return "", err
+	args = append(args, "--regexp", pattern)
+	if path := optString(input, "path"); path != "" {
+		args = append(args, path)
 	}
-	displayRoot, err := scopedPath(g.Root, "")
-	if err != nil {
-		return "", err
-	}
-	root, err := os.OpenRoot(displayRoot)
-	if err != nil {
-		return "", fmt.Errorf("open grep workspace root %s: %w", displayRoot, err)
-	}
-	defer root.Close()
-	targetName, err := filepath.Rel(displayRoot, target)
-	if err != nil {
-		return "", fmt.Errorf("resolve grep target %s within workspace root %s: %w", target, displayRoot, err)
-	}
-	targetName = filepath.ToSlash(targetName)
-	contextLines := optInt(input, "context_lines")
-	if contextLines < 0 {
-		contextLines = 0
-	}
-	maxMatches := optInt(input, "max_matches")
-	if maxMatches <= 0 {
-		maxMatches = defaultSearchMax
-	}
-
-	files, err := filesUnder(ctx, root, targetName)
-	if err != nil {
-		return "", err
-	}
-	result := grepResult{Matches: []grepMatch{}}
-	for _, file := range files {
-		if err := ctx.Err(); err != nil {
-			result.Count = len(result.Matches)
-			out, jsonErr := encodeSearchResult(result)
-			if jsonErr != nil {
-				return "", jsonErr
-			}
-			return out, err
-		}
-		lines, err := readTextLines(ctx, root, file.openPath)
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				result.Count = len(result.Matches)
-				out, encodeErr := encodeSearchResult(result)
-				if encodeErr != nil {
-					return "", encodeErr
-				}
-				return out, ctxErr
-			}
-			if errors.Is(err, errBinaryFile) {
-				continue
-			}
-			return "", fmt.Errorf("grep %s: %w", file.path, err)
-		}
-		for i, line := range lines {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				result.Count = len(result.Matches)
-				out, encodeErr := encodeSearchResult(result)
-				if encodeErr != nil {
-					return "", encodeErr
-				}
-				return out, ctxErr
-			}
-			matchLocation := re.FindStringIndex(line)
-			if matchLocation == nil {
-				continue
-			}
-			if len(result.Matches) >= maxMatches {
-				result.Truncated = true
-				result.Count = len(result.Matches)
-				return encodeSearchResult(result)
-			}
-			match := grepMatch{
-				Path: file.path,
-				Line: i + 1,
-				Text: boundedGrepText(line, matchLocation[0]),
-			}
-			beforeStart := max(0, i-contextLines)
-			for n := beforeStart; n < i; n++ {
-				match.ContextBefore = append(match.ContextBefore, grepContextLine{Line: n + 1, Text: boundedGrepText(lines[n], -1)})
-			}
-			afterEnd := min(len(lines), i+contextLines+1)
-			for n := i + 1; n < afterEnd; n++ {
-				match.ContextAfter = append(match.ContextAfter, grepContextLine{Line: n + 1, Text: boundedGrepText(lines[n], -1)})
-			}
-			result.Matches = append(result.Matches, match)
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		result.Count = len(result.Matches)
-		out, encodeErr := encodeSearchResult(result)
-		if encodeErr != nil {
-			return "", encodeErr
-		}
-		return out, err
-	}
-	result.Count = len(result.Matches)
-	return encodeSearchResult(result)
+	return runSearch(ctx, g.Root, args, optInt(input, "max_matches"), "matching lines")
 }
 
 type Glob struct {
@@ -200,12 +89,12 @@ func (Glob) ParallelSafe(map[string]any) bool { return true }
 func (Glob) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "glob",
-		Description: "Find files under the workspace root using a glob pattern. Supports ** for recursive matches. Returns JSON: {matches:[path],truncated,count}.",
+		Description: "List workspace files matching a glob pattern, honouring .gitignore. Supports ** for recursive matches. Returns one path per line.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"pattern":     map[string]any{"type": "string", "description": "Glob pattern such as **/*.go"},
-				"path":        map[string]any{"type": "string", "description": "Directory under the workspace root to search from (optional)"},
+				"path":        map[string]any{"type": "string", "description": "Directory to search from (optional, defaults to the workspace root)"},
 				"max_matches": map[string]any{"type": "integer", "description": "Maximum paths to return (optional, default 200)"},
 			},
 			"required": []string{"pattern"},
@@ -218,250 +107,46 @@ func (g Glob) Run(ctx context.Context, input map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	base, err := scopedPath(g.Root, optString(input, "path"))
-	if err != nil {
-		return "", err
+	args := append(baseArgs(), "--files", "--glob", pattern)
+	if path := optString(input, "path"); path != "" {
+		args = append(args, path)
 	}
-	displayRoot, err := scopedPath(g.Root, "")
-	if err != nil {
-		return "", err
-	}
-	maxMatches := optInt(input, "max_matches")
+	return runSearch(ctx, g.Root, args, optInt(input, "max_matches"), "paths")
+}
+
+// runSearch executes ripgrep and returns at most maxMatches lines. rg exits 1
+// when nothing matched, which is a result rather than a failure.
+func runSearch(ctx context.Context, root string, args []string, maxMatches int, unit string) (string, error) {
 	if maxMatches <= 0 {
 		maxMatches = defaultSearchMax
 	}
-	result := globResult{Matches: []string{}}
-	err = filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	cmd := exec.CommandContext(ctx, SearchBinary, args...)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", errNoRipgrep
 		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if shouldSkipDir(d.Name()) && path != base {
-				return filepath.SkipDir
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			if exit.ExitCode() == 1 {
+				return "no matches", nil
 			}
-			return nil
+			return "", fmt.Errorf("%s: %s", SearchBinary, strings.TrimSpace(string(exit.Stderr)))
 		}
-		relBase, err := filepath.Rel(base, path)
-		if err != nil {
-			return nil
-		}
-		relRoot := displayPath(displayRoot, path)
-		ok, err := doublestarMatch(pattern, relBase)
-		if err != nil {
-			return err
-		}
-		if !ok && base != displayRoot {
-			ok, err = doublestarMatch(pattern, relRoot)
-			if err != nil {
-				return err
-			}
-		}
-		if ok {
-			if len(result.Matches) >= maxMatches {
-				result.Truncated = true
-				return errStopWalk
-			}
-			result.Matches = append(result.Matches, relRoot)
-		}
-		return nil
-	})
-	if err != nil && err != errStopWalk {
 		return "", err
 	}
-	sort.Strings(result.Matches)
-	result.Count = len(result.Matches)
-	return encodeSearchResult(result)
+	return truncateLines(strings.TrimRight(string(out), "\n"), maxMatches, unit), nil
 }
 
-var errStopWalk = fmt.Errorf("stop walk")
-
-func encodeSearchResult(result any) (string, error) {
-	out, err := json.Marshal(result)
-	if err != nil {
-		return "", err
+func truncateLines(out string, limit int, unit string) string {
+	if out == "" {
+		return "no matches"
 	}
-	return string(out), nil
-}
-
-func scopedPath(root, path string) (string, error) {
-	return workspace.ResolveWithin(root, path)
-}
-
-type grepFile struct {
-	path     string
-	openPath string
-}
-
-func filesUnder(ctx context.Context, root *os.Root, path string) ([]grepFile, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	lines := strings.Split(out, "\n")
+	if len(lines) <= limit {
+		return out
 	}
-	info, err := fs.Stat(root.FS(), path)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return []grepFile{{path: path, openPath: path}}, nil
-	}
-	var files []grepFile
-	err = fs.WalkDir(root.FS(), path, func(p string, d fs.DirEntry, err error) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err != nil {
-			return fmt.Errorf("walk %s: %w", p, err)
-		}
-		if d.IsDir() {
-			if shouldSkipDir(d.Name()) && p != path {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		file := grepFile{path: p, openPath: p}
-		if d.Type()&fs.ModeSymlink != 0 {
-			resolved, err := workspace.ResolveWithin(root.Name(), filepath.Join(root.Name(), filepath.FromSlash(p)))
-			if err != nil {
-				return fmt.Errorf("resolve discovered path %s within workspace root %s: %w", p, root.Name(), err)
-			}
-			openPath, err := filepath.Rel(root.Name(), resolved)
-			if err != nil {
-				return fmt.Errorf("resolve discovered path %s within workspace root %s: %w", p, root.Name(), err)
-			}
-			file.openPath = filepath.ToSlash(openPath)
-		}
-		files = append(files, file)
-		return nil
-	})
-	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
-	return files, err
-}
-
-func readTextLines(ctx context.Context, root *os.Root, path string) ([]string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	f, err := root.Open(filepath.FromSlash(path))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	var lines []string
-	var line []byte
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		fragment, err := r.ReadSlice('\n')
-		if bytes.IndexByte(fragment, 0) >= 0 {
-			return nil, errBinaryFile
-		}
-		fragmentContentBytes := len(fragment)
-		if err == nil && fragmentContentBytes > 0 && fragment[fragmentContentBytes-1] == '\n' {
-			fragmentContentBytes--
-			if fragmentContentBytes > 0 && fragment[fragmentContentBytes-1] == '\r' {
-				fragmentContentBytes--
-			}
-		}
-		if fragmentContentBytes > maxGrepLineBytes-len(line) {
-			return nil, fmt.Errorf("line %d exceeds grep limit of %d bytes", len(lines)+1, maxGrepLineBytes)
-		}
-		line = append(line, fragment...)
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue
-		}
-		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
-		}
-		if len(line) > 0 || err == nil {
-			line = bytes.TrimSuffix(line, []byte{'\n'})
-			line = bytes.TrimSuffix(line, []byte{'\r'})
-			lines = append(lines, string(line))
-			line = line[:0]
-		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
-	}
-	return lines, nil
-}
-
-// boundedGrepText keeps tool output predictable while grep searches the full
-// contents of lines within its input limit. A match excerpt is centered on the
-// first match; context excerpts retain both ends of the source line.
-func boundedGrepText(line string, focus int) string {
-	if len(line) <= maxGrepTextBytes {
-		return line
-	}
-	payloadBytes := maxGrepTextBytes - 2*len(grepTruncationMarker)
-	if focus < 0 {
-		headBytes := payloadBytes / 2
-		tailBytes := payloadBytes - headBytes
-		return line[:headBytes] + grepTruncationMarker + line[len(line)-tailBytes:]
-	}
-	start := max(0, focus-payloadBytes/2)
-	start = min(start, len(line)-payloadBytes)
-	end := start + payloadBytes
-	var excerpt strings.Builder
-	if start > 0 {
-		excerpt.WriteString(grepTruncationMarker)
-	}
-	excerpt.WriteString(line[start:end])
-	if end < len(line) {
-		excerpt.WriteString(grepTruncationMarker)
-	}
-	return excerpt.String()
-}
-
-func displayPath(root, path string) string {
-	if root == "" {
-		return path
-	}
-	if rel, err := filepath.Rel(root, path); err == nil {
-		return filepath.ToSlash(rel)
-	}
-	return path
-}
-
-func shouldSkipDir(name string) bool {
-	switch name {
-	case ".git", "node_modules", "dist", "vendor":
-		return true
-	default:
-		return false
-	}
-}
-
-func doublestarMatch(pattern, name string) (bool, error) {
-	pattern = filepath.ToSlash(pattern)
-	name = filepath.ToSlash(name)
-	return matchParts(strings.Split(pattern, "/"), strings.Split(name, "/"))
-}
-
-func matchParts(pattern, name []string) (bool, error) {
-	if len(pattern) == 0 {
-		return len(name) == 0, nil
-	}
-	if pattern[0] == "**" {
-		if ok, err := matchParts(pattern[1:], name); ok || err != nil {
-			return ok, err
-		}
-		for i := range name {
-			if ok, err := matchParts(pattern[1:], name[i+1:]); ok || err != nil {
-				return ok, err
-			}
-		}
-		return false, nil
-	}
-	if len(name) == 0 {
-		return false, nil
-	}
-	ok, err := filepath.Match(pattern[0], name[0])
-	if err != nil || !ok {
-		return ok, err
-	}
-	return matchParts(pattern[1:], name[1:])
+	return strings.Join(lines[:limit], "\n") +
+		fmt.Sprintf("\n\n[showing the first %d of %d %s; narrow the pattern or raise max_matches]", limit, len(lines), unit)
 }
