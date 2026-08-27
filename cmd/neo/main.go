@@ -18,13 +18,13 @@ import (
 	"github.com/owainlewis/neo/internal/approval"
 	"github.com/owainlewis/neo/internal/compact"
 	"github.com/owainlewis/neo/internal/config"
-	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
+	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/tui"
 	"github.com/owainlewis/neo/internal/workflow"
@@ -466,15 +466,15 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// prompts directly from the conversation. Sequencing is the agent's
 	// judgment, not a stored workflow artifact.
 	var extra []tools.Tool
-	var stepEvents <-chan factory.Event
-	var agentRunner *factory.AgentRunner
+	var stepEvents <-chan subagent.Event
+	var agentRunner *subagent.AgentRunner
 	var agentRunnerFollowsCoordinator bool
 	var workflowEvents <-chan workflow.Event
 	wf := make(chan workflow.Event, 128)
 	workflowEvents = wf
 	extra = append(extra, workflow.Tool{Events: wf})
 	if cwd != "" {
-		var at factory.AgentTool
+		var at subagent.AgentTool
 		workerProvider, workerModel, followsCoordinator := subagentBackend(ctx, cfg, prov, model)
 		agentRunnerFollowsCoordinator = followsCoordinator
 		at, stepEvents, agentRunner = chatAgentTool(workerProvider, workerModel, cwd, root, cfg)

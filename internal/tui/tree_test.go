@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/owainlewis/neo/internal/agent"
-	"github.com/owainlewis/neo/internal/factory"
+	"github.com/owainlewis/neo/internal/subagent"
 )
 
 // renderPlain renders a block with ANSI styling stripped, so tests can
@@ -17,9 +17,9 @@ func renderPlain(b block, width int) string {
 	return ansi.Strip(b.render(width, nil))
 }
 
-func stepEv(node, parent int, step, kind, body, task string) factory.Event {
-	return factory.Event{Node: node, Task: task,
-		Ev: factory.AgentEvent{Kind: kind, Body: body}}
+func stepEv(node, parent int, step, kind, body, task string) subagent.Event {
+	return subagent.Event{Node: node, Task: task,
+		Ev: subagent.AgentEvent{Kind: kind, Body: body}}
 }
 
 func TestTreeBuildsParallelAgents(t *testing.T) {

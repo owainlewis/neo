@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/config"
-	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/subagent"
 )
 
 // subagentBackend resolves the optional worker backend. The zero-value config
@@ -41,18 +41,18 @@ func (p unavailableProvider) Complete(context.Context, llm.Request) (*llm.Respon
 }
 
 // chatAgentTool builds the agent tool for an interactive chat session.
-func chatAgentTool(prov llm.Provider, model, cwd, root string, cfg *config.Config) (factory.AgentTool, <-chan factory.Event, *factory.AgentRunner) {
+func chatAgentTool(prov llm.Provider, model, cwd, root string, cfg *config.Config) (subagent.AgentTool, <-chan subagent.Event, *subagent.AgentRunner) {
 	contextWindowTokens := 0
 	if cfg != nil {
 		contextWindowTokens = cfg.Compaction.ContextWindowTokens
 	}
-	runner := &factory.AgentRunner{
+	runner := &subagent.AgentRunner{
 		Provider:            prov,
 		DefaultModel:        model,
 		ContextWindowTokens: contextWindowTokens,
 		Root:                root,
 		BashTimeout:         5 * time.Minute,
 	}
-	sup := factory.NewSupervisor(runner, factory.DefaultBudget())
-	return factory.AgentTool{Sup: sup, Dir: cwd}, sup.Events, runner
+	sup := subagent.NewSupervisor(runner, subagent.DefaultBudget())
+	return subagent.AgentTool{Sup: sup, Dir: cwd}, sup.Events, runner
 }

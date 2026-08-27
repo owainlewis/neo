@@ -20,11 +20,11 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
-	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
+	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/workflow"
 )
@@ -34,7 +34,7 @@ type Options struct {
 	ModelChoices   []ModelChoice
 	Provider       string
 	ModelSwitcher  func(string) error
-	StepEvents     <-chan factory.Event
+	StepEvents     <-chan subagent.Event
 	WorkflowEvents <-chan workflow.Event
 	Phases         []phase.Definition
 	Verbose        bool
@@ -58,10 +58,10 @@ func WithModelSwitcher(provider string, choices []ModelChoice, fn func(string) e
 	}
 }
 
-// WithStepEvents subscribes the TUI to the factory supervisor's event
+// WithStepEvents subscribes the TUI to the subagent supervisor's event
 // stream, which the chat view folds into live subagent activity while agent
 // calls execute.
-func WithStepEvents(ch <-chan factory.Event) Option {
+func WithStepEvents(ch <-chan subagent.Event) Option {
 	return func(opts *Options) { opts.StepEvents = ch }
 }
 
@@ -166,7 +166,7 @@ type sendResultMsg struct {
 }
 type persistenceRetryResultMsg struct{ err error }
 type agentEventMsg struct{ ev agent.Event }
-type stepEventMsg struct{ ev factory.Event }
+type stepEventMsg struct{ ev subagent.Event }
 type workflowEventMsg struct{ ev workflow.Event }
 type branchMsg struct{ branch string }
 type approvalRequestMsg struct {

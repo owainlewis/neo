@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
-	"github.com/owainlewis/neo/internal/factory"
+	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -83,15 +83,15 @@ func TestParallelSubagentEventsUpdatePreallocatedRows(t *testing.T) {
 	))
 	// Parallel metadata that cannot be correlated is consumed, never rendered
 	// as a duplicate legacy tree.
-	m.handleStepEvent(factory.Event{Node: 99, CallID: "a", GroupID: "wrong",
-		Ev: factory.AgentEvent{Kind: "start"}})
+	m.handleStepEvent(subagent.Event{Node: 99, CallID: "a", GroupID: "wrong",
+		Ev: subagent.AgentEvent{Kind: "start"}})
 	if len(m.blocks) != 1 {
 		t.Fatalf("mismatched parallel event created a tree: %#v", m.blocks)
 	}
-	m.handleStepEvent(factory.Event{Node: 7, Task: "Inspect auth", CallID: "a", GroupID: "agents", GroupSize: 2, GroupPos: 0,
-		Ev: factory.AgentEvent{Kind: "start"}})
-	m.handleStepEvent(factory.Event{Node: 7, CallID: "a", GroupID: "agents", GroupSize: 2, GroupPos: 0,
-		Ev: factory.AgentEvent{Kind: "tool", Body: "read auth.go"}})
+	m.handleStepEvent(subagent.Event{Node: 7, Task: "Inspect auth", CallID: "a", GroupID: "agents", GroupSize: 2, GroupPos: 0,
+		Ev: subagent.AgentEvent{Kind: "start"}})
+	m.handleStepEvent(subagent.Event{Node: 7, CallID: "a", GroupID: "agents", GroupSize: 2, GroupPos: 0,
+		Ev: subagent.AgentEvent{Kind: "tool", Body: "read auth.go"}})
 
 	if len(m.blocks) != 1 {
 		t.Fatalf("supervisor created a duplicate block: %#v", m.blocks)
@@ -100,7 +100,7 @@ func TestParallelSubagentEventsUpdatePreallocatedRows(t *testing.T) {
 	if group.rows[0].detail != "read auth.go" {
 		t.Fatalf("live detail = %q", group.rows[0].detail)
 	}
-	m.handleStepEvent(factory.Event{Node: 7, CallID: "a", GroupID: "agents", Ev: factory.AgentEvent{Kind: "done"}})
+	m.handleStepEvent(subagent.Event{Node: 7, CallID: "a", GroupID: "agents", Ev: subagent.AgentEvent{Kind: "done"}})
 	if group.rows[0].state != parallelSucceeded || group.rows[1].state != parallelRunning {
 		t.Fatalf("states = %v, %v", group.rows[0].state, group.rows[1].state)
 	}
@@ -115,8 +115,8 @@ func TestParallelSubagentRetryCanRecoverFromFailure(t *testing.T) {
 		agent.ToolCallRef{ID: "a", Name: "agent", Args: map[string]any{"prompt": "Inspect auth"}},
 		agent.ToolCallRef{ID: "b", Name: "agent", Args: map[string]any{"prompt": "Find tests"}},
 	))
-	event := func(node int, kind string) factory.Event {
-		return factory.Event{Node: node, CallID: "a", GroupID: "agents", Ev: factory.AgentEvent{Kind: kind}}
+	event := func(node int, kind string) subagent.Event {
+		return subagent.Event{Node: node, CallID: "a", GroupID: "agents", Ev: subagent.AgentEvent{Kind: kind}}
 	}
 	m.handleStepEvent(event(7, "start"))
 	m.handleStepEvent(event(7, "fail"))
@@ -152,8 +152,8 @@ func TestParallelSubagentIgnoresSupervisorEventsAfterParentSettlement(t *testing
 	}
 
 	for _, kind := range []string{"start", "tool", "done"} {
-		m.handleStepEvent(factory.Event{Node: 9, CallID: "a", GroupID: "agents",
-			Ev: factory.AgentEvent{Kind: kind, Body: "late detail"}})
+		m.handleStepEvent(subagent.Event{Node: 9, CallID: "a", GroupID: "agents",
+			Ev: subagent.AgentEvent{Kind: kind, Body: "late detail"}})
 	}
 	if row.state != parallelFailed || row.nodeID != 0 || row.detail != "" {
 		t.Fatalf("late supervisor event rewrote parent result: %+v", row)
