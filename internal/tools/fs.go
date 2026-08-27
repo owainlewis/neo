@@ -25,7 +25,7 @@ func (ReadFile) ParallelSafe(map[string]any) bool { return true }
 func (ReadFile) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "read_file",
-		Description: "Read a file from disk. Returns up to ~256KB. Use offset/limit (1-indexed line numbers) to page through larger files.",
+		Description: "Read a file from disk. Each line is prefixed with its 1-indexed line number and a tab, matching the line numbers grep reports. Use offset/limit to page through large files.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -43,47 +43,14 @@ func (ReadFile) Run(ctx context.Context, input map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	offset := optInt(input, "offset")
-	limit := optInt(input, "limit")
-
-	if offset <= 0 && limit <= 0 {
-		return readWholeFileCapped(ctx, path)
-	}
-	return readFileWindow(ctx, path, offset, limit)
+	return readFileWindow(ctx, path, optInt(input, "offset"), optInt(input, "limit"))
 }
 
-func readWholeFileCapped(ctx context.Context, path string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if info.Size() > MaxReadBytes {
-		return "", fmt.Errorf("read_file: file exceeds %d bytes; use offset/limit to read a smaller selection", MaxReadBytes)
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-
-	b, err := io.ReadAll(io.LimitReader(f, MaxReadBytes+1))
-	if err != nil {
-		return "", err
-	}
-	if len(b) > MaxReadBytes {
-		return "", fmt.Errorf("read_file: file exceeds %d bytes; use offset/limit to read a smaller selection", MaxReadBytes)
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return string(b), nil
+// lineNumberPrefix renders the gutter for one line. The tab keeps the content
+// column stable and gives the model an unambiguous place to cut when it needs
+// the raw text back for edit_file.
+func lineNumberPrefix(line int) string {
+	return fmt.Sprintf("%6d\t", line)
 }
 
 func readFileWindow(ctx context.Context, path string, offset, limit int) (string, error) {
@@ -130,6 +97,9 @@ func readFileWindow(ctx context.Context, path string, offset, limit int) (string
 					if !wroteLine {
 						wroteLine = true
 					} else if err := appendReadFileChunk(&out, "\n"); err != nil {
+						return "", err
+					}
+					if err := appendReadFileChunk(&out, lineNumberPrefix(lineNo)); err != nil {
 						return "", err
 					}
 					inSelectedLine = true
@@ -225,7 +195,7 @@ func (EditFile) Name() string { return "edit_file" }
 func (EditFile) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
 		Name:        "edit_file",
-		Description: "Replace exactly one occurrence of old_string with new_string in a file. Fails if old_string is missing or appears more than once.",
+		Description: "Replace exactly one occurrence of old_string with new_string in a file. Fails if old_string is missing or appears more than once. Strip the line-number prefix read_file adds before matching; old_string must be the file's raw text.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
