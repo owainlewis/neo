@@ -105,8 +105,11 @@ func TestBash_CancelStopsChildProcesses(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
+		// The shell's > redirect creates the file before echo writes to it, so
+		// waiting on existence alone can cancel while it is still empty and
+		// leave readPID with nothing to parse.
 		for i := 0; i < 50; i++ {
-			if _, err := os.Stat(pidFile); err == nil {
+			if info, err := os.Stat(pidFile); err == nil && info.Size() > 0 {
 				cancel()
 				return
 			}
