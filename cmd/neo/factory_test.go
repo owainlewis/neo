@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm"
@@ -155,12 +157,66 @@ func TestChatSystemWarnsAndExcludesEscapingAgentsSymlink(t *testing.T) {
 			t.Fatalf("system prompt did not preserve %q", safe)
 		}
 	}
-	if len(blocks) != 2 {
-		t.Fatalf("system blocks = %d, want base and safe instructions blocks", len(blocks))
+	if n := blocksContaining(blocks, "# Project instructions"); n != 1 {
+		t.Fatalf("project instruction blocks = %d, want 1", n)
 	}
 	for _, want := range []string{"warning: AGENTS.md:", "outside workspace root"} {
 		if !strings.Contains(warnings.String(), want) {
 			t.Fatalf("warning %q does not contain %q", warnings.String(), want)
 		}
 	}
+}
+
+func TestChatSystemStatesTheEnvironment(t *testing.T) {
+	cwd := t.TempDir()
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, io.Discard)
+
+	for _, want := range []string{"# Environment", "Working directory: " + cwd, "Platform: " + runtime.GOOS} {
+		if !strings.Contains(system, want) {
+			t.Fatalf("system prompt missing %q:\n%s", want, system)
+		}
+	}
+	if len(blocks) < 2 || blocks[0].Cache != true {
+		t.Fatalf("environment must follow the cached base: %+v", blocks)
+	}
+	if blocks[1].Cache {
+		t.Fatalf("environment block must stay uncached: %+v", blocks[1])
+	}
+}
+
+func TestEnvironmentSectionOmittedWithoutCWD(t *testing.T) {
+	if got := environmentSection("", time.Now()); got != "" {
+		t.Fatalf("environmentSection(\"\") = %q, want empty", got)
+	}
+}
+
+func TestEnvironmentSectionNamesRepositoryRootOnlyWhenDistinct(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "pkg")
+	if err := os.Mkdir(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := environmentSection(nested, time.Now()); !strings.Contains(got, "Repository root: "+root) {
+		t.Fatalf("nested cwd should name the repository root:\n%s", got)
+	}
+	if got := environmentSection(root, time.Now()); strings.Contains(got, "Repository root:") {
+		t.Fatalf("root cwd should not repeat itself:\n%s", got)
+	}
+}
+
+// blocksContaining counts the system blocks whose text contains want. Tests
+// assert on which sections are present rather than on a block count, which
+// changes whenever a new dynamic section is added.
+func blocksContaining(blocks []llm.SystemBlock, want string) int {
+	n := 0
+	for _, blk := range blocks {
+		if strings.Contains(blk.Text, want) {
+			n++
+		}
+	}
+	return n
 }
