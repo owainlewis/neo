@@ -350,3 +350,39 @@ func TestComplete_StripsForeignRawBlocksFromMessages(t *testing.T) {
 		t.Fatalf("provider-neutral tool result was not preserved: %+v", got)
 	}
 }
+
+func TestComplete_MaxTokens(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		request int
+		want    int
+	}{
+		{"defaults when unset", 0, defaultMaxTokens},
+		{"honors an explicit value", 4096, 4096},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured struct {
+				MaxTokens int `json:"max_tokens"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				w.WriteHeader(200)
+				w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+			}))
+			defer srv.Close()
+
+			_, err := newTestClient(srv).Complete(context.Background(), llm.Request{
+				Model:     "m",
+				MaxTokens: tc.request,
+			})
+			if err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+			if captured.MaxTokens != tc.want {
+				t.Fatalf("max_tokens = %d, want %d", captured.MaxTokens, tc.want)
+			}
+		})
+	}
+}
