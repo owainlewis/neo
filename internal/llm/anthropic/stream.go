@@ -43,10 +43,10 @@ type streamEvent struct {
 // generation is not bounded by a single request timeout, not to paint text.
 func parseStream(r io.Reader) (*llm.Response, error) {
 	var (
-		out       llm.Response
-		toolJSON  = map[int]*strings.Builder{}
-		blockAt   = map[int]int{} // event index -> position in out.Content
-		sawResult bool
+		out      llm.Response
+		toolJSON = map[int]*strings.Builder{}
+		blockAt  = map[int]int{} // event index -> position in out.Content
+		done     bool
 	)
 
 	scanner := bufio.NewScanner(r)
@@ -70,7 +70,6 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 
 		switch ev.Type {
 		case "message_start":
-			sawResult = true
 			if ev.Message != nil && ev.Message.Usage != nil {
 				out.Usage = ev.Message.Usage.toLLM()
 			}
@@ -112,6 +111,8 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 					return nil, fmt.Errorf("decode tool input for %s: %w", out.Content[pos].Name, err)
 				}
 			}
+		case "message_stop":
+			done = true
 		case "message_delta":
 			if ev.Delta != nil && ev.Delta.StopReason != "" {
 				out.StopReason = ev.Delta.StopReason
@@ -126,8 +127,13 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read stream: %w", err)
 	}
-	if !sawResult {
-		return nil, fmt.Errorf("anthropic: stream ended before any response")
+	// A connection dropped part-way through ends in a clean EOF, so the absence
+	// of the terminal event is the only signal that the response is partial.
+	// Without this check a truncated stream arrives with no stop_reason, which
+	// the agent loop reads as a normal end of turn — silent truncation is the
+	// one failure mode worth being loud about.
+	if !done {
+		return nil, fmt.Errorf("anthropic: stream ended before the response was complete")
 	}
 	return &out, nil
 }
