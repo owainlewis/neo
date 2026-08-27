@@ -1593,13 +1593,49 @@ func (p *cancelAfterToolProvider) Complete(ctx context.Context, req llm.Request)
 
 type countingCompactor struct {
 	compact.NoCompaction
-	calls int
+	calls        int
+	promptTokens []int
 }
 
-func (c *countingCompactor) Compact(ctx context.Context, messages []llm.Message) (compact.Result, error) {
+func (c *countingCompactor) Compact(ctx context.Context, messages []llm.Message, promptTokens int) (compact.Result, error) {
 	c.calls++
+	c.promptTokens = append(c.promptTokens, promptTokens)
 	if len(messages) == 0 {
 		return compact.Result{}, fmt.Errorf("expected user message before compaction")
 	}
 	return compact.Result{Messages: messages}, nil
+}
+
+// The agent must feed the provider's reported prompt size back into the
+// compactor. With prompt caching, InputTokens counts only the uncached
+// remainder, so the cache fields have to be added back or a cached session
+// would look tiny and never compact.
+func TestCompactorReceivesReportedPromptSize(t *testing.T) {
+	provider := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content:    []llm.ContentBlock{{Type: "text", Text: "one"}},
+			StopReason: "end_turn",
+			Usage:      llm.Usage{InputTokens: 100, CacheReadTokens: 9000, CacheCreationTokens: 900},
+		},
+		llmtest.Text("two"),
+	}}
+	comp := &countingCompactor{}
+	ag := New(Config{Model: "m", Provider: provider, Compactor: comp})
+
+	if _, err := ag.Send(context.Background(), "first"); err != nil {
+		t.Fatalf("first turn: %v", err)
+	}
+	if _, err := ag.Send(context.Background(), "second"); err != nil {
+		t.Fatalf("second turn: %v", err)
+	}
+
+	want := []int{0, 10000}
+	if len(comp.promptTokens) != len(want) {
+		t.Fatalf("compactions = %v, want %v", comp.promptTokens, want)
+	}
+	for i, w := range want {
+		if comp.promptTokens[i] != w {
+			t.Fatalf("compaction %d saw %d prompt tokens, want %d (all: %v)", i, comp.promptTokens[i], w, comp.promptTokens)
+		}
+	}
 }

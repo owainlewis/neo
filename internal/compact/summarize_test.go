@@ -29,7 +29,7 @@ func TestSummarizer_BelowTriggerIsNoOp(t *testing.T) {
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1_000_000, KeepRecent: 2}
 
 	msgs := turns(10)
-	result, err := s.Compact(context.Background(), msgs)
+	result, err := s.Compact(context.Background(), msgs, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSummarizer_CompactsOldTurnsIntoSummary(t *testing.T) {
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1, KeepRecent: 4}
 
 	msgs := turns(12)
-	result, err := s.Compact(context.Background(), msgs)
+	result, err := s.Compact(context.Background(), msgs, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestSummarizer_CompactsCompletedToolExchange(t *testing.T) {
 		userText("continue"),
 	}
 
-	result, err := s.Compact(context.Background(), msgs)
+	result, err := s.Compact(context.Background(), msgs, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestSummarizer_ProviderErrorPropagates(t *testing.T) {
 	prov := &llmtest.FakeProvider{} // no scripted responses → Complete errors
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1, KeepRecent: 2}
 
-	result, err := s.Compact(context.Background(), turns(10))
+	result, err := s.Compact(context.Background(), turns(10), 0)
 	if err == nil {
 		t.Fatal("expected summarization error to propagate")
 	}
@@ -169,7 +169,7 @@ func TestSummarizer_NoSafeSplitLeavesTranscriptAlone(t *testing.T) {
 		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: "t1", Content: filler}}},
 		assistantText(filler),
 	}
-	result, err := s.Compact(context.Background(), msgs)
+	result, err := s.Compact(context.Background(), msgs, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,11 +184,48 @@ func TestSummarizer_EmptySummaryIsAnError(t *testing.T) {
 	prov := &llmtest.FakeProvider{Responses: []llm.Response{response}}
 	s := Summarizer{Provider: prov, Model: "m", TriggerTokens: 1, KeepRecent: 2}
 
-	result, err := s.Compact(context.Background(), turns(10))
+	result, err := s.Compact(context.Background(), turns(10), 0)
 	if err == nil {
 		t.Fatal("expected error when summarization returns no text")
 	}
 	if result.Usage != response.Usage {
 		t.Fatalf("failed compaction usage = %+v, want %+v", result.Usage, response.Usage)
+	}
+}
+
+// The reported prompt size, not the character estimate, decides when to
+// compact. The estimate cannot see the system prompt or the tool definitions,
+// so it runs low and compaction fires late.
+func TestSummarizer_UsesReportedPromptSizeOverEstimate(t *testing.T) {
+	messages := make([]llm.Message, 0, DefaultKeepRecent+2)
+	for i := range cap(messages) {
+		role := llm.RoleUser
+		if i%2 == 1 {
+			role = llm.RoleAssistant
+		}
+		messages = append(messages, llm.Message{Role: role, Content: []llm.ContentBlock{{Type: "text", Text: "short"}}})
+	}
+	s := Summarizer{Provider: &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("a summary")}}, TriggerTokens: 1000}
+
+	// The estimate for this transcript is tiny, so nothing happens without a
+	// reported size.
+	got, err := s.Compact(context.Background(), messages, 0)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(got.Messages) != len(messages) {
+		t.Fatalf("estimate path compacted %d messages, want no change", len(messages)-len(got.Messages))
+	}
+
+	// The provider reporting a prompt over the trigger does compact it.
+	got, err = s.Compact(context.Background(), messages, 2000)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(got.Messages) >= len(messages) {
+		t.Fatalf("reported size above the trigger did not compact: %d messages", len(got.Messages))
+	}
+	if !strings.Contains(got.Messages[0].Content[0].Text, "a summary") {
+		t.Fatalf("first message is not the summary: %+v", got.Messages[0])
 	}
 }

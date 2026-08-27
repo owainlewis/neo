@@ -73,7 +73,7 @@ func TriggerTokensForContextWindow(contextWindowTokens int) int {
 	return int(float64(contextWindowTokens) * triggerRatio)
 }
 
-func (s Summarizer) Compact(ctx context.Context, messages []llm.Message) (Result, error) {
+func (s Summarizer) Compact(ctx context.Context, messages []llm.Message, promptTokens int) (Result, error) {
 	trigger := s.TriggerTokens
 	if trigger <= 0 {
 		trigger = TriggerTokensForContextWindow(DefaultContextWindowTokens)
@@ -82,7 +82,12 @@ func (s Summarizer) Compact(ctx context.Context, messages []llm.Message) (Result
 	if keep <= 0 {
 		keep = DefaultKeepRecent
 	}
-	if len(messages) <= keep || EstimateTokens(messages) < trigger {
+	size := promptTokens
+	if size <= 0 {
+		// Nothing observed yet, so fall back to the estimate for the first turn.
+		size = EstimateTokens(messages)
+	}
+	if len(messages) <= keep || size < trigger {
 		return Result{Messages: messages}, nil
 	}
 	split := SafeSplitPoint(messages, len(messages)-keep)
@@ -146,8 +151,9 @@ func (s Summarizer) summarize(ctx context.Context, head []llm.Message) (string, 
 }
 
 // EstimateTokens approximates the token count of a transcript at ~4 characters
-// per token. It is deliberately rough: it only needs to be in the right order
-// of magnitude to decide when to compact.
+// per token. It is only used before the first provider response, when there is
+// no reported size to use instead; it undercounts because it cannot see the
+// system prompt or the tool definitions that are sent alongside.
 func EstimateTokens(messages []llm.Message) int {
 	chars := 0
 	for _, m := range messages {

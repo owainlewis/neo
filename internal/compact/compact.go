@@ -7,7 +7,10 @@ import (
 )
 
 type Compactor interface {
-	Compact(ctx context.Context, messages []llm.Message) (Result, error)
+	// Compact trims messages when the transcript no longer fits. promptTokens is
+	// what the provider reported for the previous request, or 0 before any
+	// response has landed.
+	Compact(ctx context.Context, messages []llm.Message, promptTokens int) (Result, error)
 }
 
 // Result contains the transcript and provider usage produced by a compaction
@@ -20,7 +23,7 @@ type Result struct {
 
 type NoCompaction struct{}
 
-func (NoCompaction) Compact(_ context.Context, messages []llm.Message) (Result, error) {
+func (NoCompaction) Compact(_ context.Context, messages []llm.Message, _ int) (Result, error) {
 	return Result{Messages: messages}, nil
 }
 
