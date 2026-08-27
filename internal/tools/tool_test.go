@@ -70,16 +70,20 @@ func TestParallelReadSearchToolsHonorCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	tests := []struct {
-		name  string
-		tool  Tool
-		input map[string]any
+		name         string
+		tool         Tool
+		input        map[string]any
+		needsRipgrep bool
 	}{
 		{name: "read_file", tool: ReadFile{}, input: map[string]any{"path": path}},
-		{name: "grep", tool: Grep{Root: root}, input: map[string]any{"pattern": "hello"}},
-		{name: "glob", tool: Glob{Root: root}, input: map[string]any{"pattern": "**/*.txt"}},
+		{name: "grep", tool: Grep{Root: root}, input: map[string]any{"pattern": "hello"}, needsRipgrep: true},
+		{name: "glob", tool: Glob{Root: root}, input: map[string]any{"pattern": "**/*.txt"}, needsRipgrep: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.needsRipgrep {
+				requireRipgrep(t)
+			}
 			_, err := tt.tool.Run(ctx, tt.input)
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("error = %v, want context canceled", err)
