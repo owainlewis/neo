@@ -73,6 +73,7 @@ func TestParseStream_ToolWithNoArguments(t *testing.T) {
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"branch"}}`,
 		`data: {"type":"content_block_stop","index":0}`,
 		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		`data: {"type":"message_stop"}`,
 		``,
 	}, "\n\n")
 
@@ -92,7 +93,10 @@ func TestParseStream_Errors(t *testing.T) {
 		{"mid-stream error event",
 			"data: {\"type\":\"message_start\",\"message\":{}}\n\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"overloaded\"}}\n\n",
 			"overloaded"},
-		{"truncated before any event", "", "stream ended before any response"},
+		{"truncated before any event", "", "stream ended before the response was complete"},
+		{"truncated mid-response",
+			"data: {\"type\":\"message_start\",\"message\":{}}\n\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"half a th\"}}\n\n",
+			"stream ended before the response was complete"},
 		{"unparseable event", "data: {not json}\n\n", "decode stream event"},
 		{"unparseable tool input",
 			"data: {\"type\":\"message_start\",\"message\":{}}\n\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"bash\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{oops\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
