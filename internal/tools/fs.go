@@ -136,6 +136,11 @@ func lineNumberPrefix(line int) string {
 }
 
 func readFileWindow(ctx context.Context, path string, offset, limit int) (string, error) {
+	// Check before opening: a cancelled turn should report cancellation rather
+	// than a filesystem error, and opening a FIFO with no writer blocks.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

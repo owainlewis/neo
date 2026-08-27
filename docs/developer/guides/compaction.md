@@ -16,16 +16,29 @@ If the transcript gets too large, the next provider call may fail or become wast
 
 Neo summarizes old turns once the transcript gets large:
 
-- `compact.Compactor` is the interface; the agent calls it before every provider call.
-- `compact.Summarizer` is wired in by the chat command. When the estimated transcript size passes 70% of the configured context window, it asks the provider to summarize the oldest turns and replaces them with a single user message carrying the summary. The most recent messages are kept verbatim.
+- `compact.Compactor` is the interface; the agent calls it before every provider call, passing the prompt size the provider reported for the previous request.
+- `compact.Summarizer` is wired in by the chat command. When that reported size passes 70% of the configured context window, it asks the provider to summarize the oldest turns and replaces them with a single user message carrying the summary. The most recent messages are kept verbatim.
 - `NoCompaction` is the fallback when no compactor is configured.
 - `SafeSplitPoint` picks the cut so strategies avoid invalid transcript splits.
 
 The important safety rule is: never keep a `tool_result` without its matching `tool_use`.
 
+## Measuring the transcript
+
+The trigger uses `Usage.PromptTokens()` from the previous response, which is
+exact and includes the system prompt and the tool definitions. `EstimateTokens`
+(characters divided by four) survives only as the fallback for the first turn,
+before any response has landed; it undercounts because it can see neither.
+
+The reported size lags one turn behind. At a 70% trigger that is safe: a single
+turn can add at most `tools.MaxOutputBytes` of tool output.
+
+Resuming a session restores the transcript but not the reported size, so the
+first turn after a resume falls back to the estimate.
+
 ## Context Window Setting
 
-Neo uses a conservative default context window of 200k tokens and compacts at 70% of that estimate. Users on larger-context models can raise it in `neo.yaml`:
+Neo uses a conservative default context window of 200k tokens and compacts at 70% of it. Users on larger-context models can raise it in `neo.yaml`:
 
 ```yaml
 compaction:

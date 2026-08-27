@@ -220,3 +220,19 @@ func blocksContaining(blocks []llm.SystemBlock, want string) int {
 	}
 	return n
 }
+
+func TestEnvironmentSectionKeepsValuesOnOneLine(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "odd\nname")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Skipf("filesystem rejects newlines in paths: %v", err)
+	}
+	got := environmentSection(dir, time.Now())
+	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
+		if strings.HasPrefix(line, "#") && line != "# Environment" {
+			t.Fatalf("a path introduced its own heading:\n%s", got)
+		}
+	}
+	if strings.Contains(got, "Working directory: "+dir) {
+		t.Fatalf("newline in path was not flattened:\n%s", got)
+	}
+}

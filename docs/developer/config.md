@@ -33,7 +33,7 @@ model: claude-opus-5
 #   - rm -rf
 #   - write_file
 
-# Transcripts compact at 70% of this estimate.
+# Transcripts compact once the provider reports a prompt at 70% of this size.
 compaction:
   context_window_tokens: 200000
 
@@ -56,7 +56,9 @@ output:
 The compaction window applies consistently to the coordinator and child
 agents. Children that follow the coordinator use the active model after a
 `/model` switch while retaining this configured window. Omitting the setting
-keeps the built-in 200,000-token estimate for both.
+keeps the built-in 200,000-token default for both. The trigger measures the
+prompt size the provider reported for the previous request, so it accounts for
+the system prompt and tool definitions rather than the transcript alone.
 
 The embedded source, including annotated provider examples, is
 [`internal/config/defaults/neo.yaml`](https://github.com/owainlewis/neo/blob/main/internal/config/defaults/neo.yaml).
