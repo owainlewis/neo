@@ -8,6 +8,12 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 )
 
+// MaxOutputBytes bounds what a single tool call contributes to the transcript,
+// roughly 16k tokens. It is the one place that decides how much context a tool
+// may spend: tools truncate or refuse at this size so the agent's final cap
+// never has to fire.
+const MaxOutputBytes = 64 * 1024
+
 type Tool interface {
 	Name() string
 	Spec() llm.ToolSpec

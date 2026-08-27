@@ -14,7 +14,7 @@ import (
 
 // MaxReadBytes caps the total bytes ReadFile will return in a single call.
 // Files larger than this must be paged via offset/limit.
-const MaxReadBytes = 256 * 1024
+const MaxReadBytes = MaxOutputBytes
 
 type ReadFile struct{}
 

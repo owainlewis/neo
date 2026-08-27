@@ -4,9 +4,14 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/owainlewis/neo/internal/tools"
 )
 
-const maxToolResultContentBytes = 256 * 1024
+// maxToolResultContentBytes is the backstop for tool output that reached the
+// transcript without the tool bounding it first. Tools cap themselves at the
+// same size, so in practice this only fires for a tool that does not.
+const maxToolResultContentBytes = tools.MaxOutputBytes
 
 func capToolResultContent(out string) string {
 	if len(out) <= maxToolResultContentBytes {
