@@ -40,10 +40,14 @@ func New() (*Client, error) {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set")
 	}
 	return &Client{
-		APIKey:     key,
-		Endpoint:   defaultEndpoint,
-		Version:    defaultVersion,
-		HTTP:       &http.Client{Timeout: 5 * time.Minute},
+		APIKey:   key,
+		Endpoint: defaultEndpoint,
+		Version:  defaultVersion,
+		// No client deadline. A fixed timeout caps how long a single generation
+		// may take, which is exactly the cliff streaming is here to remove; the
+		// caller's context is what bounds the request, and every caller has one
+		// (Ctrl-C in chat, --timeout headless).
+		HTTP:       &http.Client{},
 		MaxRetries: 4,
 		BaseDelay:  500 * time.Millisecond,
 	}, nil
@@ -57,6 +61,7 @@ type apiRequest struct {
 	Messages  []wireMessage  `json:"messages"`
 	Tools     []llm.ToolSpec `json:"tools,omitempty"`
 	MaxTokens int            `json:"max_tokens"`
+	Stream    bool           `json:"stream,omitempty"`
 }
 
 // wireMessage and wireBlock are the Messages API shapes. They exist so a
@@ -86,16 +91,30 @@ type cacheControl struct {
 	Type string `json:"type"` // "ephemeral"
 }
 
+// apiUsage is the wire shape of Anthropic's usage object. input_tokens already
+// excludes the cached counts, which is the partition llm.Usage documents, so
+// the fields map across directly.
+type apiUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+func (u apiUsage) toLLM() llm.Usage {
+	return llm.Usage{
+		InputTokens:         u.InputTokens,
+		OutputTokens:        u.OutputTokens,
+		CacheCreationTokens: u.CacheCreationInputTokens,
+		CacheReadTokens:     u.CacheReadInputTokens,
+	}
+}
+
 type apiResponse struct {
 	Content    []llm.ContentBlock `json:"content"`
 	StopReason string             `json:"stop_reason"`
-	Usage      *struct {
-		InputTokens              int `json:"input_tokens"`
-		OutputTokens             int `json:"output_tokens"`
-		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	} `json:"usage,omitempty"`
-	Error *struct {
+	Usage      *apiUsage          `json:"usage,omitempty"`
+	Error      *struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
@@ -182,6 +201,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 		Messages:  wireMessages(req.Messages, cacheRequested(req)),
 		Tools:     req.Tools,
 		MaxTokens: req.MaxTokens,
+		Stream:    true,
 	})
 	if err != nil {
 		return nil, err
@@ -194,6 +214,15 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 		"payload", logx.PayloadValue(string(body)),
 	)
 
+	// Streaming is the transport, not a UI feature: nothing is emitted as it
+	// arrives. It keeps a long generation from being one long request, and the
+	// Messages API requires it above a max_tokens threshold, so raising
+	// defaultMaxTokens later does not need another transport change.
+	//
+	// streamed is assigned by the attempt and read after it succeeds. The retry
+	// helper deals in buffered bodies, which a stream has no equivalent of, so
+	// the assembled response comes back this way rather than through it.
+	var streamed *llm.Response
 	result, err := retry.Do(ctx, retry.Options{
 		Provider:       c.Name(),
 		ErrorLabel:     "anthropic",
@@ -201,66 +230,58 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 		BaseDelay:      c.BaseDelay,
 		RetryAfterBody: parseRetryAfterBody,
 	}, func(ctx context.Context) (retry.AttemptResult, error) {
-		raw, status, retryAfter, err := c.doRequest(ctx, body)
-		return retry.AttemptResult{Body: raw, Status: status, RetryAfter: retryAfter}, err
+		streamed = nil
+		resp, err := c.send(ctx, body)
+		if err != nil {
+			return retry.AttemptResult{}, err
+		}
+		defer resp.Body.Close()
+		retryAfter := retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now())
+
+		if resp.StatusCode >= 400 {
+			raw, readErr := io.ReadAll(resp.Body)
+			return retry.AttemptResult{Body: raw, Status: resp.StatusCode, RetryAfter: retryAfter}, readErr
+		}
+		parsed, err := parseStream(resp.Body)
+		if err != nil {
+			return retry.AttemptResult{Status: resp.StatusCode, RetryAfter: retryAfter}, err
+		}
+		streamed = parsed
+		return retry.AttemptResult{Status: resp.StatusCode, RetryAfter: retryAfter}, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	raw, status := result.Body, result.Status
-	if status >= 400 {
+	if result.Status >= 400 {
 		logx.Debug("provider client error",
 			"provider", c.Name(),
-			"status", status,
-			"body", logx.PayloadValue(string(raw)),
+			"status", result.Status,
+			"body", logx.PayloadValue(string(result.Body)),
 		)
-		return nil, fmt.Errorf("anthropic %d: %s", status, string(raw))
-	}
-
-	var out apiResponse
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("decode: %w (body: %s)", err, string(raw))
-	}
-	if out.Error != nil {
-		return nil, fmt.Errorf("anthropic: %s", out.Error.Message)
+		return nil, fmt.Errorf("anthropic %d: %s", result.Status, string(result.Body))
 	}
 	logx.Debug("provider response",
 		"provider", c.Name(),
-		"status", status,
-		"response", logx.PayloadValue(string(raw)),
-		"items", len(out.Content),
-		"stop_reason", out.StopReason,
+		"status", result.Status,
+		"items", len(streamed.Content),
+		"stop_reason", streamed.StopReason,
+		"usage", streamed.Usage,
 	)
-	resp := &llm.Response{Content: out.Content, StopReason: out.StopReason}
-	if out.Usage != nil {
-		resp.Usage = llm.Usage{
-			InputTokens:         out.Usage.InputTokens,
-			OutputTokens:        out.Usage.OutputTokens,
-			CacheCreationTokens: out.Usage.CacheCreationInputTokens,
-			CacheReadTokens:     out.Usage.CacheReadInputTokens,
-		}
-	}
-	return resp, nil
+	return streamed, nil
 }
 
-// doRequest issues one POST and returns the body, status, and any Retry-After
-// hint from the response header.
-func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
+// send issues one POST and returns the live response with its body unread, so
+// the caller can consume the event stream incrementally.
+func (c *Client) send(ctx context.Context, body []byte) (*http.Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, retry.Absent(), err
+		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("x-api-key", c.APIKey)
 	httpReq.Header.Set("anthropic-version", c.Version)
-
-	resp, err := c.HTTP.Do(httpReq)
-	if err != nil {
-		return nil, 0, retry.Absent(), err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	return raw, resp.StatusCode, retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()), nil
+	return c.HTTP.Do(httpReq)
 }
 
 func parseRetryAfterBody(body []byte) retry.RetryAfter {
