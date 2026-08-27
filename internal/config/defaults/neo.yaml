@@ -51,6 +51,10 @@ features:
 output:
   verbose: false
 
+# Agent prompts are files, not config: put markdown in ~/.neo/agents/<name>.md
+# or .neo/agents/<name>.md and run `neo --agent=<name>` to replace the built-in
+# system prompt. `neo agents` lists them.
+
 # Named prompts shown as slash commands and as the active phase in the TUI.
 # Neo always provides design, plan, build, and review. Add a new phase or
 # override a default by name. Omitted default fields keep their built-in value.

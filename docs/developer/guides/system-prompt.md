@@ -17,7 +17,8 @@ If all of that is mashed into one giant string, it is harder to understand, hard
 Neo builds the prompt in ordered blocks:
 
 1. A stable base prompt plus the named-phase and skill catalogs.
-2. Dynamic project instructions from AGENTS.md files.
+2. A dynamic environment section: working directory, repository root, platform, date.
+3. Dynamic project instructions from AGENTS.md files.
 
 The flattened prompt is still available for providers that only accept a string. Providers that support structured system prompts can use `llm.SystemBlock` values instead.
 
@@ -25,7 +26,7 @@ The flattened prompt is still available for providers that only accept a string.
 
 | Source | Purpose |
 | --- | --- |
-| Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. |
+| Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. Replaced wholesale by an agent profile when `--agent` is given. |
 | Named phase catalog | Names and descriptions of built-in and configured prompts. Full bodies are injected only when invoked. |
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked with `$name` or `/name args`. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
@@ -47,7 +48,29 @@ first-class slash commands and as the active TUI label. Phase names and
 descriptions are always advertised, while their full bodies remain outside the
 base prompt until invocation.
 
-Change the base prompt only when the default personality or operating rules of Neo itself should change.
+## Agent Profiles
+
+`--agent <name>` replaces the base prompt with a markdown file, so one binary
+can be a coding agent, a personal assistant, or anything else:
+
+```
+~/.neo/agents/<name>.md          user-global
+<repo>/.neo/agents/<name>.md     project, wins on a name clash
+```
+
+A profile is just the file. No frontmatter, no schema, no config entry.
+
+The body **replaces** the base instructions rather than appending to them: a
+personal assistant should not be carrying "run tests after you change code".
+Everything after the base block still composes — the environment section,
+AGENTS.md, and the phase and skill catalogs all apply. If the default coding
+phases are noise for a given profile, override `phases` in config.
+
+Restricting a profile's tool set (a genuinely read-only `reviewer`) is the
+obvious next step and can be added as frontmatter without changing this layout.
+
+Change the built-in base prompt only when the default behaviour of Neo itself
+should change; reach for a profile when you want a different agent.
 
 ## What To Be Careful About
 
