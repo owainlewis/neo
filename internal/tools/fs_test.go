@@ -2,11 +2,11 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -340,6 +340,7 @@ func fileMode(t *testing.T, path string) os.FileMode {
 }
 
 func TestReadFile_NumbersMatchGrep(t *testing.T) {
+	requireRipgrep(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src.txt")
 	if err := os.WriteFile(path, []byte("alpha\nbravo\nneedle\ndelta\n"), 0o644); err != nil {
@@ -350,19 +351,22 @@ func TestReadFile_NumbersMatchGrep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	raw, err := Grep{Root: dir}.Run(context.Background(), map[string]any{"pattern": "needle"})
+	found, err := Grep{Root: dir}.Run(context.Background(), map[string]any{"pattern": "needle"})
 	if err != nil {
 		t.Fatalf("grep: %v", err)
 	}
-	var got grepResult
-	if err := json.Unmarshal([]byte(raw), &got); err != nil {
-		t.Fatalf("decode grep: %v", err)
+
+	// grep reports src.txt:3:needle; read_file must number the same line 3.
+	fields := strings.SplitN(strings.TrimSpace(found), ":", 3)
+	if len(fields) != 3 {
+		t.Fatalf("unexpected grep output: %q", found)
 	}
-	if len(got.Matches) != 1 {
-		t.Fatalf("grep matches = %d, want 1", len(got.Matches))
+	line, err := strconv.Atoi(fields[1])
+	if err != nil {
+		t.Fatalf("grep line number %q: %v", fields[1], err)
 	}
-	if want := lineNumberPrefix(got.Matches[0].Line) + "needle"; !strings.Contains(read, want) {
-		t.Fatalf("read_file line %d is not numbered to match grep:\n%s", got.Matches[0].Line, read)
+	if want := lineNumberPrefix(line) + "needle"; !strings.Contains(read, want) {
+		t.Fatalf("read_file line %d is not numbered to match grep:\n%s", line, read)
 	}
 }
 

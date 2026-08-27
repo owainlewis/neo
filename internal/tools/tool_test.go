@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/owainlewis/neo/internal/llm"
@@ -71,59 +70,24 @@ func TestParallelReadSearchToolsHonorCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	tests := []struct {
-		name  string
-		tool  Tool
-		input map[string]any
+		name         string
+		tool         Tool
+		input        map[string]any
+		needsRipgrep bool
 	}{
 		{name: "read_file", tool: ReadFile{}, input: map[string]any{"path": path}},
-		{name: "grep", tool: Grep{Root: root}, input: map[string]any{"pattern": "hello"}},
-		{name: "glob", tool: Glob{Root: root}, input: map[string]any{"pattern": "**/*.txt"}},
+		{name: "grep", tool: Grep{Root: root}, input: map[string]any{"pattern": "hello"}, needsRipgrep: true},
+		{name: "glob", tool: Glob{Root: root}, input: map[string]any{"pattern": "**/*.txt"}, needsRipgrep: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.needsRipgrep {
+				requireRipgrep(t)
+			}
 			_, err := tt.tool.Run(ctx, tt.input)
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("error = %v, want context canceled", err)
 			}
 		})
-	}
-}
-
-type cancelAfterChecksContext struct {
-	context.Context
-	mu        sync.Mutex
-	remaining int
-	done      chan struct{}
-	once      sync.Once
-}
-
-func (c *cancelAfterChecksContext) Done() <-chan struct{} { return c.done }
-func (c *cancelAfterChecksContext) Err() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.remaining > 0 {
-		c.remaining--
-		return nil
-	}
-	c.once.Do(func() { close(c.done) })
-	return context.Canceled
-}
-
-func TestGrepPropagatesCancellationDuringScan(t *testing.T) {
-	root := t.TempDir()
-	var content string
-	for range 200 {
-		content += "match this line\n"
-	}
-	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ctx := &cancelAfterChecksContext{Context: context.Background(), remaining: 20, done: make(chan struct{})}
-	out, err := (Grep{Root: root}).Run(ctx, map[string]any{"pattern": "match"})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("error = %v, want context canceled (partial output %q)", err, out)
-	}
-	if out == "" {
-		t.Fatal("mid-scan cancellation should retain partial structured output")
 	}
 }

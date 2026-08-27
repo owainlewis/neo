@@ -7,8 +7,8 @@ Neo exposes a small built-in tool surface to the model.
 | `agent` | Interactive chat | Spawn a fresh subagent with a self-contained prompt. `mode: "work"` is writable and serial; `mode: "inspect"` is read-only and parallel-safe. |
 | `bash` | Chat and headless | Run a shell command via `/bin/bash -c`. Returns bounded combined stdout and stderr, retaining the start and end when truncated. |
 | `edit_file` | Chat and headless | Replace exactly one occurrence of `old_string` with `new_string`. Fails if the old text is missing, appears more than once, or the file changed since the agent last read it. `old_string` matches the file's raw text, so the line-number gutter `read_file` adds must be stripped first. |
-| `glob` | Chat and headless | Find files under the workspace root using a glob pattern. Supports `**` for recursive matches and returns structured JSON. |
-| `grep` | Chat and headless | Search complete text lines up to 4 MiB under the workspace with a regular expression and return structured JSON matches. Longer lines return an explicit error. Very long match and context text is returned as a bounded excerpt. |
+| `glob` | Chat and headless | List workspace files matching a glob pattern, honouring `.gitignore`. Supports `**` for recursive matches. Returns one path per line. |
+| `grep` | Chat and headless | Search the workspace with a regular expression, honouring `.gitignore`. Returns matching lines as `path:line:text`. |
 | `read_file` | Chat and headless | Read a file from disk, prefixing each line with its 1-indexed number and a tab so the numbers match what `grep` reports. Returns up to `tools.MaxOutputBytes` (64 KiB); use `offset` and `limit` to page through larger files. |
 | `workflow` | Interactive chat | Create or update the visible workflow checklist. Neo attaches tool and subagent activity to the active item automatically. |
 | `write_file` | Chat and headless | Write content to a file, creating parent directories. Overwrites the file if it exists. |
@@ -41,12 +41,28 @@ sharing one record. Build a fresh set per agent so a subagent's reads never
 satisfy the coordinator's edits. The check is a stat comparison, not a lock: a
 writer racing between the check and the write still wins.
 
-Recursive `grep` discovery and file reads use a rooted filesystem handle anchored
-to the resolved workspace root. A discovered symlink that escapes that root is
-rejected with an explicit error, including when an ordinary file is replaced by
-an escaping symlink between discovery and reading. Relative and absolute
-symlinks whose targets remain inside the workspace are searched under the link's
-displayed path.
+## Search
+
+`grep` and `glob` shell out to [ripgrep](https://github.com/BurntSushi/ripgrep),
+which honours `.gitignore`, skips binaries, and is far faster than a hand-rolled
+walk. `--no-require-git` is passed so ignore rules apply whether or not the
+workspace is a git checkout.
+
+If `rg` is not on `PATH`, both tools return an error telling the model to use
+`bash` with `grep` or `find` instead. There is deliberately no Go fallback: a
+second implementation would mean two sets of ignore rules and two output shapes.
+`neo doctor` reports ripgrep as a warning, not a failure, for the same reason.
+
+They stay separate tools rather than folding into `bash` because they are
+classified parallel-safe, which `bash` cannot be without interpreting shell
+commands, and because inspect-mode subagents need read-only search without a
+shell.
+
+Search applies no path confinement of its own, matching `read_file`,
+`write_file`, and `edit_file`. The sandbox is the boundary.
+
+Cancelling a search kills the ripgrep process and returns an error with no
+partial output.
 
 ## Execution and confirmations
 

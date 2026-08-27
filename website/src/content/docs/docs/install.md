@@ -19,6 +19,18 @@ It uses the first existing writable directory from `~/.local/bin`, `~/bin`, or
 `/usr/local/bin`. If none qualifies, it creates and uses `~/.local/bin`. The
 installer warns when the selected directory is not on `PATH`.
 
+## Optional: ripgrep
+
+Neo is a single binary with no required runtime. The `grep` and `glob` tools do
+need [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on your `PATH`;
+without it they return an error and the agent falls back to `bash`. Run
+`neo doctor` to check.
+
+```bash
+brew install ripgrep      # macOS
+apt install ripgrep       # Debian, Ubuntu
+```
+
 ```bash
 # Pin a specific version
 curl -fsSL .../install.sh | bash -s -- --version v1.2.3

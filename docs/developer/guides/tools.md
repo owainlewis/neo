@@ -17,8 +17,8 @@ contains their capabilities.
 Neo exposes a small built-in tool surface:
 
 - `read_file`: read files.
-- `grep`: search file contents and return structured JSON matches.
-- `glob`: find files by pattern and return structured JSON paths.
+- `grep`: search file contents with a regular expression, via ripgrep.
+- `glob`: list files by pattern, via ripgrep.
 - `bash`: run shell commands.
 - `write_file`: overwrite or create files.
 - `edit_file`: replace one exact string.
