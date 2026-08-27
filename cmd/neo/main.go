@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/owainlewis/neo/internal/agent"
@@ -21,6 +22,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/phase"
+	"github.com/owainlewis/neo/internal/profile"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/skills"
@@ -100,16 +102,26 @@ func run(args []string, streams stdio) int {
 	defer stop()
 	logx.Debug("neo start", "args", logx.SafeAny(args))
 
+	// --agent is global: it selects the system prompt, not a subcommand, so it
+	// is pulled out before dispatch and works with both chat and run.
+	args, agentName, err := takeAgentFlag(args)
+	if err != nil {
+		fmt.Fprintln(streams.err, err)
+		return 2
+	}
+
 	// `neo` with no subcommand defaults to chat — the common case.
 	if len(args) == 0 {
-		return runChat(ctx, streams)
+		return runChat(ctx, agentName, streams)
 	}
 
 	switch args[0] {
 	case "chat":
-		return runChat(ctx, streams)
+		return runChat(ctx, agentName, streams)
 	case "run":
-		return runHeadless(ctx, args[1:], streams)
+		return runHeadless(ctx, args[1:], agentName, streams)
+	case "agents":
+		return runAgents(streams)
 	case "sessions":
 		return runSessions(ctx, args[1:], streams)
 	case "doctor":
@@ -119,7 +131,7 @@ func run(args []string, streams stdio) int {
 			fmt.Fprintln(streams.err, "usage: neo resume <session-id>")
 			return 2
 		}
-		return resumeSession(ctx, args[1], streams)
+		return resumeSession(ctx, args[1], agentName, streams)
 	case "login":
 		return runLogin(ctx, streams)
 	case "logout":
@@ -138,6 +150,79 @@ func run(args []string, streams stdio) int {
 	}
 }
 
+var errAgentNeedsName = fmt.Errorf("--agent needs a name, for example --agent=reviewer")
+
+// takeAgentFlag removes --agent from anywhere in args and returns its value.
+// It is handled here rather than by a FlagSet because it has to be readable
+// before we know which subcommand is running.
+func takeAgentFlag(args []string) ([]string, string, error) {
+	var out []string
+	name := ""
+	seen := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		flag, value, hasValue := strings.Cut(arg, "=")
+		if flag != "--agent" && flag != "-agent" {
+			out = append(out, arg)
+			continue
+		}
+		seen = true
+		if hasValue {
+			name = value
+			continue
+		}
+		if i+1 >= len(args) {
+			return nil, "", errAgentNeedsName
+		}
+		i++
+		name = args[i]
+	}
+	if seen && strings.TrimSpace(name) == "" {
+		return nil, "", errAgentNeedsName
+	}
+	return out, strings.TrimSpace(name), nil
+}
+
+// loadProfile resolves --agent. An unknown name is fatal: continuing with the
+// built-in coding prompt would make a typo look like a working session.
+func loadProfile(cwd, name string, errOut io.Writer) (profile.Profile, bool) {
+	if name == "" {
+		return profile.Profile{}, true
+	}
+	p, err := profile.Load(cwd, name)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return profile.Profile{}, false
+	}
+	return p, true
+}
+
+func runAgents(streams stdio) int {
+	cwd, _ := os.Getwd()
+	found, err := profile.List(cwd)
+	if err != nil {
+		fmt.Fprintf(streams.err, "agents: %v\n", err)
+		return 1
+	}
+	if len(found) == 0 {
+		fmt.Fprintln(streams.out, "No agents defined. Create one at ~/.neo/agents/<name>.md or .neo/agents/<name>.md")
+		return 0
+	}
+	w := tabwriter.NewWriter(streams.out, 0, 0, 2, ' ', 0)
+	for _, p := range found {
+		fmt.Fprintf(w, "%s\t%s\n", p.Name, p.Path)
+	}
+	return flushTabwriter(w, streams.err)
+}
+
+func flushTabwriter(w *tabwriter.Writer, errOut io.Writer) int {
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(errOut, "write: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 const usageText = `neo — a Go coding agent
 
 USAGE:
@@ -145,6 +230,7 @@ USAGE:
   neo chat           Interactive chat mode (explicit)
   neo run [options] <prompt>
                      Run one headless prompt and exit
+  neo agents         List available agent prompts
   neo sessions       List saved chat sessions
   neo sessions search <query>
                      Search saved session transcripts
@@ -168,6 +254,14 @@ CONFIG:
     provider: openai
     openai_auth: subscription
   then run "neo login".
+
+AGENT PROMPTS:
+  --agent <name>     Replace the built-in system prompt with a markdown file
+                     from ~/.neo/agents/<name>.md or .neo/agents/<name>.md.
+                     Works with chat, run, and resume. Use "neo agents" to list.
+
+    neo --agent=assistant
+    neo run --agent=reviewer "review the current diff"
 
 HEADLESS RUN:
   neo run --json --timeout 10m "Review this repo without changing files"
@@ -198,10 +292,18 @@ func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
 // caching reuse the base across turns and sessions while the project tail
 // varies. Discovery errors are non-fatal, warning and falling back to the blocks
 // built so far rather than failing to start.
-func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, errOut io.Writer) (string, []llm.SystemBlock) {
+func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, agentProfile profile.Profile, errOut io.Writer) (string, []llm.SystemBlock) {
 	// Base block: static instructions plus phase and skill catalogs. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
-	base := phase.Augment(chatSystemPrompt, cfg.NamedPhases())
+	//
+	// An agent profile replaces the instructions outright rather than appending
+	// to them: a personal assistant should not be carrying "run tests after you
+	// change code". Everything after this block composes unchanged.
+	instructions := chatSystemPrompt
+	if agentProfile.Body != "" {
+		instructions = agentProfile.Body
+	}
+	base := phase.Augment(instructions, cfg.NamedPhases())
 	base = skills.Augment(base, sk)
 	cache := cfg.PromptCachingEnabled()
 	blocks := []llm.SystemBlock{{Text: base, Cache: cache}}
@@ -266,12 +368,12 @@ func loadConfig(errOut io.Writer) (*config.Config, bool) {
 	return cfg, true
 }
 
-func runChat(ctx context.Context, streams stdio) int {
+func runChat(ctx context.Context, agentName string, streams stdio) int {
 	store, ok := loadSessionStore(streams.err)
 	if !ok {
 		return 1
 	}
-	return runChatSession(ctx, store, nil, streams)
+	return runChatSession(ctx, store, nil, agentName, streams)
 }
 
 type headlessOptions struct {
@@ -290,7 +392,7 @@ type headlessResult struct {
 	Error      string `json:"error,omitempty"`
 }
 
-func runHeadless(ctx context.Context, args []string, streams stdio) int {
+func runHeadless(ctx context.Context, args []string, agentName string, streams stdio) int {
 	opts, prompt, err := parseHeadlessArgs(args, streams.in)
 	if err != nil {
 		fmt.Fprintln(streams.err, err)
@@ -315,8 +417,12 @@ func runHeadless(ctx context.Context, args []string, streams stdio) int {
 	}
 	cwd, _ := os.Getwd()
 	root := workspace.Root(cwd)
+	agentProfile, ok := loadProfile(cwd, agentName, streams.err)
+	if !ok {
+		return 1
+	}
 	sk := loadSkills(cfg, cwd, streams.err)
-	system, systemBlocks := chatSystem(cfg, cwd, sk, streams.err)
+	system, systemBlocks := chatSystem(cfg, cwd, sk, agentProfile, streams.err)
 
 	var toolCalls, toolErrors int
 	reg := newRegistry(cwd, root)
@@ -419,7 +525,7 @@ func finishHeadless(opts headlessOptions, result headlessResult, streams stdio) 
 	}
 }
 
-func resumeSession(ctx context.Context, id string, streams stdio) int {
+func resumeSession(ctx context.Context, id string, agentName string, streams stdio) int {
 	store, ok := loadSessionStore(streams.err)
 	if !ok {
 		return 1
@@ -434,7 +540,13 @@ func resumeSession(ctx context.Context, id string, streams stdio) int {
 		return 1
 	}
 	restoreSessionCWD(sess.Metadata.CWD, streams.err)
-	return runChatSession(ctx, store, sess, streams)
+	// A resumed session keeps the agent it was started with unless the user
+	// names a different one; reverting to the coding prompt mid-conversation
+	// would change who the agent is.
+	if agentName == "" {
+		agentName = sess.Metadata.Agent
+	}
+	return runChatSession(ctx, store, sess, agentName, streams)
 }
 
 func restoreSessionCWD(cwd string, errOut io.Writer) {
@@ -451,7 +563,7 @@ func restoreSessionCWD(cwd string, errOut io.Writer) {
 	}
 }
 
-func runChatSession(ctx context.Context, store *session.Store, sess *session.Session, streams stdio) int {
+func runChatSession(ctx context.Context, store *session.Store, sess *session.Session, agentName string, streams stdio) int {
 	cfg, ok := loadConfig(streams.err)
 	if !ok {
 		return 1
@@ -473,6 +585,10 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	cwd, _ := os.Getwd() // "" on failure → cwd-dependent capabilities are skipped
 	root := workspace.Root(cwd)
+	agentProfile, ok := loadProfile(cwd, agentName, streams.err)
+	if !ok {
+		return 1
+	}
 	// The chat agent is the primary coordinator. It gets the agent tool (as
 	// caller node 0) so it can spawn amnesiac subagents with self-contained
 	// prompts directly from the conversation. Sequencing is the agent's
@@ -499,6 +615,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		adapterName := prov.Name()
 		sess, err = store.Create(ctx, session.Metadata{
 			CWD:        cwd,
+			Agent:      agentProfile.Name,
 			Model:      model,
 			Provider:   sessionProviderID(adapterName),
 			OpenAIAuth: adapterOpenAIAuth(adapterName),
@@ -513,7 +630,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// the TUI.
 	sk := loadSkills(cfg, cwd, streams.err)
 
-	system, systemBlocks := chatSystem(cfg, cwd, sk, streams.err)
+	system, systemBlocks := chatSystem(cfg, cwd, sk, agentProfile, streams.err)
 	var requiresApproval func(string, map[string]any) bool
 	if len(cfg.ToolApprovals) > 0 {
 		requiresApproval = approval.New(cfg.ToolApprovals).Requires
@@ -531,7 +648,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	})
 
 	saveSession := func() error {
-		return saveChatSession(ctx, store, sess, ag, cwd)
+		return saveChatSession(ctx, store, sess, ag, cwd, agentProfile.Name)
 	}
 
 	switchModel := func(nextModel string) error {
@@ -558,11 +675,14 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	return 0
 }
 
-func saveChatSession(ctx context.Context, store *session.Store, sess *session.Session, ag *agent.Agent, cwd string) error {
+func saveChatSession(ctx context.Context, store *session.Store, sess *session.Session, ag *agent.Agent, cwd, agentName string) error {
 	activeProvider, activeModel := ag.Backend()
 	sess.Messages = ag.Transcript()
 	sess.Usage = ag.Usage()
 	sess.Metadata.CWD = cwd
+	// Resuming with a different --agent switches the session's agent, so record
+	// the one actually in use rather than the one it was created with.
+	sess.Metadata.Agent = agentName
 	sess.Metadata.Model = activeModel
 	sess.Metadata.Provider = sessionProviderID(activeProvider)
 	sess.Metadata.OpenAIAuth = adapterOpenAIAuth(activeProvider)

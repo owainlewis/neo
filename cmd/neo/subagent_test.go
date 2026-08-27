@@ -14,6 +14,7 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
+	"github.com/owainlewis/neo/internal/profile"
 )
 
 func TestSubagentBackendFollowsCoordinatorByDefault(t *testing.T) {
@@ -61,7 +62,7 @@ func TestChatAgentToolPassesCompactionContextWindowToRunner(t *testing.T) {
 }
 
 func TestChatSystemAdvertisesAgentToolWorkflowPattern(t *testing.T) {
-	system, blocks := chatSystem(&config.Config{}, t.TempDir(), nil, io.Discard)
+	system, blocks := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, io.Discard)
 	for _, want := range []string{
 		"user's request",
 		"AGENTS.md",
@@ -82,7 +83,7 @@ func TestChatSystemAdvertisesAgentToolWorkflowPattern(t *testing.T) {
 }
 
 func TestChatSystemAdvertisesNamedPhasesWithoutPromptBodies(t *testing.T) {
-	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, io.Discard)
+	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, io.Discard)
 	for _, want := range []string{"# Named phases", "/design", "/plan", "/build", "/review"} {
 		if !strings.Contains(system, want) {
 			t.Fatalf("system prompt missing %q named phase catalog:\n%s", want, system)
@@ -104,7 +105,7 @@ func TestChatSystemPreservesAgentsWorkflowInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	system, blocks := chatSystem(&config.Config{}, root, nil, io.Discard)
+	system, blocks := chatSystem(&config.Config{}, root, nil, profile.Profile{}, io.Discard)
 
 	if len(blocks) < 2 {
 		t.Fatalf("system blocks = %d, want project instructions block", len(blocks))
@@ -147,7 +148,7 @@ func TestChatSystemWarnsAndExcludesEscapingAgentsSymlink(t *testing.T) {
 	}
 
 	var warnings bytes.Buffer
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, &warnings)
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, &warnings)
 
 	if strings.Contains(system, sentinel) {
 		t.Fatal("escaping AGENTS.md target entered the system prompt")
@@ -169,7 +170,7 @@ func TestChatSystemWarnsAndExcludesEscapingAgentsSymlink(t *testing.T) {
 
 func TestChatSystemStatesTheEnvironment(t *testing.T) {
 	cwd := t.TempDir()
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, io.Discard)
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, io.Discard)
 
 	for _, want := range []string{"# Environment", "Working directory: " + cwd, "Platform: " + runtime.GOOS} {
 		if !strings.Contains(system, want) {

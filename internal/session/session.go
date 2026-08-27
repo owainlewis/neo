@@ -33,9 +33,13 @@ type Metadata struct {
 	Provider string `json:"provider,omitempty"`
 	// OpenAIAuth distinguishes the API-key and subscription adapters, whose
 	// model sets are not interchangeable.
-	OpenAIAuth string    `json:"openai_auth,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	OpenAIAuth string `json:"openai_auth,omitempty"`
+	// Agent is the profile name whose markdown replaced the built-in system
+	// prompt, so resuming keeps the agent the session was started with. Empty
+	// means the built-in coding prompt.
+	Agent     string    `json:"agent,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Session struct {

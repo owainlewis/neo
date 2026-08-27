@@ -7,6 +7,7 @@
 | `neo` | Open interactive chat mode. |
 | `neo chat` | Open interactive chat mode explicitly. |
 | `neo run [options] <prompt>` | Run one headless prompt and exit without session persistence. |
+| `neo agents` | List discovered agent prompts and where each came from. |
 | `neo sessions` | List saved chat sessions. |
 | `neo doctor` | Check local config, credentials, sessions, git, and workspace readiness. |
 | `neo sessions search <query>` | Search saved session transcripts locally. |
@@ -15,6 +16,18 @@
 | `neo logout` | Remove stored OpenAI subscription credentials. |
 | `neo version` | Print the build-time Neo version. Also available as `neo -v` and `neo --version`. |
 | `neo help` | Print usage. |
+
+## Global flags
+
+| Flag | Description |
+| --- | --- |
+| `--agent <name>` | Replace the built-in system prompt with `<name>.md` from `~/.neo/agents/` or `.neo/agents/`. Accepted anywhere in the arguments, before or after a subcommand, and in `--agent=name` or `--agent name` form. |
+
+`--agent` is extracted before subcommand dispatch, so it works with `neo`,
+`neo chat`, `neo run`, and `neo resume`. An unknown name exits non-zero and
+lists what exists rather than falling back to the coding prompt. Sessions record
+the agent they were started with, so `neo resume` keeps it unless a different
+`--agent` is given.
 
 ## Environment
 

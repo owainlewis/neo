@@ -20,6 +20,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/llm/openai"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
+	"github.com/owainlewis/neo/internal/profile"
 	"github.com/owainlewis/neo/internal/session"
 )
 
@@ -234,7 +235,7 @@ func TestChatSystem_IgnoresProjectMemoryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, io.Discard)
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, io.Discard)
 
 	if n := blocksContaining(blocks, "# Project instructions"); n != 0 {
 		t.Fatalf("project instruction blocks = %d, want 0", n)
@@ -275,7 +276,7 @@ func TestSaveChatSession_NormalizesCodexAdapterProviderForResume(t *testing.T) {
 		Provider: openai.NewCodex(nil),
 		Model:    "gpt-5-codex",
 	})
-	if err := saveChatSession(ctx, store, sess, ag, "/workspace"); err != nil {
+	if err := saveChatSession(ctx, store, sess, ag, "/workspace", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -348,7 +349,7 @@ func TestSaveChatSession_PreservesOpenAIAPIProvider(t *testing.T) {
 		Provider: &openai.Client{},
 		Model:    "gpt-5.2",
 	})
-	if err := saveChatSession(ctx, store, sess, ag, "/workspace"); err != nil {
+	if err := saveChatSession(ctx, store, sess, ag, "/workspace", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,7 +453,7 @@ func TestSaveChatSession_PersistsCompactionAndAnswerUsage(t *testing.T) {
 	if _, err := ag.Send(ctx, "continue"); err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	if err := saveChatSession(ctx, store, sess, ag, "/workspace"); err != nil {
+	if err := saveChatSession(ctx, store, sess, ag, "/workspace", ""); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -641,5 +642,97 @@ func TestParseHeadlessArgsReadsInjectedPipedInput(t *testing.T) {
 	}
 	if prompt != "from stdin from args" {
 		t.Fatalf("prompt = %q, want piped stdin followed by arguments", prompt)
+	}
+}
+
+func TestTakeAgentFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		wantArgs []string
+		wantName string
+		wantErr  bool
+	}{
+		{name: "absent", args: []string{"run", "hello"}, wantArgs: []string{"run", "hello"}},
+		{name: "equals form", args: []string{"--agent=reviewer"}, wantName: "reviewer"},
+		{name: "space form", args: []string{"--agent", "reviewer"}, wantName: "reviewer"},
+		{name: "single dash", args: []string{"-agent=reviewer"}, wantName: "reviewer"},
+		{
+			name:     "keeps other args in order",
+			args:     []string{"run", "--agent=reviewer", "--json", "do the thing"},
+			wantArgs: []string{"run", "--json", "do the thing"},
+			wantName: "reviewer",
+		},
+		{name: "missing value", args: []string{"--agent"}, wantErr: true},
+		{name: "empty value", args: []string{"--agent="}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args, name, err := takeAgentFlag(tc.args)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+			if name != tc.wantName {
+				t.Fatalf("name = %q, want %q", name, tc.wantName)
+			}
+			if strings.Join(args, "|") != strings.Join(tc.wantArgs, "|") {
+				t.Fatalf("args = %v, want %v", args, tc.wantArgs)
+			}
+		})
+	}
+}
+
+func TestChatSystem_AgentProfileReplacesTheBuiltInPrompt(t *testing.T) {
+	cwd := t.TempDir()
+	agentProfile := profile.Profile{Name: "assistant", Body: "You are a calm personal assistant."}
+
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, agentProfile, io.Discard)
+
+	if !strings.Contains(system, agentProfile.Body) {
+		t.Fatalf("profile body missing:\n%s", system)
+	}
+	if strings.Contains(system, "You are neo, a focused coding agent") {
+		t.Fatalf("the built-in prompt must be replaced, not appended:\n%s", system)
+	}
+	// Everything after the base block still composes.
+	if !strings.Contains(system, "# Environment") {
+		t.Fatalf("environment section missing:\n%s", system)
+	}
+	if len(blocks) == 0 || !blocks[0].Cache {
+		t.Fatalf("the profile belongs in the cacheable base block: %+v", blocks)
+	}
+}
+
+func TestChatSystem_NoProfileKeepsTheCodingPrompt(t *testing.T) {
+	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, io.Discard)
+	if !strings.Contains(system, "You are neo, a focused coding agent") {
+		t.Fatalf("default prompt changed:\n%s", system)
+	}
+}
+
+func TestSaveChatSession_RecordsTheActiveAgent(t *testing.T) {
+	ctx := context.Background()
+	store := session.NewStore(t.TempDir())
+	sess, err := store.Create(ctx, session.Metadata{Agent: "assistant"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ag := agent.New(agent.Config{Model: "m", Provider: &llmtest.FakeProvider{}})
+
+	// Resuming under a different profile switches the session's agent.
+	if err := saveChatSession(ctx, store, sess, ag, "/workspace", "reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := store.Load(ctx, sess.Metadata.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Metadata.Agent != "reviewer" {
+		t.Fatalf("agent = %q, want reviewer", reloaded.Metadata.Agent)
 	}
 }
