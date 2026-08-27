@@ -230,19 +230,31 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, errOut io.Wri
 // has to spend a bash call on pwd and has no idea what today's date is. These
 // facts are fixed for the session, so a branch name is deliberately absent: it
 // changes underneath us and the model can ask git when it matters.
+//
+// The date is captured once, when the session starts, so a chat left open
+// across midnight reports the previous day. Refreshing it would mean rebuilding
+// the system blocks every turn, which is more machinery than the failure is
+// worth; resuming a session rebuilds this section.
 func environmentSection(cwd string, now time.Time) string {
 	if cwd == "" {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n\n# Environment\n\n")
-	fmt.Fprintf(&b, "Working directory: %s\n", cwd)
+	fmt.Fprintf(&b, "Working directory: %s\n", promptValue(cwd))
 	if root := workspace.Root(cwd); root != cwd {
-		fmt.Fprintf(&b, "Repository root: %s\n", root)
+		fmt.Fprintf(&b, "Repository root: %s\n", promptValue(root))
 	}
 	fmt.Fprintf(&b, "Platform: %s\n", runtime.GOOS)
 	fmt.Fprintf(&b, "Today's date: %s\n", now.Format("2006-01-02"))
 	return b.String()
+}
+
+// promptValue keeps a discovered value on one line. A path may legally contain
+// a newline, and pasting one verbatim would let a directory name introduce its
+// own headings into the system prompt.
+func promptValue(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
 }
 
 func loadConfig(errOut io.Writer) (*config.Config, bool) {

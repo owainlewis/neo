@@ -81,4 +81,4 @@ Run Neo inside a suitable VM or sandbox.
 - `internal/approval/matcher.go`: literal matching.
 - `internal/agent/agent.go`: serial confirmation barrier.
 - `internal/tui/approvals.go`: interactive yes/no prompt.
-- `internal/factory/supervisor.go`: inspect tool selection.
+- `internal/subagent/supervisor.go`: inspect tool selection.

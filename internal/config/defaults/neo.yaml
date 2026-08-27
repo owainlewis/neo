@@ -29,8 +29,9 @@ model: claude-opus-5
 #   - rm -rf
 #   - write_file
 
-# Long transcripts compact at 70% of this context window estimate. Keep this
-# conservative by default; raise it for larger-context models.
+# Long transcripts compact once the provider reports a prompt at 70% of this
+# context window. Keep this conservative by default; raise it for larger-context
+# models.
 compaction:
   context_window_tokens: 200000
 
