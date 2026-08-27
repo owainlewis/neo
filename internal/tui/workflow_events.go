@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/logx"
+	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -79,7 +79,7 @@ func (m *model) noteWorkflowActivity(detail string) {
 }
 
 // handleStepEvent folds the supervisor's event stream into activity blocks.
-func (m *model) handleStepEvent(ev factory.Event) {
+func (m *model) handleStepEvent(ev subagent.Event) {
 	if ev.Generation != m.conversationGeneration {
 		logx.Debug("stale subagent event ignored", "event_generation", ev.Generation, "conversation_generation", m.conversationGeneration)
 		return
@@ -116,7 +116,7 @@ func (m *model) handleStepEvent(ev factory.Event) {
 	}
 }
 
-func (m *model) handleParallelStepEvent(ev factory.Event) bool {
+func (m *model) handleParallelStepEvent(ev subagent.Event) bool {
 	if ev.GroupID == "" || ev.CallID == "" {
 		return false
 	}
@@ -169,7 +169,7 @@ func (m *model) handleParallelStepEvent(ev factory.Event) bool {
 }
 
 // startTreeNode places a started agent in the current activity block.
-func (m *model) startTreeNode(ev factory.Event) {
+func (m *model) startTreeNode(ev subagent.Event) {
 	if m.treeIndex == nil {
 		m.treeIndex = map[int]*treeBlock{}
 	}

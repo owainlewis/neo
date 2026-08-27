@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/agent"
-	"github.com/owainlewis/neo/internal/factory"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
+	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/workflow"
 )
@@ -175,11 +175,11 @@ func TestResetConversationIgnoresBufferedActivityFromOldGeneration(t *testing.T)
 			Items: []workflow.Item{{ID: "old", Text: "Old step"}},
 		},
 	})
-	m.handleStepEvent(factory.Event{
+	m.handleStepEvent(subagent.Event{
 		Generation: oldGeneration,
 		Node:       1,
 		Task:       "Old subagent",
-		Ev:         factory.AgentEvent{Kind: "start"},
+		Ev:         subagent.AgentEvent{Kind: "start"},
 	})
 
 	if m.workflow != nil || m.workflowVisible || m.activeTree != nil || m.treeIndex != nil || len(m.blocks) != 0 {
@@ -211,11 +211,11 @@ func TestOldActivityStaysStaleAfterNewTurnStarts(t *testing.T) {
 			Items: []workflow.Item{{ID: "old", Text: "Old step"}},
 		},
 	})
-	m.handleStepEvent(factory.Event{
+	m.handleStepEvent(subagent.Event{
 		Generation: oldGeneration,
 		Node:       1,
 		Task:       "Old subagent",
-		Ev:         factory.AgentEvent{Kind: "start"},
+		Ev:         subagent.AgentEvent{Kind: "start"},
 	})
 
 	if m.conversationGeneration != newGeneration {

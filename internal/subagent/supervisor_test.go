@@ -1,4 +1,4 @@
-package factory
+package subagent
 
 import (
 	"context"
@@ -239,33 +239,21 @@ func TestRunAgentPromptCancellation(t *testing.T) {
 	}
 }
 
-type temporaryError struct{ error }
+// A failing subagent runs once. Retry used to be exposed as max_retries but
+// only fired for errors implementing Temporary(), which nothing in the provider
+// stack does, so the input was unreachable.
+func TestAgentToolDoesNotRetry(t *testing.T) {
+	var calls atomic.Int32
+	sup, dir := newTestSupervisor(t, func(context.Context, string, string, chan<- AgentEvent) (string, error) {
+		calls.Add(1)
+		return "partial", errors.New("stop")
+	}, testBudget())
 
-func (temporaryError) Temporary() bool { return true }
-
-func TestAgentToolRetriesOnlyTemporaryFailures(t *testing.T) {
-	for _, tt := range []struct {
-		name      string
-		err       error
-		wantCalls int32
-	}{
-		{name: "temporary", err: temporaryError{errors.New("retry")}, wantCalls: 3},
-		{name: "permanent", err: errors.New("stop"), wantCalls: 1},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			var calls atomic.Int32
-			sup, dir := newTestSupervisor(t, func(context.Context, string, string, chan<- AgentEvent) (string, error) {
-				calls.Add(1)
-				return "partial", tt.err
-			}, testBudget())
-			tool := AgentTool{Sup: sup, Dir: dir}
-			if _, err := tool.Run(context.Background(), map[string]any{"prompt": "review", "max_retries": 2}); err != nil {
-				t.Fatal(err)
-			}
-			if got := calls.Load(); got != tt.wantCalls {
-				t.Fatalf("calls=%d want=%d", got, tt.wantCalls)
-			}
-		})
+	if _, err := (AgentTool{Sup: sup, Dir: dir}).Run(context.Background(), map[string]any{"prompt": "review"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls=%d, want 1", got)
 	}
 }
 
@@ -295,17 +283,6 @@ func TestConcurrentInspectOptionsAreIndependent(t *testing.T) {
 	for _, tools := range seen {
 		if !slices.Equal(tools, inspectAgentTools) {
 			t.Fatalf("shared options mutated: %v", seen)
-		}
-	}
-}
-
-func TestRetryCountIsBounded(t *testing.T) {
-	for _, tc := range []struct {
-		input any
-		want  int
-	}{{-1, 0}, {2, 2}, {99, 5}, {float64(3), 3}, {"2", 0}} {
-		if got := parseRetryCount(tc.input); got != tc.want {
-			t.Errorf("parseRetryCount(%v)=%d want %d", tc.input, got, tc.want)
 		}
 	}
 }

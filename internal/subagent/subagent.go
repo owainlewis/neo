@@ -1,7 +1,6 @@
-// Package factory supervises chat-spawned subagents. The public model-facing
-// surface is the agent tool: the coordinator writes a self-contained prompt,
-// the supervisor enforces agent/time budgets, and the UI receives events for
-// live progress.
+// Package subagent backs the agent tool: the coordinator writes a
+// self-contained prompt, the supervisor enforces agent/time budgets, and the UI
+// receives events for live progress.
 //
 // Division of labor:
 //
@@ -9,7 +8,7 @@
 //	code  constrains — agent count, time
 //	code  observes   — events, attribution, rendering
 //	code  never interprets — no state machines over agent outcomes
-package factory
+package subagent
 
 import (
 	"strings"

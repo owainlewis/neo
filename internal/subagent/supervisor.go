@@ -1,4 +1,4 @@
-package factory
+package subagent
 
 import (
 	"context"
@@ -22,12 +22,11 @@ type Runner interface {
 // AgentResult is the uniform envelope returned to the calling agent.
 // Ok means "the subagent completed", not that its answer is correct.
 type AgentResult struct {
-	Ok        bool   `json:"ok"`
-	Output    string `json:"output"`
-	Kind      string `json:"kind"`
-	Took      string `json:"took"`
-	Code      string `json:"code,omitempty"`
-	Retryable bool   `json:"-"`
+	Ok     bool   `json:"ok"`
+	Output string `json:"output"`
+	Kind   string `json:"kind"`
+	Took   string `json:"took"`
+	Code   string `json:"code,omitempty"`
 }
 
 type AgentMode string
@@ -98,10 +97,10 @@ func (s *Supervisor) RunAgentPrompt(ctx context.Context, dir, prompt string, opt
 		return fail(err.Error(), "admission_denied")
 	}
 	s.attribute(id, AgentEvent{Kind: "start"})
-	out, ok, code, retryable := s.runAgent(ctx, id, dir, prompt, opts)
+	out, ok, code := s.runAgent(ctx, id, dir, prompt, opts)
 	s.finish(id, out, ok)
 	return AgentResult{Ok: ok, Output: out, Kind: "agent",
-		Took: time.Since(start).Round(time.Second).String(), Code: code, Retryable: retryable}
+		Took: time.Since(start).Round(time.Second).String(), Code: code}
 }
 
 func (s *Supervisor) admitAndRegister(input string, call tools.CallMetadata, generation uint64) (int, error) {
@@ -118,7 +117,7 @@ func (s *Supervisor) admitAndRegister(input string, call tools.CallMetadata, gen
 	return id, nil
 }
 
-func (s *Supervisor) runAgent(ctx context.Context, id int, dir, input string, opts RunOptions) (string, bool, string, bool) {
+func (s *Supervisor) runAgent(ctx context.Context, id int, dir, input string, opts RunOptions) (string, bool, string) {
 	cctx, cancel := context.WithTimeout(ctx, s.budget.MaxWall)
 	defer cancel()
 
@@ -136,17 +135,17 @@ func (s *Supervisor) runAgent(ctx context.Context, id int, dir, input string, op
 	wg.Wait()
 	if err != nil {
 		if cctx.Err() == context.DeadlineExceeded {
-			return out + "\n[subagent hit its wall-clock limit]", false, "timeout", false
+			return out + "\n[subagent hit its wall-clock limit]", false, "timeout"
 		}
 		if cctx.Err() != nil {
-			return "subagent error: " + cctx.Err().Error() + "\n" + out, false, "canceled", false
+			return "subagent error: " + cctx.Err().Error() + "\n" + out, false, "canceled"
 		}
-		return "subagent error: " + err.Error() + "\n" + out, false, "execution_error", isTemporary(err)
+		return "subagent error: " + err.Error() + "\n" + out, false, "execution_error"
 	}
 	if strings.TrimSpace(out) == "" {
-		return "subagent error: subagent returned an empty result", false, "empty_result", false
+		return "subagent error: subagent returned an empty result", false, "empty_result"
 	}
-	return out, true, "", false
+	return out, true, ""
 }
 
 func (s *Supervisor) attribute(id int, ev AgentEvent) {
@@ -191,9 +190,8 @@ For independent investigations, issue several mode=inspect calls together. Use m
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"prompt":      map[string]any{"type": "string", "description": "Self-contained prompt for the subagent"},
-				"mode":        map[string]any{"type": "string", "enum": []string{"work", "inspect"}, "description": "work (default, writable and serial) or inspect (read-only and parallel-safe)"},
-				"max_retries": map[string]any{"type": "integer", "description": "Optional retry count for subagent execution failures only; does not judge task success"},
+				"prompt": map[string]any{"type": "string", "description": "Self-contained prompt for the subagent"},
+				"mode":   map[string]any{"type": "string", "enum": []string{"work", "inspect"}, "description": "work (default, writable and serial) or inspect (read-only and parallel-safe)"},
 			},
 			"required": []string{"prompt"},
 		},
@@ -210,14 +208,7 @@ func (t AgentTool) Run(ctx context.Context, input map[string]any) (string, error
 		return "", err
 	}
 	call, _ := tools.CallMetadataFrom(ctx)
-	maxRetries := parseRetryCount(input["max_retries"])
-	var res AgentResult
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		res = t.Sup.RunAgentPrompt(ctx, t.Dir, prompt, PromptOptions{Mode: mode, Call: call})
-		if res.Ok || !res.Retryable || attempt == maxRetries {
-			break
-		}
-	}
+	res := t.Sup.RunAgentPrompt(ctx, t.Dir, prompt, PromptOptions{Mode: mode, Call: call})
 	return fmt.Sprintf("{\"ok\":%t,\"kind\":%q,\"took\":%q,\"code\":%q}\n%s",
 		res.Ok, res.Kind, res.Took, res.Code, res.Output), nil
 }
@@ -250,29 +241,4 @@ func parseAgentMode(input map[string]any) (AgentMode, error) {
 	default:
 		return "", fmt.Errorf("agent: invalid mode %q", value)
 	}
-}
-
-// isTemporary requires an error to opt into whole-child retry.
-func isTemporary(err error) bool {
-	var temporary interface{ Temporary() bool }
-	return errors.As(err, &temporary) && temporary.Temporary()
-}
-
-func parseRetryCount(v any) int {
-	var n int
-	switch x := v.(type) {
-	case int:
-		n = x
-	case int64:
-		n = int(x)
-	case float64:
-		n = int(x)
-	}
-	if n < 0 {
-		return 0
-	}
-	if n > 5 {
-		return 5
-	}
-	return n
 }

@@ -1,4 +1,4 @@
-package factory
+package subagent
 
 import (
 	"context"
@@ -107,7 +107,7 @@ func (r *AgentRunner) registryWithOptions(dir string, opts RunOptions) *tools.Re
 	return all.Filter(opts.Tools)
 }
 
-// translate maps core agent loop events onto the factory event stream.
+// translate maps core agent loop events onto the subagent event stream.
 func translate(e agent.Event) (AgentEvent, bool) {
 	switch e.Kind {
 	case agent.EventAssistantText, agent.EventAssistantCommentary:
