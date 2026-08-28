@@ -1261,6 +1261,38 @@ func TestAgent_AccumulatesUsage(t *testing.T) {
 	}
 }
 
+// midStreamFailureProvider simulates an Anthropic-style provider that
+// reports usage from message_start/message_delta and then fails before
+// message_stop: it returns a non-nil response carrying the tokens billed so
+// far alongside a non-nil error, the same shape parseStream now returns for
+// a decode error, an error SSE event, or a truncated stream.
+type midStreamFailureProvider struct {
+	usage llm.Usage
+	err   error
+}
+
+func (p *midStreamFailureProvider) Name() string { return "mid-stream-failure" }
+
+func (p *midStreamFailureProvider) Complete(context.Context, llm.Request) (*llm.Response, error) {
+	return &llm.Response{Usage: p.usage}, p.err
+}
+
+func TestAgent_CountsPartialUsageOnMidStreamProviderFailure(t *testing.T) {
+	partial := llm.Usage{InputTokens: 100, OutputTokens: 40, CacheCreationTokens: 5, CacheReadTokens: 6}
+	prov := &midStreamFailureProvider{
+		usage: partial,
+		err:   fmt.Errorf("anthropic: stream ended before the response was complete"),
+	}
+	ag := newTestAgent(t, prov)
+
+	if _, err := ag.Send(context.Background(), "hi"); err == nil {
+		t.Fatal("expected the mid-stream failure to fail the turn")
+	}
+	if got := ag.Usage(); got != partial {
+		t.Fatalf("usage = %+v, want the partial usage billed before the mid-stream failure %+v", got, partial)
+	}
+}
+
 func TestAgent_AccumulatesCompactionAndAnswerUsageExactlyOnce(t *testing.T) {
 	summary := llmtest.Text("summary")
 	summary.Usage = llm.Usage{InputTokens: 10, OutputTokens: 20, CacheCreationTokens: 30, CacheReadTokens: 40}
