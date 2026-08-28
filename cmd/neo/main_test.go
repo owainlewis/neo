@@ -235,7 +235,7 @@ func TestChatSystem_IgnoresProjectMemoryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, io.Discard)
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, chatRegistry(), io.Discard)
 
 	if n := blocksContaining(blocks, "# Project instructions"); n != 0 {
 		t.Fatalf("project instruction blocks = %d, want 0", n)
@@ -691,12 +691,12 @@ func TestChatSystem_AgentProfileReplacesTheBuiltInPrompt(t *testing.T) {
 	cwd := t.TempDir()
 	agentProfile := profile.Profile{Name: "assistant", Body: "You are a calm personal assistant."}
 
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, agentProfile, io.Discard)
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, agentProfile, chatRegistry(), io.Discard)
 
 	if !strings.Contains(system, agentProfile.Body) {
 		t.Fatalf("profile body missing:\n%s", system)
 	}
-	if strings.Contains(system, "You are neo, a focused coding agent") {
+	if strings.Contains(system, "You are neo, a coding agent") {
 		t.Fatalf("the built-in prompt must be replaced, not appended:\n%s", system)
 	}
 	// Everything after the base block still composes.
@@ -709,8 +709,8 @@ func TestChatSystem_AgentProfileReplacesTheBuiltInPrompt(t *testing.T) {
 }
 
 func TestChatSystem_NoProfileKeepsTheCodingPrompt(t *testing.T) {
-	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, io.Discard)
-	if !strings.Contains(system, "You are neo, a focused coding agent") {
+	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, chatRegistry(), io.Discard)
+	if !strings.Contains(system, "You are neo, a coding agent") {
 		t.Fatalf("default prompt changed:\n%s", system)
 	}
 }

@@ -16,7 +16,8 @@ If all of that is mashed into one giant string, it is harder to understand, hard
 
 Neo builds the prompt in ordered blocks:
 
-1. A stable base prompt plus the named-phase and skill catalogs.
+1. A stable base: the core instructions, the capability sections for tools that
+   are actually registered, and the named-phase and skill catalogs.
 2. A dynamic environment section: working directory, repository root, platform, date.
 3. Dynamic project instructions from AGENTS.md files.
 
@@ -26,7 +27,8 @@ The flattened prompt is still available for providers that only accept a string.
 
 | Source | Purpose |
 | --- | --- |
-| Base prompt | Neo's default behavior: focused coding agent, read files, make small verified changes. Replaced wholesale by an agent profile when `--agent` is given. |
+| Core prompt | Neo's default behaviour, assuming no particular tool: inspect before changing, smallest change that works, run and report the checks, answer the request that was made, do not commit or deploy unasked. Replaced wholesale by an agent profile when `--agent` is given. |
+| Capability sections | Instructions for a specific tool, appended only when that tool is in the registry. |
 | Named phase catalog | Names and descriptions of built-in and configured prompts. Full bodies are injected only when invoked. |
 | Skill catalog | Names and descriptions of available skills. Full skill bodies are only expanded when invoked with `$name` or `/name args`. |
 | AGENTS.md | Project or user instructions that should guide work in this repo. |
@@ -47,6 +49,25 @@ Use named phases for low-friction, configurable prompts that should appear as
 first-class slash commands and as the active TUI label. Phase names and
 descriptions are always advertised, while their full bodies remain outside the
 base prompt until invocation.
+
+## Capability Sections
+
+Behaviour that depends on a tool lives with that tool, not in the always-loaded
+core. `capabilitySections` appends the workflow checklist rules when the
+`workflow` tool is registered and the delegation rules when `agent` is.
+
+This matters because the registries differ: interactive chat has both tools,
+`neo run` has neither. Before this split, headless models were told to "create a
+visible workflow checklist with the workflow tool" and to "delegate ... with the
+agent tool" — a contract they could not keep, which wastes tokens and invites
+invented tool calls.
+
+Two tests enforce it: one asserts the headless prompt never names either tool
+while the chat prompt names both, and one checks that any tool the prompt
+mentions is in the registry the prompt was built for.
+
+Adding a conditional tool means adding its guidance to `capabilitySections`
+rather than to the core prompt.
 
 ## Agent Profiles
 
@@ -74,7 +95,13 @@ should change; reach for a profile when you want a different agent.
 
 ## What To Be Careful About
 
-Always-loaded prompt text costs tokens every turn. Keep stable instructions short. Put big or optional workflows in skills, tools, or searchable history instead of stuffing them into the system prompt.
+Always-loaded prompt text costs tokens every turn. Keep the core short, put
+tool-specific behaviour in a capability section so it is absent where the tool
+is, and put big or optional workflows in skills rather than the system prompt.
+
+`TestChatSystemPromptSizeBudgets` holds two ceilings: one for the always-loaded
+core, one for the core plus capability sections. The first is the number that
+matters most, since it is paid in every mode.
 
 ## Where To Look
 

@@ -15,6 +15,9 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/profile"
+	"github.com/owainlewis/neo/internal/subagent"
+	"github.com/owainlewis/neo/internal/tools"
+	"github.com/owainlewis/neo/internal/workflow"
 )
 
 func TestSubagentBackendFollowsCoordinatorByDefault(t *testing.T) {
@@ -61,29 +64,62 @@ func TestChatAgentToolPassesCompactionContextWindowToRunner(t *testing.T) {
 	}
 }
 
-func TestChatSystemAdvertisesAgentToolWorkflowPattern(t *testing.T) {
-	system, blocks := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, io.Discard)
-	for _, want := range []string{
-		"user's request",
-		"AGENTS.md",
-		"an invoked skill",
-		"your own plan",
-		"always render them through the",
-		"Do not invent a workflow for a simple single-step request",
-		"agent tool",
-		"subagent prompts",
-	} {
-		if !strings.Contains(system, want) {
-			t.Fatalf("system prompt missing %q workflow guidance:\n%s", want, system)
+// The prompt must describe a tool only where that tool exists. `neo run` builds
+// the base registry with no workflow or agent tool, so instructing it to use
+// them would be a contract the model cannot keep.
+func TestChatSystemScopesCapabilityGuidanceToRegisteredTools(t *testing.T) {
+	cfg := &config.Config{}
+	capabilityPhrases := []string{"workflow tool", "agent tool", "subagent"}
+
+	headless, _ := chatSystem(cfg, t.TempDir(), nil, profile.Profile{}, newRegistry("", ""), io.Discard)
+	for _, phrase := range capabilityPhrases {
+		if strings.Contains(headless, phrase) {
+			t.Fatalf("headless prompt names %q but has no such tool:\n%s", phrase, headless)
+		}
+	}
+
+	chat, blocks := chatSystem(cfg, t.TempDir(), nil, profile.Profile{}, chatRegistry(), io.Discard)
+	for _, phrase := range capabilityPhrases {
+		if !strings.Contains(chat, phrase) {
+			t.Fatalf("chat prompt is missing %q:\n%s", phrase, chat)
+		}
+	}
+	for _, want := range []string{"# Workflow checklist", "# Delegation"} {
+		if !strings.Contains(chat, want) {
+			t.Fatalf("chat prompt missing section %q:\n%s", want, chat)
 		}
 	}
 	if len(blocks) == 0 || !blocks[0].Cache {
-		t.Fatalf("base prompt should be cacheable: %+v", blocks)
+		t.Fatalf("capability sections belong in the cacheable base: %+v", blocks)
+	}
+}
+
+// Every tool the prompt names must be in the registry that prompt was built for.
+func TestChatSystemNamesNoUnregisteredTool(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		reg  *tools.Registry
+	}{
+		{"headless", newRegistry("", "")},
+		{"chat", chatRegistry()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, tc.reg, io.Discard)
+			registered := map[string]bool{}
+			for _, n := range tc.reg.Names() {
+				registered[n] = true
+			}
+			for _, candidate := range []string{"workflow", "agent"} {
+				if strings.Contains(system, candidate+" tool") && !registered[candidate] {
+					t.Fatalf("prompt names the %s tool, which is not registered", candidate)
+				}
+			}
+		})
 	}
 }
 
 func TestChatSystemAdvertisesNamedPhasesWithoutPromptBodies(t *testing.T) {
-	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, io.Discard)
+	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, chatRegistry(), io.Discard)
 	for _, want := range []string{"# Named phases", "/design", "/plan", "/build", "/review"} {
 		if !strings.Contains(system, want) {
 			t.Fatalf("system prompt missing %q named phase catalog:\n%s", want, system)
@@ -105,7 +141,7 @@ func TestChatSystemPreservesAgentsWorkflowInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	system, blocks := chatSystem(&config.Config{}, root, nil, profile.Profile{}, io.Discard)
+	system, blocks := chatSystem(&config.Config{}, root, nil, profile.Profile{}, chatRegistry(), io.Discard)
 
 	if len(blocks) < 2 {
 		t.Fatalf("system blocks = %d, want project instructions block", len(blocks))
@@ -148,7 +184,7 @@ func TestChatSystemWarnsAndExcludesEscapingAgentsSymlink(t *testing.T) {
 	}
 
 	var warnings bytes.Buffer
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, &warnings)
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, chatRegistry(), &warnings)
 
 	if strings.Contains(system, sentinel) {
 		t.Fatal("escaping AGENTS.md target entered the system prompt")
@@ -170,7 +206,7 @@ func TestChatSystemWarnsAndExcludesEscapingAgentsSymlink(t *testing.T) {
 
 func TestChatSystemStatesTheEnvironment(t *testing.T) {
 	cwd := t.TempDir()
-	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, io.Discard)
+	system, blocks := chatSystem(&config.Config{}, cwd, nil, profile.Profile{}, chatRegistry(), io.Discard)
 
 	for _, want := range []string{"# Environment", "Working directory: " + cwd, "Platform: " + runtime.GOOS} {
 		if !strings.Contains(system, want) {
@@ -236,4 +272,10 @@ func TestEnvironmentSectionKeepsValuesOnOneLine(t *testing.T) {
 	if strings.Contains(got, "Working directory: "+dir) {
 		t.Fatalf("newline in path was not flattened:\n%s", got)
 	}
+}
+
+// chatRegistry mirrors what interactive chat registers, so prompt tests see the
+// capability sections a chat session would actually get.
+func chatRegistry() *tools.Registry {
+	return newRegistry("", "", workflow.Tool{}, subagent.AgentTool{})
 }
