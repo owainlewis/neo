@@ -420,14 +420,42 @@ type headlessOptions struct {
 }
 
 type headlessResult struct {
-	OK         bool   `json:"ok"`
-	ElapsedMS  int64  `json:"elapsed_ms"`
-	Provider   string `json:"provider"`
-	Model      string `json:"model"`
-	ToolCalls  int    `json:"tool_calls"`
-	ToolErrors int    `json:"tool_errors"`
-	Final      string `json:"final,omitempty"`
-	Error      string `json:"error,omitempty"`
+	OK         bool          `json:"ok"`
+	ElapsedMS  int64         `json:"elapsed_ms"`
+	Provider   string        `json:"provider"`
+	Model      string        `json:"model"`
+	ToolCalls  int           `json:"tool_calls"`
+	ToolErrors int           `json:"tool_errors"`
+	Usage      headlessUsage `json:"usage"`
+	Final      string        `json:"final,omitempty"`
+	Error      string        `json:"error,omitempty"`
+}
+
+// headlessUsage is the public token-accounting shape for `neo run --json`.
+// It intentionally uses its own field names rather than embedding llm.Usage:
+// the internal type's JSON tags (input_tokens, cache_creation_tokens,
+// cache_read_tokens) predate this CLI-facing contract and don't spell out
+// "input" on the cache fields. TotalTokens is always computed by Neo as the
+// sum of the other four fields; it is never taken from a provider total.
+type headlessUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	TotalTokens              int `json:"total_tokens"`
+}
+
+// newHeadlessUsage converts an accumulated llm.Usage into the public
+// headless JSON shape, computing total_tokens as the sum of the other
+// fields rather than trusting any provider-reported total.
+func newHeadlessUsage(u llm.Usage) headlessUsage {
+	return headlessUsage{
+		InputTokens:              u.InputTokens,
+		CacheCreationInputTokens: u.CacheCreationTokens,
+		CacheReadInputTokens:     u.CacheReadTokens,
+		OutputTokens:             u.OutputTokens,
+		TotalTokens:              u.InputTokens + u.CacheCreationTokens + u.CacheReadTokens + u.OutputTokens,
+	}
 }
 
 func runHeadless(ctx context.Context, args []string, agentName string, streams stdio) int {
@@ -443,21 +471,27 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 		defer cancel()
 	}
 	started := time.Now()
-	cfg, ok := loadConfig(streams.err)
-	if !ok {
+	cfg, err := config.Load()
+	if err != nil {
+		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Usage: headlessUsage{}, Error: fmt.Sprintf("config: %v", err)}, streams)
 		return 1
 	}
 	providerName, model := cfg.Provider, cfg.Model
 	prov, err := checkedProvider(ctx, cfg, providerName)
 	if err != nil {
-		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Error: err.Error()}, streams)
+		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Usage: headlessUsage{}, Error: err.Error()}, streams)
 		return 1
 	}
 	cwd, _ := os.Getwd()
 	root := workspace.Root(cwd)
-	agentProfile, ok := loadProfile(cwd, agentName, streams.err)
-	if !ok {
-		return 1
+	var agentProfile profile.Profile
+	if agentName != "" {
+		p, err := profile.Load(cwd, agentName)
+		if err != nil {
+			finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Usage: headlessUsage{}, Error: err.Error()}, streams)
+			return 1
+		}
+		agentProfile = p
 	}
 	sk := loadSkills(cfg, cwd, streams.err)
 	reg := newRegistry(cwd, root)
@@ -490,6 +524,7 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 		Model:      model,
 		ToolCalls:  toolCalls,
 		ToolErrors: toolErrors,
+		Usage:      newHeadlessUsage(ag.Usage()),
 		Final:      out,
 	}
 	if err != nil {

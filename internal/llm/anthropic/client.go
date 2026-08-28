@@ -243,14 +243,17 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			return retry.AttemptResult{Body: raw, Status: resp.StatusCode, RetryAfter: retryAfter}, readErr
 		}
 		parsed, err := parseStream(resp.Body)
+		// parsed carries any usage captured before a mid-stream failure (decode
+		// error, error event, or truncation); keep it even on error so a later
+		// attempt failure still surfaces the tokens already billed.
+		streamed = parsed
 		if err != nil {
 			return retry.AttemptResult{Status: resp.StatusCode, RetryAfter: retryAfter}, err
 		}
-		streamed = parsed
 		return retry.AttemptResult{Status: resp.StatusCode, RetryAfter: retryAfter}, nil
 	})
 	if err != nil {
-		return nil, err
+		return streamed, err
 	}
 	if result.Status >= 400 {
 		logx.Debug("provider client error",

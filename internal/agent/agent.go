@@ -358,6 +358,15 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			Tools:        a.cfg.Tools.Specs(),
 		})
 		if err != nil {
+			// A provider can fail mid-stream after already reporting usage
+			// (message_start / message_delta) for tokens it billed before the
+			// failure. When it does, resp is non-nil and carries that partial
+			// usage; record it before returning so the total still reflects
+			// every call the agent actually made, not just the ones that
+			// finished cleanly.
+			if resp != nil {
+				a.usage = addUsage(a.usage, resp.Usage)
+			}
 			logx.Debug("agent provider error", "turn", turn+1, "error", err.Error())
 			a.emit(Event{Kind: EventError, Err: err})
 			return "", err

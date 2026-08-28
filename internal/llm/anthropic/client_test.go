@@ -360,6 +360,35 @@ func TestComplete_ParsesCacheUsage(t *testing.T) {
 	}
 }
 
+// If a stream reports usage and then breaks before message_stop, Complete
+// must still surface those tokens on its returned response even though it
+// also returns an error, so a caller accounting for a mid-turn failure does
+// not silently lose tokens Anthropic already billed.
+func TestComplete_ReturnsPartialUsageOnMidStreamFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		fmt.Fprint(w, `event: message_start`+"\n")
+		fmt.Fprint(w, `data: {"type":"message_start","message":{"usage":{"input_tokens":11,"cache_read_input_tokens":22}}}`+"\n\n")
+		fmt.Fprint(w, `data: {"type":"message_delta","delta":{},"usage":{"output_tokens":33}}`+"\n\n")
+		// Connection ends here: no message_stop, so the stream is truncated.
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	client.MaxRetries = 0
+	resp, err := client.Complete(context.Background(), llm.Request{Model: "m"})
+	if err == nil {
+		t.Fatal("expected an error for the truncated stream")
+	}
+	if resp == nil {
+		t.Fatal("expected a non-nil response carrying the partial usage")
+	}
+	want := llm.Usage{InputTokens: 11, CacheReadTokens: 22, OutputTokens: 33}
+	if resp.Usage != want {
+		t.Fatalf("usage = %+v, want %+v", resp.Usage, want)
+	}
+}
+
 func TestComplete_StripsForeignRawBlocksFromMessages(t *testing.T) {
 	var captured struct {
 		Messages []struct {

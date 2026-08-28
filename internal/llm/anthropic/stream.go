@@ -41,6 +41,11 @@ type streamEvent struct {
 // non-streaming endpoint would have returned. Nothing is emitted as it
 // arrives: Neo renders completed blocks, and streaming exists here so a long
 // generation is not bounded by a single request timeout, not to paint text.
+//
+// On error, the returned *llm.Response is non-nil whenever usage was
+// captured before the failure (message_start / message_delta already
+// arrived), so callers can still account for tokens billed before a
+// mid-stream failure instead of discarding them along with the error.
 func parseStream(r io.Reader) (*llm.Response, error) {
 	var (
 		out      llm.Response
@@ -62,10 +67,10 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 		}
 		var ev streamEvent
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			return nil, fmt.Errorf("decode stream event: %w (data: %s)", err, payload)
+			return &out, fmt.Errorf("decode stream event: %w (data: %s)", err, payload)
 		}
 		if ev.Error != nil {
-			return nil, fmt.Errorf("anthropic: %s", ev.Error.Message)
+			return &out, fmt.Errorf("anthropic: %s", ev.Error.Message)
 		}
 
 		switch ev.Type {
@@ -108,7 +113,7 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 			// buffer means a tool with no arguments, which is valid.
 			if raw := b.String(); raw != "" {
 				if err := json.Unmarshal([]byte(raw), &out.Content[pos].Input); err != nil {
-					return nil, fmt.Errorf("decode tool input for %s: %w", out.Content[pos].Name, err)
+					return &out, fmt.Errorf("decode tool input for %s: %w", out.Content[pos].Name, err)
 				}
 			}
 		case "message_stop":
@@ -125,7 +130,7 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read stream: %w", err)
+		return &out, fmt.Errorf("read stream: %w", err)
 	}
 	// A connection dropped part-way through ends in a clean EOF, so the absence
 	// of the terminal event is the only signal that the response is partial.
@@ -133,7 +138,7 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 	// the agent loop reads as a normal end of turn — silent truncation is the
 	// one failure mode worth being loud about.
 	if !done {
-		return nil, fmt.Errorf("anthropic: stream ended before the response was complete")
+		return &out, fmt.Errorf("anthropic: stream ended before the response was complete")
 	}
 	return &out, nil
 }

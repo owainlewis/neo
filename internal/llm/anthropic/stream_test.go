@@ -114,6 +114,66 @@ func TestParseStream_Errors(t *testing.T) {
 	}
 }
 
+// A stream can report usage via message_start/message_delta and then fail
+// before message_stop (decode error, error event, or truncation). The tokens
+// already billed must not be discarded along with the error: parseStream
+// returns them on the response value even though it also returns the error.
+func TestParseStream_PreservesPartialUsageOnMidStreamFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, stream, wantErr string
+		wantUsage             llm.Usage
+	}{
+		{
+			name: "error event after message_start",
+			stream: strings.Join([]string{
+				`data: {"type":"message_start","message":{"usage":{"input_tokens":11,"cache_read_input_tokens":22}}}`,
+				`data: {"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`,
+				``,
+			}, "\n\n"),
+			wantErr:   "overloaded",
+			wantUsage: llm.Usage{InputTokens: 11, CacheReadTokens: 22},
+		},
+		{
+			name: "truncated after message_delta output tokens",
+			stream: strings.Join([]string{
+				`data: {"type":"message_start","message":{"usage":{"input_tokens":11,"cache_read_input_tokens":22}}}`,
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"half"}}`,
+				`data: {"type":"message_delta","delta":{},"usage":{"output_tokens":33}}`,
+				``,
+			}, "\n\n"),
+			wantErr:   "stream ended before the response was complete",
+			wantUsage: llm.Usage{InputTokens: 11, CacheReadTokens: 22, OutputTokens: 33},
+		},
+		{
+			name: "decode error after message_start",
+			stream: strings.Join([]string{
+				`data: {"type":"message_start","message":{"usage":{"input_tokens":11,"cache_read_input_tokens":22}}}`,
+				`data: {not json}`,
+				``,
+			}, "\n\n"),
+			wantErr:   "decode stream event",
+			wantUsage: llm.Usage{InputTokens: 11, CacheReadTokens: 22},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := parseStream(strings.NewReader(tc.stream))
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q does not contain %q", err, tc.wantErr)
+			}
+			if resp == nil {
+				t.Fatal("expected a non-nil response carrying the partial usage")
+			}
+			if resp.Usage != tc.wantUsage {
+				t.Fatalf("usage = %+v, want %+v", resp.Usage, tc.wantUsage)
+			}
+		})
+	}
+}
+
 // Cancelling mid-generation must surface as a context error. Before the read
 // error was propagated, a cancelled request looked like an empty success and
 // failed later with a decode error, hiding what actually happened.
