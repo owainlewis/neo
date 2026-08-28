@@ -8,12 +8,23 @@ import (
 	"github.com/owainlewis/neo/internal/profile"
 )
 
-const basePromptByteBudget = 2048
+// Two budgets, because the prompt is no longer one size. The core is sent on
+// every request in every mode and is the number that matters most; the chat
+// budget covers it plus the workflow and delegation sections, which only exist
+// where those tools do.
+const (
+	corePromptByteBudget = 1400
+	chatPromptByteBudget = 2600
+)
 
-func TestChatSystemBasePromptSizeBudget(t *testing.T) {
-	prompt, _ := chatSystem(&config.Config{}, "", nil, profile.Profile{}, io.Discard)
-	if len(prompt) > basePromptByteBudget {
-		t.Fatalf("base prompt size = %d bytes, budget = %d", len(prompt), basePromptByteBudget)
+func TestChatSystemPromptSizeBudgets(t *testing.T) {
+	headless, _ := chatSystem(&config.Config{}, "", nil, profile.Profile{}, newRegistry("", ""), io.Discard)
+	if len(headless) > corePromptByteBudget {
+		t.Fatalf("always-loaded prompt = %d bytes, budget = %d", len(headless), corePromptByteBudget)
+	}
+	chat, _ := chatSystem(&config.Config{}, "", nil, profile.Profile{}, chatRegistry(), io.Discard)
+	if len(chat) > chatPromptByteBudget {
+		t.Fatalf("chat prompt = %d bytes, budget = %d", len(chat), chatPromptByteBudget)
 	}
 }
 
@@ -22,11 +33,11 @@ func TestChatSystemBasePromptSizeBudget(t *testing.T) {
 // checkout running the benchmark.
 func BenchmarkChatSystem(b *testing.B) {
 	cfg := &config.Config{}
-	prompt, _ := chatSystem(cfg, "", nil, profile.Profile{}, io.Discard)
+	prompt, _ := chatSystem(cfg, "", nil, profile.Profile{}, chatRegistry(), io.Discard)
 	b.ReportAllocs()
 
 	for b.Loop() {
-		prompt, blocks := chatSystem(cfg, "", nil, profile.Profile{}, io.Discard)
+		prompt, blocks := chatSystem(cfg, "", nil, profile.Profile{}, chatRegistry(), io.Discard)
 		if len(prompt) == 0 || len(blocks) != 1 {
 			b.Fatal("unexpected base prompt")
 		}

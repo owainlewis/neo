@@ -37,31 +37,51 @@ import (
 // Default "dev" makes local builds obvious in the splash screen.
 var Version = "dev"
 
-const chatSystemPrompt = `You are neo, a focused coding agent.
+// chatSystemPrompt is always loaded, so it stays short and assumes nothing
+// about which tools are registered. Behaviour that depends on a specific tool
+// lives in the capability blocks below and is appended only when that tool is
+// present — `neo run` has no workflow or agent tool, and instructing a model to
+// use tools it was not given wastes tokens and invites invented calls.
+const chatSystemPrompt = `You are neo, a coding agent working in the user's current working directory.
 
-Operate in the user's current working directory. Use the available tools to read files,
-inspect code with bash, and make edits. Prefer small, verified changes. Run tests after
-you change code. When you finish a task, briefly summarize what changed.
+Inspect the project before changing it, and prefer the smallest change that does
+the job. After changing code, run the checks that cover it and say what you ran;
+if something could not be verified, say that instead of implying it passed.
 
-Before tool calls, write one short sentence explaining what you are checking or
-changing and why. Do not narrate obvious individual calls or expose private reasoning.
-Issue independent reads, searches, or inspections together in one response.
+Answer the request that was made. An inspection, explanation, review, or design
+request is answered, not implemented, unless changes were asked for. Leave
+unrelated work alone, and do not commit, push, or deploy unless asked.
+
+Before a tool call, write one short sentence explaining what you are checking or
+changing and why. Do not narrate obvious individual calls or expose private
+reasoning. Issue independent reads, searches, or inspections together in one
+response. When you finish a task, briefly summarize what changed.`
+
+// workflowCapability is appended when the workflow tool is registered.
+const workflowCapability = `
+
+# Workflow checklist
 
 For multi-step tasks, or when workflow instructions are provided, create a
-visible workflow checklist with the workflow tool before doing the work.
-Workflow instructions may come from the user's request,
-AGENTS.md, an invoked skill, or your own plan; always render them through the
-workflow tool. Preserve the wording and order of user-provided numbered steps.
-Do not invent a workflow for a simple single-step request. Mark each high-level
-item running before working on it, and mark it done, failed, or skipped based
-on the outcome.
-When the user asks for a coordinator-worker or orchestrated-agent flow, treat the
-chat agent as the coordinator: plan first, delegate suitable self-contained tasks
-to subagents with the agent tool, inspect their results, and keep workflow
-statuses based on evidence. Do not mirror every tool call manually; Neo attaches
-tool and subagent activity to the active workflow item automatically. Write
-subagent prompts dynamically from the user's goal and current context; use the
-normal tools directly when delegation is unnecessary.`
+visible checklist with the workflow tool before doing the work. Instructions may
+come from the user's request, AGENTS.md, an invoked skill, or your own plan;
+render them through the workflow tool either way, preserving the wording and
+order of user-provided numbered steps. Do not invent a workflow for a simple
+single-step request. Mark each high-level item running before working on it, and
+done, failed, or skipped based on the outcome.`
+
+// subagentCapability is appended when the agent tool is registered.
+const subagentCapability = `
+
+# Delegation
+
+When the user asks for a coordinator-worker or orchestrated-agent flow, act as
+the coordinator: plan first, delegate suitable self-contained tasks to subagents
+with the agent tool, inspect their results, and base any workflow status on
+evidence. Do not mirror every tool call manually; Neo attaches tool and subagent
+activity to the active workflow item automatically. Write subagent prompts from
+the user's goal and current context, and use the normal tools directly when
+delegation is unnecessary.`
 
 func main() {
 	os.Exit(execute(os.Args[1:], stdio{
@@ -292,7 +312,7 @@ func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
 // caching reuse the base across turns and sessions while the project tail
 // varies. Discovery errors are non-fatal, warning and falling back to the blocks
 // built so far rather than failing to start.
-func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, agentProfile profile.Profile, errOut io.Writer) (string, []llm.SystemBlock) {
+func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, agentProfile profile.Profile, reg *tools.Registry, errOut io.Writer) (string, []llm.SystemBlock) {
 	// Base block: static instructions plus phase and skill catalogs. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
 	//
@@ -303,6 +323,7 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, agentProfile 
 	if agentProfile.Body != "" {
 		instructions = agentProfile.Body
 	}
+	instructions += capabilitySections(reg)
 	base := phase.Augment(instructions, cfg.NamedPhases())
 	base = skills.Augment(base, sk)
 	cache := cfg.PromptCachingEnabled()
@@ -357,6 +378,23 @@ func environmentSection(cwd string, now time.Time) string {
 // own headings into the system prompt.
 func promptValue(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+}
+
+// capabilitySections returns the instructions for tools that are actually
+// registered. A nil registry contributes nothing, which keeps the prompt honest
+// for callers that build one later.
+func capabilitySections(reg *tools.Registry) string {
+	if reg == nil {
+		return ""
+	}
+	var b strings.Builder
+	if _, ok := reg.Get("workflow"); ok {
+		b.WriteString(workflowCapability)
+	}
+	if _, ok := reg.Get("agent"); ok {
+		b.WriteString(subagentCapability)
+	}
+	return b.String()
 }
 
 func loadConfig(errOut io.Writer) (*config.Config, bool) {
@@ -422,10 +460,10 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 		return 1
 	}
 	sk := loadSkills(cfg, cwd, streams.err)
-	system, systemBlocks := chatSystem(cfg, cwd, sk, agentProfile, streams.err)
+	reg := newRegistry(cwd, root)
+	system, systemBlocks := chatSystem(cfg, cwd, sk, agentProfile, reg, streams.err)
 
 	var toolCalls, toolErrors int
-	reg := newRegistry(cwd, root)
 	ag := agent.New(agent.Config{
 		Model:        model,
 		System:       system,
@@ -630,7 +668,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// the TUI.
 	sk := loadSkills(cfg, cwd, streams.err)
 
-	system, systemBlocks := chatSystem(cfg, cwd, sk, agentProfile, streams.err)
+	system, systemBlocks := chatSystem(cfg, cwd, sk, agentProfile, reg, streams.err)
 	var requiresApproval func(string, map[string]any) bool
 	if len(cfg.ToolApprovals) > 0 {
 		requiresApproval = approval.New(cfg.ToolApprovals).Requires
