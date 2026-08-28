@@ -582,12 +582,12 @@ func validateHeadlessFlagOperands(args []string) error {
 
 		switch name {
 		case "--config", "-config":
-			if i+1 < len(args) && isHeadlessFlag(args[i+1]) {
+			if i+1 < len(args) && (args[i+1] == "--" || isHeadlessFlag(args[i+1])) {
 				return fmt.Errorf("--config needs a path")
 			}
 			i++
 		case "--model", "-model":
-			if i+1 < len(args) && isHeadlessFlag(args[i+1]) {
+			if i+1 < len(args) && (args[i+1] == "--" || isHeadlessFlag(args[i+1])) {
 				return fmt.Errorf("--model needs a non-empty id")
 			}
 			i++

@@ -599,6 +599,7 @@ func TestParseHeadlessArgsRejectsEmptyModel(t *testing.T) {
 		{"--model", "", "prompt"},
 		{"--model=", "prompt"},
 		{"--model", "--config", "headless.yaml", "prompt"},
+		{"--model", "--", "prompt"},
 	} {
 		_, _, err := parseHeadlessArgs(args, nil)
 		if err == nil || !strings.Contains(err.Error(), "--model needs a non-empty id") {
@@ -612,6 +613,7 @@ func TestParseHeadlessArgsRejectsMissingConfigPath(t *testing.T) {
 		{"--config", "", "prompt"},
 		{"--config=", "prompt"},
 		{"--config", "--model", "override-model", "prompt"},
+		{"--config", "--", "prompt"},
 	} {
 		_, _, err := parseHeadlessArgs(args, nil)
 		if err == nil || !strings.Contains(err.Error(), "--config needs a path") {
