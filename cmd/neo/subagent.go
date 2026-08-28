@@ -8,6 +8,7 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/subagent"
+	"github.com/owainlewis/neo/internal/tools"
 )
 
 // subagentBackend resolves the optional worker backend. The zero-value config
@@ -40,7 +41,9 @@ func (p unavailableProvider) Complete(context.Context, llm.Request) (*llm.Respon
 	return nil, p.err
 }
 
-// chatAgentTool builds the agent tool for an interactive chat session.
+// chatAgentTool builds the agent tool for a coordinator session. Both
+// interactive chat and headless `neo run` use it, so they share one
+// construction path and one owner of subagent lifecycle and cancellation.
 func chatAgentTool(prov llm.Provider, model, cwd, root string, cfg *config.Config) (subagent.AgentTool, <-chan subagent.Event, *subagent.AgentRunner) {
 	contextWindowTokens := 0
 	if cfg != nil {
@@ -55,4 +58,24 @@ func chatAgentTool(prov llm.Provider, model, cwd, root string, cfg *config.Confi
 	}
 	sup := subagent.NewSupervisor(runner, subagent.DefaultBudget())
 	return subagent.AgentTool{Sup: sup, Dir: cwd}, sup.Events, runner
+}
+
+// headlessRegistry builds the tool registry for `neo run`. Headless
+// coordinators delegate through the same native agent tool as interactive
+// chat: the same supervisor budgets, the same work/inspect capabilities, and
+// the same backend selection. The workflow tool stays out, because headless
+// runs have no checklist surface.
+//
+// The agent tool needs a working directory to run subagents in, so a failed
+// os.Getwd (empty cwd) falls back to the base registry rather than spawning
+// children with nowhere to work. Nothing drains the returned supervisor's
+// event channel; Supervisor.attribute drops on a full channel, so headless
+// subagent activity never blocks and never reaches stdout.
+func headlessRegistry(ctx context.Context, cfg *config.Config, prov llm.Provider, model, cwd, root string) (*tools.Registry, *subagent.AgentRunner) {
+	if cwd == "" {
+		return newRegistry(cwd, root), nil
+	}
+	workerProvider, workerModel, _ := subagentBackend(ctx, cfg, prov, model)
+	at, _, runner := chatAgentTool(workerProvider, workerModel, cwd, root, cfg)
+	return newRegistry(cwd, root, at), runner
 }

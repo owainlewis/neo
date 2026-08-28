@@ -591,7 +591,7 @@ func TestParseHeadlessArgsRejectsRemovedPermissionFlag(t *testing.T) {
 }
 
 func TestHeadlessRegistryIncludesWritableTools(t *testing.T) {
-	names := newRegistry(t.TempDir(), t.TempDir()).Names()
+	names := headlessTestRegistry(t).Names()
 	for _, want := range []string{"bash", "edit_file", "write_file"} {
 		found := false
 		for _, name := range names {

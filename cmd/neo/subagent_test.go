@@ -64,17 +64,17 @@ func TestChatAgentToolPassesCompactionContextWindowToRunner(t *testing.T) {
 	}
 }
 
-// The prompt must describe a tool only where that tool exists. `neo run` builds
-// the base registry with no workflow or agent tool, so instructing it to use
-// them would be a contract the model cannot keep.
+// The prompt must describe a tool only where that tool exists. A registry
+// carrying neither capability tool gets neither section, so instructing it to
+// use them would be a contract the model cannot keep.
 func TestChatSystemScopesCapabilityGuidanceToRegisteredTools(t *testing.T) {
 	cfg := &config.Config{}
 	capabilityPhrases := []string{"workflow tool", "agent tool", "subagent"}
 
-	headless, _ := chatSystem(cfg, t.TempDir(), nil, profile.Profile{}, newRegistry("", ""), io.Discard)
+	base, _ := chatSystem(cfg, t.TempDir(), nil, profile.Profile{}, newRegistry("", ""), io.Discard)
 	for _, phrase := range capabilityPhrases {
-		if strings.Contains(headless, phrase) {
-			t.Fatalf("headless prompt names %q but has no such tool:\n%s", phrase, headless)
+		if strings.Contains(base, phrase) {
+			t.Fatalf("prompt names %q but has no such tool:\n%s", phrase, base)
 		}
 	}
 
@@ -100,7 +100,8 @@ func TestChatSystemNamesNoUnregisteredTool(t *testing.T) {
 		name string
 		reg  *tools.Registry
 	}{
-		{"headless", newRegistry("", "")},
+		{"base", newRegistry("", "")},
+		{"headless", headlessTestRegistry(t)},
 		{"chat", chatRegistry()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -274,8 +275,209 @@ func TestEnvironmentSectionKeepsValuesOnOneLine(t *testing.T) {
 	}
 }
 
+// headlessTestRegistry mirrors what `neo run` registers.
+func headlessTestRegistry(t *testing.T) *tools.Registry {
+	t.Helper()
+	reg, _ := headlessRegistry(context.Background(), &config.Config{},
+		&llmtest.FakeProvider{}, "main-model", t.TempDir(), t.TempDir())
+	return reg
+}
+
 // chatRegistry mirrors what interactive chat registers, so prompt tests see the
 // capability sections a chat session would actually get.
 func chatRegistry() *tools.Registry {
 	return newRegistry("", "", workflow.Tool{}, subagent.AgentTool{})
+}
+
+// headlessRegistry is what `neo run` actually builds, so headless tests must
+// assert against it rather than the bare base registry.
+func TestHeadlessRegistryExposesAgentToolWithoutWorkflow(t *testing.T) {
+	reg, runner := headlessRegistry(context.Background(), &config.Config{},
+		&llmtest.FakeProvider{}, "main-model", t.TempDir(), t.TempDir())
+	if runner == nil {
+		t.Fatal("headless registry did not build a subagent runner")
+	}
+	for _, want := range []string{"agent", "bash", "grep", "glob", "read_file", "write_file", "edit_file"} {
+		if _, ok := reg.Get(want); !ok {
+			t.Fatalf("headless registry is missing %q, has %v", want, reg.Names())
+		}
+	}
+	if _, ok := reg.Get("workflow"); ok {
+		t.Fatalf("headless registry must not register the workflow tool: %v", reg.Names())
+	}
+}
+
+// os.Getwd can fail. A subagent with no directory has nowhere to run, so
+// headless falls back to the base registry rather than spawning children.
+func TestHeadlessRegistryWithoutWorkingDirectoryHasNoAgentTool(t *testing.T) {
+	reg, runner := headlessRegistry(context.Background(), &config.Config{},
+		&llmtest.FakeProvider{}, "main-model", "", t.TempDir())
+	if runner != nil {
+		t.Fatal("no working directory should mean no subagent runner")
+	}
+	if _, ok := reg.Get("agent"); ok {
+		t.Fatalf("headless registry spawned an agent tool with no cwd: %v", reg.Names())
+	}
+}
+
+func TestHeadlessSubagentBackendFollowsCoordinatorByDefault(t *testing.T) {
+	coordinator := &llmtest.FakeProvider{}
+	_, runner := headlessRegistry(context.Background(), &config.Config{},
+		coordinator, "main-model", t.TempDir(), t.TempDir())
+	if runner.Provider != coordinator || runner.DefaultModel != "main-model" {
+		t.Fatalf("worker backend = %T/%q, want the coordinator's", runner.Provider, runner.DefaultModel)
+	}
+}
+
+func TestHeadlessSubagentBackendUsesConfiguredSubagentsBlock(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	cfg := &config.Config{Subagents: config.Backend{Provider: "anthropic", Model: "worker-model"}}
+	_, runner := headlessRegistry(context.Background(), cfg,
+		&llmtest.FakeProvider{}, "main-model", t.TempDir(), t.TempDir())
+	if runner.Provider.Name() != "anthropic" || runner.DefaultModel != "worker-model" {
+		t.Fatalf("worker backend = %s/%q, want anthropic/worker-model", runner.Provider.Name(), runner.DefaultModel)
+	}
+}
+
+// The headless coordinator can delegate, and the child sees no agent tool, so
+// a subagent cannot delegate again.
+func TestHeadlessAgentToolDelegatesWithoutNestedDelegation(t *testing.T) {
+	worker := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("child report")}}
+	reg, _ := headlessRegistry(context.Background(), &config.Config{},
+		worker, "main-model", t.TempDir(), t.TempDir())
+	at, ok := reg.Get("agent")
+	if !ok {
+		t.Fatal("headless registry has no agent tool")
+	}
+	out, err := at.Run(context.Background(), map[string]any{"prompt": "summarize the repo"})
+	if err != nil {
+		t.Fatalf("agent tool run: %v", err)
+	}
+	if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, "child report") {
+		t.Fatalf("agent tool output = %q", out)
+	}
+	if len(worker.Calls) == 0 {
+		t.Fatal("the worker backend was never called")
+	}
+	for _, spec := range worker.Calls[0].Tools {
+		if spec.Name == "agent" {
+			t.Fatal("a headless subagent was given the agent tool and could delegate again")
+		}
+	}
+}
+
+// inspect children are read-only and parallel-safe; work children are neither.
+func TestHeadlessAgentToolInspectModeIsReadOnlyAndParallelSafe(t *testing.T) {
+	worker := &llmtest.FakeProvider{Responses: []llm.Response{llmtest.Text("inspection")}}
+	reg, _ := headlessRegistry(context.Background(), &config.Config{},
+		worker, "main-model", t.TempDir(), t.TempDir())
+	at, _ := reg.Get("agent")
+	parallel, ok := at.(interface{ ParallelSafe(map[string]any) bool })
+	if !ok {
+		t.Fatal("headless agent tool does not report parallel safety")
+	}
+	if !parallel.ParallelSafe(map[string]any{"prompt": "look", "mode": "inspect"}) {
+		t.Fatal("inspect input should be parallel-safe")
+	}
+	for _, input := range []map[string]any{
+		{"prompt": "change", "mode": "work"},
+		{"prompt": "change"},
+		{"prompt": "", "mode": "inspect"},
+	} {
+		if parallel.ParallelSafe(input) {
+			t.Fatalf("input %v should not be parallel-safe", input)
+		}
+	}
+
+	if _, err := at.Run(context.Background(), map[string]any{"prompt": "look", "mode": "inspect"}); err != nil {
+		t.Fatalf("inspect run: %v", err)
+	}
+	var names []string
+	for _, spec := range worker.Calls[0].Tools {
+		names = append(names, spec.Name)
+	}
+	want := map[string]bool{"read_file": true, "grep": true, "glob": true}
+	if len(names) != len(want) {
+		t.Fatalf("inspect child tools = %v, want exactly %v", names, want)
+	}
+	for _, name := range names {
+		if !want[name] {
+			t.Fatalf("inspect child got writable tool %q (%v)", name, names)
+		}
+	}
+}
+
+func TestHeadlessAgentToolReportsCancellationAndTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ctx  func(t *testing.T) context.Context
+		code string
+	}{
+		{"canceled", func(t *testing.T) context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx
+		}, `"code":"canceled"`},
+		{"timeout", func(t *testing.T) context.Context {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+			t.Cleanup(cancel)
+			time.Sleep(time.Millisecond)
+			return ctx
+		}, `"code":"timeout"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg, _ := headlessRegistry(context.Background(), &config.Config{},
+				&llmtest.FakeProvider{}, "main-model", t.TempDir(), t.TempDir())
+			at, _ := reg.Get("agent")
+			out, err := at.Run(tc.ctx(t), map[string]any{"prompt": "work"})
+			if err != nil {
+				t.Fatalf("agent tool run: %v", err)
+			}
+			if !strings.Contains(out, `"ok":false`) || !strings.Contains(out, tc.code) {
+				t.Fatalf("output = %q, want ok:false with %s", out, tc.code)
+			}
+		})
+	}
+}
+
+// DefaultBudget's session agent cap still bounds headless delegation.
+func TestHeadlessAgentToolKeepsDefaultSupervisorBudgets(t *testing.T) {
+	budget := subagent.DefaultBudget()
+	if budget.MaxAgents != 20 || budget.MaxWall != 15*time.Minute {
+		t.Fatalf("default budget = %+v, want 20 agents / 15m wall", budget)
+	}
+	responses := make([]llm.Response, budget.MaxAgents)
+	for i := range responses {
+		responses[i] = llmtest.Text("done")
+	}
+	reg, _ := headlessRegistry(context.Background(), &config.Config{},
+		&llmtest.FakeProvider{Responses: responses}, "main-model", t.TempDir(), t.TempDir())
+	at, _ := reg.Get("agent")
+	for i := 0; i < budget.MaxAgents; i++ {
+		out, err := at.Run(context.Background(), map[string]any{"prompt": "work"})
+		if err != nil || !strings.Contains(out, `"ok":true`) {
+			t.Fatalf("run %d: out=%q err=%v", i+1, out, err)
+		}
+	}
+	out, err := at.Run(context.Background(), map[string]any{"prompt": "one too many"})
+	if err != nil {
+		t.Fatalf("agent tool run: %v", err)
+	}
+	if !strings.Contains(out, `"ok":false`) || !strings.Contains(out, `"code":"admission_denied"`) {
+		t.Fatalf("output = %q, want admission_denied", out)
+	}
+}
+
+// The subagent capability section is gated on the agent tool, so headless now
+// gets it and the workflow section stays out.
+func TestHeadlessSystemPromptDescribesDelegationOnly(t *testing.T) {
+	reg, _ := headlessRegistry(context.Background(), &config.Config{},
+		&llmtest.FakeProvider{}, "main-model", t.TempDir(), t.TempDir())
+	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, reg, io.Discard)
+	if !strings.Contains(system, "agent tool") || !strings.Contains(system, "# Delegation") {
+		t.Fatalf("headless prompt is missing the delegation section:\n%s", system)
+	}
+	if strings.Contains(system, "workflow tool") || strings.Contains(system, "# Workflow checklist") {
+		t.Fatalf("headless prompt describes the workflow tool it does not have:\n%s", system)
+	}
 }

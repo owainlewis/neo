@@ -460,7 +460,9 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 		return 1
 	}
 	sk := loadSkills(cfg, cwd, streams.err)
-	reg := newRegistry(cwd, root)
+	// ctx (including --timeout) is the parent of every subagent run, so a
+	// cancelled or timed-out headless run stops its children too.
+	reg, _ := headlessRegistry(ctx, cfg, prov, model, cwd, root)
 	system, systemBlocks := chatSystem(cfg, cwd, sk, agentProfile, reg, streams.err)
 
 	var toolCalls, toolErrors int

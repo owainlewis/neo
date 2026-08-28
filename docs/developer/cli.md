@@ -43,6 +43,7 @@ the agent they were started with, so `neo resume` keeps it unless a different
 - `neo run` executes one prompt without opening the TUI, prints the final answer, and exits. It is intended for scripts and eval harnesses.
 - `neo run` applies a `10m` timeout, does not create or update sessions, and supports `--json` for a machine-readable summary containing elapsed time and tool counts.
 - Headless runs receive the standard tool registry and do not use interactive `tool_approvals`. Run Neo inside a VM or sandbox that provides the required filesystem, process, network, and credential boundaries.
+- Headless runs include subagent delegation: `neo run` registers the same `agent` tool as interactive chat, with the same supervisor budgets, the same `work` and `inspect` capabilities, and the same `subagents` backend selection. The `workflow` tool stays chat-only. Subagent activity never reaches stdout, so `--json` output remains a single JSON object, and the run's timeout or cancellation stops its children.
 - The removed `--permission` option returns migration guidance instead of being silently accepted.
 - `neo run` accepts prompt text as arguments and prepends piped stdin when present, e.g. `cat prompt.md | neo run --json`.
 - `neo doctor` is local-first: it checks config, required credential presence, session store access, git availability, and whether the current directory is a git workspace without calling providers or printing secrets.
