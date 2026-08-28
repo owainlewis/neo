@@ -595,7 +595,11 @@ func TestParseHeadlessArgsConfigAndModelOverrides(t *testing.T) {
 }
 
 func TestParseHeadlessArgsRejectsEmptyModel(t *testing.T) {
-	for _, args := range [][]string{{"--model", "", "prompt"}, {"--model=", "prompt"}} {
+	for _, args := range [][]string{
+		{"--model", "", "prompt"},
+		{"--model=", "prompt"},
+		{"--model", "--config", "headless.yaml", "prompt"},
+	} {
 		_, _, err := parseHeadlessArgs(args, nil)
 		if err == nil || !strings.Contains(err.Error(), "--model needs a non-empty id") {
 			t.Fatalf("parseHeadlessArgs(%q) error = %v", args, err)
