@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1709,5 +1710,159 @@ func TestToolUseStopWithToolCallStillRuns(t *testing.T) {
 	}
 	if len(provider.Calls) != 2 {
 		t.Fatalf("provider calls = %d, want 2", len(provider.Calls))
+	}
+}
+
+// mutatingTool rewrites a nested value inside the input it is handed. Nothing
+// in the Tool interface forbids this, so the agent must not hand over anything
+// the transcript still references.
+type mutatingTool struct{}
+
+func (mutatingTool) Name() string { return "mutate" }
+func (mutatingTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{Name: "mutate", InputSchema: map[string]any{"type": "object"}}
+}
+func (mutatingTool) Run(_ context.Context, in map[string]any) (string, error) {
+	if nested, ok := in["opts"].(map[string]any); ok {
+		nested["path"] = "CLOBBERED"
+	}
+	if list, ok := in["paths"].([]any); ok && len(list) > 0 {
+		list[0] = "CLOBBERED"
+	}
+	return "ok", nil
+}
+
+func TestToolCannotMutateTheTranscript(t *testing.T) {
+	input := map[string]any{
+		"opts":  map[string]any{"path": "real.go"},
+		"paths": []any{"a.go", "b.go"},
+	}
+	provider := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content:    []llm.ContentBlock{{Type: "tool_use", ID: "t1", Name: "mutate", Input: input}},
+			StopReason: "tool_use",
+		},
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{Model: "m", Provider: provider, Tools: tools.NewRegistry(mutatingTool{})})
+
+	if _, err := ag.Send(context.Background(), "go"); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	for _, msg := range ag.Transcript() {
+		for _, block := range msg.Content {
+			if block.Type != "tool_use" {
+				continue
+			}
+			opts, _ := block.Input["opts"].(map[string]any)
+			if opts["path"] != "real.go" {
+				t.Fatalf("nested map in the transcript was mutated: %+v", block.Input)
+			}
+			paths, _ := block.Input["paths"].([]any)
+			if len(paths) == 0 || paths[0] != "a.go" {
+				t.Fatalf("nested slice in the transcript was mutated: %+v", block.Input)
+			}
+		}
+	}
+	// The same must hold for what the next provider request carried.
+	sent := provider.Calls[1].Messages
+	for _, msg := range sent {
+		for _, block := range msg.Content {
+			if block.Type == "tool_use" {
+				if opts, _ := block.Input["opts"].(map[string]any); opts["path"] != "real.go" {
+					t.Fatalf("the follow-up request carried mutated input: %+v", block.Input)
+				}
+			}
+		}
+	}
+}
+
+func TestTranscriptCopyIsIsolated(t *testing.T) {
+	provider := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content: []llm.ContentBlock{{
+				Type:   "tool_use",
+				ID:     "t1",
+				Name:   "echo",
+				Input:  map[string]any{"opts": map[string]any{"k": "v"}},
+				Raw:    json.RawMessage(`{"keep":1}`),
+				Source: &llm.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc"},
+			}},
+			StopReason: "tool_use",
+		},
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{Model: "m", Provider: provider, Tools: tools.NewRegistry(echoTool{})})
+	if _, err := ag.Send(context.Background(), "go"); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	// Mutate everything mutable in the returned copy.
+	for _, msg := range ag.Transcript() {
+		for _, block := range msg.Content {
+			if opts, ok := block.Input["opts"].(map[string]any); ok {
+				opts["k"] = "CLOBBERED"
+			}
+			if len(block.Raw) > 0 {
+				block.Raw[0] = 'X'
+			}
+			if block.Source != nil {
+				block.Source.Data = "CLOBBERED"
+			}
+		}
+	}
+
+	for _, msg := range ag.Transcript() {
+		for _, block := range msg.Content {
+			if opts, ok := block.Input["opts"].(map[string]any); ok && opts["k"] != "v" {
+				t.Fatalf("agent state followed a mutated transcript copy: %+v", block.Input)
+			}
+			if len(block.Raw) > 0 && block.Raw[0] != '{' {
+				t.Fatalf("raw replay bytes are shared: %s", block.Raw)
+			}
+			if block.Source != nil && block.Source.Data != "abc" {
+				t.Fatalf("image source is shared: %+v", block.Source)
+			}
+		}
+	}
+}
+
+func TestEventArgsAreIsolated(t *testing.T) {
+	provider := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content: []llm.ContentBlock{
+				{Type: "tool_use", ID: "a", Name: "echo", Input: map[string]any{"opts": map[string]any{"k": "v"}}},
+			},
+			StopReason: "tool_use",
+		},
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{
+		Model:    "m",
+		Provider: provider,
+		Tools:    tools.NewRegistry(echoTool{}),
+		OnEvent: func(e Event) {
+			// A consumer mutating what it was handed must not reach the transcript.
+			if opts, ok := e.Args["opts"].(map[string]any); ok {
+				opts["k"] = "CLOBBERED"
+			}
+			for _, ref := range e.Calls {
+				if opts, ok := ref.Args["opts"].(map[string]any); ok {
+					opts["k"] = "CLOBBERED"
+				}
+			}
+		},
+	})
+	if _, err := ag.Send(context.Background(), "go"); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	for _, msg := range ag.Transcript() {
+		for _, block := range msg.Content {
+			if opts, ok := block.Input["opts"].(map[string]any); ok && opts["k"] != "v" {
+				t.Fatalf("an event consumer mutated the transcript: %+v", block.Input)
+			}
+		}
 	}
 }

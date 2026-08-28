@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -784,7 +785,10 @@ func (a *Agent) prepareTool(block llm.ContentBlock) preparedToolCall {
 }
 
 func (a *Agent) runPreparedTool(ctx context.Context, call preparedToolCall) toolOutcome {
-	name, input := call.block.Name, call.block.Input
+	// The tool gets its own copy. call.block.Input belongs to the response that
+	// becomes the assistant message in the transcript, and the Tool interface
+	// does not promise not to mutate what it is given.
+	name, input := call.block.Name, cloneInput(call.block.Input)
 	ctx = tools.WithCallMetadata(ctx, tools.CallMetadata{
 		ToolUseID: call.block.ID,
 		GroupID:   call.groupID,
@@ -856,19 +860,62 @@ func cloneContentBlocks(in []llm.ContentBlock) []llm.ContentBlock {
 	}
 	out := make([]llm.ContentBlock, len(in))
 	for i, block := range in {
-		out[i] = block
-		out[i].Input = cloneInput(block.Input)
+		out[i] = cloneContentBlock(block)
 	}
 	return out
 }
 
+// cloneContentBlock isolates every mutable field. Raw is a byte slice and
+// Source is a pointer, so copying the struct alone would leave both shared.
+func cloneContentBlock(block llm.ContentBlock) llm.ContentBlock {
+	out := block
+	out.Input = cloneInput(block.Input)
+	if block.Raw != nil {
+		out.Raw = append(json.RawMessage(nil), block.Raw...)
+	}
+	if block.Source != nil {
+		source := *block.Source
+		out.Source = &source
+	}
+	return out
+}
+
+// cloneInput deep-copies a tool input so the copy shares nothing mutable with
+// the original. Ownership of JSON-like values is the rule the transcript
+// depends on: a provider response's input map ends up in the assistant message
+// committed to the transcript, so anything handed the same map could corrupt a
+// turn that has already happened.
 func cloneInput(in map[string]any) map[string]any {
 	if in == nil {
 		return nil
 	}
 	out := make(map[string]any, len(in))
 	for k, v := range in {
-		out[k] = v
+		out[k] = cloneValue(v)
 	}
 	return out
+}
+
+// cloneValue copies the JSON value types a decoded tool input can contain.
+// Everything else is immutable (strings, numbers, bools) or something a tool
+// schema cannot produce, so it is returned as-is rather than reflected over.
+// A recursive copy beats a JSON round trip here: it allocates only what the
+// payload actually contains and cannot fail.
+func cloneValue(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for k, elem := range value {
+			out[k] = cloneValue(elem)
+		}
+		return out
+	case []any:
+		out := make([]any, len(value))
+		for i, elem := range value {
+			out[i] = cloneValue(elem)
+		}
+		return out
+	default:
+		return v
+	}
 }
