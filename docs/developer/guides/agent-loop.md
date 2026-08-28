@@ -40,6 +40,27 @@ Neo builds the assistant message and tool results together before committing the
 
 Oversized tool output is capped at the agent boundary before it enters the transcript or session payload. The capped content includes a visible truncation marker with the original byte size and line count.
 
+## Who Owns A Message
+
+The transcript is the agent's, and nothing outside it holds a reference into it.
+Every crossing is a deep copy of the JSON-like values a tool schema can produce:
+
+- a tool receives its own copy of its input, so mutating it cannot rewrite the
+  assistant `tool_use` that is already in the transcript;
+- `Transcript()` returns a copy that can be mutated freely;
+- event `Args` and `ToolCallRef.Args` are copies, so a UI consumer cannot reach
+  back into agent state.
+
+Nested maps and slices, `Raw` replay bytes, and `ImageSource` pointers are all
+copied — a struct copy alone leaves the last two shared. The copy is a small
+recursive walk rather than a JSON round trip: it allocates only what the payload
+contains and cannot fail.
+
+The `Tool` interface does not forbid mutating its input, and it should not have
+to. Relying on every current and future tool and event consumer to be careful
+would make the transcript invariant implicit; copying at the boundary makes it
+structural.
+
 ## Stop Reasons Fail Closed
 
 The loop only continues on a stop reason it knows how to act on. Anything else
