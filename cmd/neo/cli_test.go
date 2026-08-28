@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,54 @@ func TestRunHeadlessReportsArgumentAndProviderFailures(t *testing.T) {
 			t.Fatalf("stderr = %q, want provider error", errOut.String())
 		}
 	})
+}
+
+func TestRunHeadlessExplicitConfigAndModelOverrideTakePrecedence(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(root)
+	if err := os.WriteFile(filepath.Join(root, "neo.yaml"), []byte("provider: anthropic\nmodel: discovered-model\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	explicit := filepath.Join(root, "headless.yaml")
+	if err := os.WriteFile(explicit, []byte("provider: invalid\nmodel: explicit-model\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	streams, out, _ := bufferedStdio()
+
+	if code := run([]string{"run", "--config=" + explicit, "--model=override-model", "--json", "hello"}, streams); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	var result headlessResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode result: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(result.Error, `unknown provider "invalid"`) {
+		t.Fatalf("result error = %q, want explicit config provider failure", result.Error)
+	}
+	if result.Model != "override-model" {
+		t.Fatalf("model = %q, want model override", result.Model)
+	}
+}
+
+func TestRunHeadlessExplicitConfigFailurePrecedesProviderSetup(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := os.WriteFile(filepath.Join(root, "neo.yaml"), []byte("provider: invalid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	explicit := filepath.Join(root, "broken.yaml")
+	if err := os.WriteFile(explicit, []byte("permissions: [invalid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	streams, out, errOut := bufferedStdio()
+
+	if code := run([]string{"run", "--config", explicit, "hello"}, streams); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if out.Len() != 0 || !strings.Contains(errOut.String(), "config:") || strings.Contains(errOut.String(), "unknown provider") {
+		t.Fatalf("stdout = %q, stderr = %q", out.String(), errOut.String())
+	}
 }
 
 func TestRunDoctorReturnsFailureStatusThroughDispatcher(t *testing.T) {

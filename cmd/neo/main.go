@@ -284,10 +284,16 @@ AGENT PROMPTS:
     neo run --agent=reviewer "review the current diff"
 
 HEADLESS RUN:
-  neo run --json --timeout 10m "Review this repo without changing files"
+  neo run --config ci.yaml --model test-model --json --timeout 10m "Review this repo without changing files"
   cat prompt.md | neo run --json
 
-  Options: --timeout <duration>, --json`
+  Options:
+    --config <path>  Load only this complete config file. Overrides normal
+                     neo.yaml, user config, and embedded-default discovery.
+    --model <id>     Override the model from the selected config.
+    --timeout <duration>, --json
+
+  Precedence: --model, then --config, then normal config discovery.`
 
 func printUsage(out io.Writer) {
 	fmt.Fprintln(out, usageText)
@@ -415,8 +421,11 @@ func runChat(ctx context.Context, agentName string, streams stdio) int {
 }
 
 type headlessOptions struct {
-	timeout time.Duration
-	json    bool
+	timeout    time.Duration
+	json       bool
+	configPath string
+	model      string
+	modelSet   bool
 }
 
 type headlessResult struct {
@@ -443,9 +452,12 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 		defer cancel()
 	}
 	started := time.Now()
-	cfg, ok := loadConfig(streams.err)
+	cfg, ok := loadHeadlessConfig(opts, streams.err)
 	if !ok {
 		return 1
+	}
+	if opts.modelSet {
+		cfg.Model = opts.model
 	}
 	providerName, model := cfg.Provider, cfg.Model
 	prov, err := checkedProvider(ctx, cfg, providerName)
@@ -514,8 +526,24 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 	fs.SetOutput(io.Discard)
 	fs.DurationVar(&opts.timeout, "timeout", opts.timeout, "maximum wall-clock duration")
 	fs.BoolVar(&opts.json, "json", false, "print a JSON summary instead of plain text")
+	fs.StringVar(&opts.configPath, "config", "", "load only this complete configuration file")
+	fs.StringVar(&opts.model, "model", "", "override the configured model")
 	if err := fs.Parse(args); err != nil {
 		return opts, "", err
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			opts.modelSet = true
+		}
+	})
+	if strings.TrimSpace(opts.configPath) == "" && flagWasSet(fs, "config") {
+		return opts, "", fmt.Errorf("--config needs a path")
+	}
+	if opts.modelSet {
+		opts.model = strings.TrimSpace(opts.model)
+		if opts.model == "" {
+			return opts, "", fmt.Errorf("--model needs a non-empty id")
+		}
 	}
 	parts := fs.Args()
 	if stdin != nil && !isCharacterDevice(stdin) {
@@ -532,6 +560,26 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 		return opts, "", fmt.Errorf("neo run: missing prompt")
 	}
 	return opts, prompt, nil
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		set = set || f.Name == name
+	})
+	return set
+}
+
+func loadHeadlessConfig(opts headlessOptions, errOut io.Writer) (*config.Config, bool) {
+	if opts.configPath == "" {
+		return loadConfig(errOut)
+	}
+	cfg, err := config.LoadFile(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(errOut, "config: %v\n", err)
+		return nil, false
+	}
+	return cfg, true
 }
 
 func isCharacterDevice(in io.Reader) bool {

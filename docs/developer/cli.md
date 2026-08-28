@@ -45,6 +45,8 @@ the agent they were started with, so `neo resume` keeps it unless a different
 - Headless runs receive the standard tool registry and do not use interactive `tool_approvals`. Run Neo inside a VM or sandbox that provides the required filesystem, process, network, and credential boundaries.
 - The removed `--permission` option returns migration guidance instead of being silently accepted.
 - `neo run` accepts prompt text as arguments and prepends piped stdin when present, e.g. `cat prompt.md | neo run --json`.
+- `neo run --config <path>` loads only the named complete config file. It does not search the project, user config directory, or embedded defaults; an unreadable or invalid file exits before provider setup.
+- `neo run --model <id>` replaces the model loaded from configuration for that headless run, including transcript compaction. For headless runs, precedence is `--model`, then `--config`, then normal configuration discovery. Both options also accept `--config=<path>` and `--model=<id>`.
 - `neo doctor` is local-first: it checks config, required credential presence, session store access, git availability, and whether the current directory is a git workspace without calling providers or printing secrets.
 - The interactive `@` file picker indexes files under Neo's effective startup working directory and inserts paths relative to that directory.
 - `neo login` prints the OpenAI Codex device-code URL and one-time code, then stores refreshable subscription credentials in `~/.neo/auth.json` with file permissions intended to protect secrets.

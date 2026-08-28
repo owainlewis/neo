@@ -156,6 +156,21 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// LoadFile reads and parses exactly path. Unlike Load, it does not fall back to
+// project, user, or embedded configuration when the file is unavailable.
+func LoadFile(path string) (*Config, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	cfg, err := parseConfig(b, path)
+	if err != nil {
+		return nil, err
+	}
+	cfg.source = path
+	return cfg, nil
+}
+
 func configPaths(home string) []string {
 	paths := []string{projectConfigName}
 	if home != "" {

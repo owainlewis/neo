@@ -8,6 +8,12 @@ Neo loads the first available config:
 
 First hit wins. Config files are not merged.
 
+`neo run --config <path>` is the headless-only exception to discovery: it loads
+only that complete file, with no fallback. `neo run --model <id>` then overrides
+its model for that run, including compaction provider calls. Headless precedence
+is `--model`, then `--config`, then the discovery order above. Both flags also
+accept the `--flag=value` form.
+
 ## Default Config
 
 This is the complete configuration surface. Copy it to `~/.neo/config.yaml` or

@@ -576,6 +576,60 @@ func TestParseHeadlessArgsDefaults(t *testing.T) {
 	}
 }
 
+func TestParseHeadlessArgsConfigAndModelOverrides(t *testing.T) {
+	for _, args := range [][]string{
+		{"--config", "headless.yaml", "--model", "override-model", "prompt"},
+		{"--config=headless.yaml", "--model=override-model", "prompt"},
+	} {
+		opts, prompt, err := parseHeadlessArgs(args, nil)
+		if err != nil {
+			t.Fatalf("parseHeadlessArgs(%q): %v", args, err)
+		}
+		if opts.configPath != "headless.yaml" || opts.model != "override-model" || !opts.modelSet {
+			t.Fatalf("options = %+v", opts)
+		}
+		if prompt != "prompt" {
+			t.Fatalf("prompt = %q", prompt)
+		}
+	}
+}
+
+func TestParseHeadlessArgsRejectsEmptyModel(t *testing.T) {
+	for _, args := range [][]string{{"--model", "", "prompt"}, {"--model=", "prompt"}} {
+		_, _, err := parseHeadlessArgs(args, nil)
+		if err == nil || !strings.Contains(err.Error(), "--model needs a non-empty id") {
+			t.Fatalf("parseHeadlessArgs(%q) error = %v", args, err)
+		}
+	}
+}
+
+func TestLoadHeadlessConfigPrefersExplicitFile(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := os.WriteFile(filepath.Join(root, "neo.yaml"), []byte("model: discovered-model\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	explicit := filepath.Join(root, "headless.yaml")
+	if err := os.WriteFile(explicit, []byte("model: explicit-model\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := loadHeadlessConfig(headlessOptions{configPath: explicit}, io.Discard)
+	if !ok {
+		t.Fatal("loadHeadlessConfig returned false")
+	}
+	if cfg.Model != "explicit-model" {
+		t.Fatalf("model = %q, want explicit model", cfg.Model)
+	}
+}
+
+func TestLoadHeadlessConfigReportsExplicitFileFailure(t *testing.T) {
+	var errOut bytes.Buffer
+	_, ok := loadHeadlessConfig(headlessOptions{configPath: filepath.Join(t.TempDir(), "missing.yaml")}, &errOut)
+	if ok || !strings.Contains(errOut.String(), "config:") || !strings.Contains(errOut.String(), "missing.yaml") {
+		t.Fatalf("ok = %v, stderr = %q", ok, errOut.String())
+	}
+}
+
 func TestParseHeadlessArgsRejectsRemovedPermissionFlag(t *testing.T) {
 	for _, args := range [][]string{
 		{"--permission", "readonly", "prompt"},

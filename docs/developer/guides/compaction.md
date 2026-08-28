@@ -45,7 +45,7 @@ compaction:
   context_window_tokens: 1000000
 ```
 
-Neo does not maintain a model catalog for compaction. Unknown or custom models use the same conservative default unless the user sets an override.
+Neo does not maintain a model catalog for compaction. Unknown or custom models use the same conservative default unless the user sets an override. For `neo run`, a `--model <id>` override is also passed to both the normal request and any compaction request.
 
 ## Strategy Options
 
