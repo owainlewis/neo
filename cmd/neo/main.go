@@ -522,6 +522,11 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 			return opts, "", fmt.Errorf("--permission has been removed; run Neo inside a sandbox and use tool_approvals for optional interactive confirmations")
 		}
 	}
+	for i, arg := range args {
+		if arg == "--config" && (i+1 == len(args) || strings.HasPrefix(args[i+1], "-")) {
+			return opts, "", fmt.Errorf("--config needs a path")
+		}
+	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.DurationVar(&opts.timeout, "timeout", opts.timeout, "maximum wall-clock duration")

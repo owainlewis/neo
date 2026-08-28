@@ -603,6 +603,19 @@ func TestParseHeadlessArgsRejectsEmptyModel(t *testing.T) {
 	}
 }
 
+func TestParseHeadlessArgsRejectsMissingConfigPath(t *testing.T) {
+	for _, args := range [][]string{
+		{"--config", "", "prompt"},
+		{"--config=", "prompt"},
+		{"--config", "--model", "override-model", "prompt"},
+	} {
+		_, _, err := parseHeadlessArgs(args, nil)
+		if err == nil || !strings.Contains(err.Error(), "--config needs a path") {
+			t.Fatalf("parseHeadlessArgs(%q) error = %v", args, err)
+		}
+	}
+}
+
 func TestLoadHeadlessConfigPrefersExplicitFile(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
