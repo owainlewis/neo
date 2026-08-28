@@ -676,6 +676,8 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 		if err := m.persistSession(); err != nil {
 			m.appendBlock(errorBlock{err: err})
 		}
+	case "/quit", "/exit":
+		return m.quitNow()
 	default:
 		if definition, ok := phase.Find(m.phases, cmd); ok {
 			if m.busy {
@@ -702,6 +704,26 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 		m.appendBlock(errorBlock{err: fmt.Errorf("unknown command: %s — try /help", cmd)})
 	}
 	return nil
+}
+
+// quitNow leaves immediately, whether or not a turn is running. It is the
+// escape hatch for a turn that will not unwind: ctrl+c asks the turn to cancel
+// and then waits for it, so a tool that ignores its context can leave the UI
+// waiting. This does not wait.
+//
+// The session is saved on the way out, but a failed save does not block the
+// exit — the user asked to leave.
+func (m *model) quitNow() tea.Cmd {
+	logx.Debug("tui quit command", "busy", m.busy)
+	if m.sendCancel != nil {
+		m.sendCancel()
+		m.sendCancel = nil
+	}
+	if err := m.persistSession(); err != nil {
+		m.appendBlock(errorBlock{err: fmt.Errorf("save session: %w", err)})
+	}
+	m.quitting = true
+	return tea.Quit
 }
 
 func slashCommandRequiresIdle(cmd string) bool {

@@ -29,7 +29,7 @@ or replace the generic workflow checklist.
 
 The `phases` map in `neo.yaml` adds a named prompt or overrides a default by
 name. Names use lowercase letters, numbers, hyphens, or underscores. Native
-commands such as `help`, `clear`, and `model` are reserved.
+commands such as `help`, `clear`, `model`, `quit`, and `exit` are reserved.
 
 ```yaml
 phases:

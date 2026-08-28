@@ -278,3 +278,69 @@ func assertQuitCommand(t *testing.T, cmd tea.Cmd) {
 		t.Fatalf("command returned %T, want tea.QuitMsg", msg)
 	}
 }
+
+func TestSlashQuitExitsImmediately(t *testing.T) {
+	for _, cmd := range []string{"/quit", "/exit"} {
+		t.Run(cmd, func(t *testing.T) {
+			m := makeTestModel()
+			saved := false
+			m.afterSend = func() error { saved = true; return nil }
+
+			got := m.handleSlashCommand(cmd)
+
+			if got == nil {
+				t.Fatal("expected a quit command")
+			}
+			if _, ok := got().(tea.QuitMsg); !ok {
+				t.Fatalf("command did not quit: %T", got())
+			}
+			if !m.quitting {
+				t.Fatal("model should be marked quitting")
+			}
+			if !saved {
+				t.Fatal("session should be saved on the way out")
+			}
+		})
+	}
+}
+
+// The point of /quit is that it does not wait for a turn to unwind. ctrl+c
+// cancels and then waits, so a tool ignoring its context leaves the UI stuck.
+func TestSlashQuitDoesNotWaitForABlockedTurn(t *testing.T) {
+	provider := &cancelBlockingProvider{started: make(chan struct{})}
+	m := makeTestModel()
+	m.ag = agent.New(agent.Config{Model: "test", Provider: provider})
+
+	send := m.startSend("hang", "hang", nil)
+	m.busy = true
+	go send()
+	<-provider.started
+
+	got := m.handleSlashCommand("/quit")
+	if got == nil {
+		t.Fatal("expected a quit command")
+	}
+	if _, ok := got().(tea.QuitMsg); !ok {
+		t.Fatalf("quit must not wait for the turn: %T", got())
+	}
+	if m.quitPending {
+		t.Fatal("/quit leaves directly; it must not enter the pending-quit wait")
+	}
+}
+
+// A save failure is reported but must not trap the user in the session.
+func TestSlashQuitExitsEvenIfTheSaveFails(t *testing.T) {
+	m := makeTestModel()
+	m.afterSend = func() error { return errors.New("disk full") }
+
+	got := m.handleSlashCommand("/quit")
+	if got == nil {
+		t.Fatal("expected a quit command")
+	}
+	if _, ok := got().(tea.QuitMsg); !ok {
+		t.Fatalf("a failed save must not block the exit: %T", got())
+	}
+	if !strings.Contains(renderBlocks(m), "disk full") {
+		t.Fatal("the save failure should still be reported")
+	}
+}

@@ -21,8 +21,10 @@ var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 var reservedNames = map[string]bool{
 	"clear": true,
+	"exit":  true,
 	"help":  true,
 	"model": true,
+	"quit":  true,
 }
 
 // Resolve overlays configured definitions on Neo's defaults. Defaults retain
