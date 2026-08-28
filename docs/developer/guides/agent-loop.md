@@ -40,6 +40,29 @@ Neo builds the assistant message and tool results together before committing the
 
 Oversized tool output is capped at the agent boundary before it enters the transcript or session payload. The capped content includes a visible truncation marker with the original byte size and line count.
 
+## Stop Reasons Fail Closed
+
+The loop only continues on a stop reason it knows how to act on. Anything else
+ends the turn with a typed error rather than re-asking the provider:
+
+| Stop reason | Behaviour |
+| --- | --- |
+| `end_turn`, `stop_sequence`, `""` | Turn complete. |
+| `tool_use` with tool calls | Run them, append results, continue. |
+| `tool_use` with **no** tool call | `ErrMissingToolCall`. Nothing to run means nothing to reply with, so the next request would be identical and the loop would spin to `MaxTurns`. |
+| `max_tokens` | `ErrMaxOutputTokens`, keeping the partial text. |
+| `model_context_window_exceeded` | `ErrContextWindowExceeded`, keeping the partial text. |
+| `refusal` | Turn complete, keeping the text. |
+| `pause_turn` | Continue; the provider asked for another round. |
+| anything unrecognised | `ErrUnexpectedStopReason`. |
+
+Every terminating branch preserves the response's text but never its tool calls:
+an unmatched `tool_use` in the transcript would make the next request invalid.
+
+Adapter bugs and provider dialect differences are the reason for the strictness.
+A provider-neutral loop cannot assume every backend reports stop reasons the
+same way, so an unfamiliar one must cost a single call, not five hundred.
+
 ## How To Extend It
 
 Add behavior around the loop, not inside it, unless the behavior is truly provider/tool-turn mechanics.

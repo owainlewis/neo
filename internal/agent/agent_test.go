@@ -1660,3 +1660,54 @@ func TestPromptTokensIsIndependentOfCaching(t *testing.T) {
 		})
 	}
 }
+
+// A provider reporting tool_use with no tool call has nothing to execute and
+// nothing to reply with, so the next request would be identical. It must fail
+// after one call rather than spin to MaxTurns.
+func TestToolUseStopWithoutToolCallFailsAfterOneCall(t *testing.T) {
+	provider := &llmtest.FakeProvider{Responses: []llm.Response{
+		{
+			Content:    []llm.ContentBlock{{Type: "text", Text: "I'll read that file."}},
+			StopReason: "tool_use",
+		},
+		llmtest.Text("should never be reached"),
+	}}
+	ag := New(Config{Model: "m", Provider: provider, MaxTurns: 20})
+
+	out, err := ag.Send(context.Background(), "read main.go")
+
+	if !errors.Is(err, ErrMissingToolCall) {
+		t.Fatalf("err = %v, want ErrMissingToolCall", err)
+	}
+	if len(provider.Calls) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(provider.Calls))
+	}
+	if out != "I'll read that file." {
+		t.Fatalf("partial text = %q, want it preserved", out)
+	}
+	transcript := ag.Transcript()
+	last := transcript[len(transcript)-1]
+	if last.Role != llm.RoleAssistant || last.Content[0].Text != "I'll read that file." {
+		t.Fatalf("partial text should stay in the transcript: %+v", last)
+	}
+}
+
+// The guard must not fire when the response does carry a tool call.
+func TestToolUseStopWithToolCallStillRuns(t *testing.T) {
+	provider := &llmtest.FakeProvider{Responses: []llm.Response{
+		llmtest.ToolUse("t1", "echo", map[string]any{}),
+		llmtest.Text("done"),
+	}}
+	ag := New(Config{
+		Model:    "m",
+		Provider: provider,
+		Tools:    tools.NewRegistry(echoTool{}),
+	})
+
+	if _, err := ag.Send(context.Background(), "go"); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(provider.Calls) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(provider.Calls))
+	}
+}

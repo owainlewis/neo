@@ -44,6 +44,11 @@ var ErrContextWindowExceeded = errors.New("response truncated: model context win
 // the partial text) beats silently re-calling the provider until MaxTurns.
 var ErrMaxOutputTokens = errors.New("response truncated: model hit its max output tokens limit")
 
+// ErrMissingToolCall is returned when a provider reports that it stopped to
+// call a tool but sends no tool call. There is nothing to run and nothing to
+// reply with, so the loop would otherwise re-ask the provider until MaxTurns.
+var ErrMissingToolCall = errors.New("provider stopped for a tool call but sent none")
+
 type Event struct {
 	Kind      EventKind
 	Text      string
@@ -395,6 +400,18 @@ func (a *Agent) run(ctx context.Context) (string, error) {
 			logx.Debug("agent turn refused", "turn", turn+1)
 			a.emit(Event{Kind: EventDone})
 			return strings.TrimSpace(finalText.String()), nil
+		}
+		if resp.StopReason == "tool_use" && !hasToolUse(resp.Content) {
+			// Nothing to execute means nothing to reply with, so the next
+			// request would be identical and the loop would spin to MaxTurns.
+			// An adapter bug or an unfamiliar provider dialect should fail
+			// closed after one call, not burn 500.
+			a.appendSafeAssistantMessage(resp.Content)
+			a.processResponseText(resp.Content, &finalText)
+			err := fmt.Errorf("%w (from %s)", ErrMissingToolCall, provider.Name())
+			logx.Debug("agent tool_use stop with no tool call", "turn", turn+1)
+			a.emit(Event{Kind: EventError, Err: err})
+			return strings.TrimSpace(finalText.String()), err
 		}
 		if resp.StopReason == "model_context_window_exceeded" {
 			a.appendSafeAssistantMessage(resp.Content)
