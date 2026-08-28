@@ -616,6 +616,133 @@ func TestHeadlessResultOmitsPermissionField(t *testing.T) {
 	}
 }
 
+func TestHeadlessResultAlwaysIncludesUsageObject(t *testing.T) {
+	out, err := json.Marshal(headlessResult{OK: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"usage"`) {
+		t.Fatalf("headless JSON missing usage object for zero-value result: %s", out)
+	}
+}
+
+func TestNewHeadlessUsage(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		in   llm.Usage
+		want headlessUsage
+	}{
+		{
+			name: "zero usage",
+			in:   llm.Usage{},
+			want: headlessUsage{},
+		},
+		{
+			name: "uncached usage",
+			in:   llm.Usage{InputTokens: 100, OutputTokens: 50},
+			want: headlessUsage{InputTokens: 100, OutputTokens: 50, TotalTokens: 150},
+		},
+		{
+			name: "cache read usage",
+			in:   llm.Usage{InputTokens: 10, CacheReadTokens: 200, OutputTokens: 20},
+			want: headlessUsage{InputTokens: 10, CacheReadInputTokens: 200, OutputTokens: 20, TotalTokens: 230},
+		},
+		{
+			name: "cache creation usage",
+			in:   llm.Usage{InputTokens: 10, CacheCreationTokens: 300, OutputTokens: 20},
+			want: headlessUsage{InputTokens: 10, CacheCreationInputTokens: 300, OutputTokens: 20, TotalTokens: 330},
+		},
+		{
+			name: "all fields populated",
+			in:   llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4},
+			want: headlessUsage{InputTokens: 1, OutputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 4, TotalTokens: 10},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := newHeadlessUsage(tt.in)
+			if got != tt.want {
+				t.Fatalf("newHeadlessUsage(%+v) = %+v, want %+v", tt.in, got, tt.want)
+			}
+			if got.TotalTokens != got.InputTokens+got.CacheCreationInputTokens+got.CacheReadInputTokens+got.OutputTokens {
+				t.Fatalf("total_tokens %d is not the sum of the other fields: %+v", got.TotalTokens, got)
+			}
+		})
+	}
+}
+
+// TestNewHeadlessUsageReflectsCompactionAndAnswerUsage covers usage that
+// spans a compaction call plus the final answer call, mirroring what
+// runHeadless reports when a headless run compacts mid-turn.
+func TestNewHeadlessUsageReflectsCompactionAndAnswerUsage(t *testing.T) {
+	summary := llmtest.Text("summary")
+	summary.Usage = llm.Usage{InputTokens: 10, OutputTokens: 20, CacheCreationTokens: 30, CacheReadTokens: 40}
+	answer := llmtest.Text("answer")
+	answer.Usage = llm.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{summary, answer}}
+
+	messages := make([]llm.Message, 0, 10)
+	for i := 0; i < 10; i++ {
+		role := llm.RoleUser
+		if i%2 == 1 {
+			role = llm.RoleAssistant
+		}
+		messages = append(messages, llm.Message{Role: role, Content: []llm.ContentBlock{{Type: "text", Text: strings.Repeat("x", 400)}}})
+	}
+	ag := agent.New(agent.Config{
+		Model:    "test-model",
+		Provider: prov,
+		Messages: messages,
+		Compactor: compact.Summarizer{
+			Provider:      prov,
+			Model:         "test-model",
+			TriggerTokens: 1,
+			KeepRecent:    2,
+		},
+	})
+	if _, err := ag.Send(context.Background(), "continue"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	want := headlessUsage{InputTokens: 11, OutputTokens: 22, CacheCreationInputTokens: 33, CacheReadInputTokens: 44, TotalTokens: 110}
+	if got := newHeadlessUsage(ag.Usage()); got != want {
+		t.Fatalf("usage = %+v, want summary plus answer usage %+v", got, want)
+	}
+}
+
+// TestNewHeadlessUsageReflectsPartialUsageOnFailure covers the acceptance
+// criterion that a failed headless run can still report non-zero usage: the
+// agent's accumulated usage already includes tokens spent on the failing
+// call itself.
+func TestNewHeadlessUsageReflectsPartialUsageOnFailure(t *testing.T) {
+	response := llmtest.Text("")
+	response.Usage = llm.Usage{InputTokens: 7, OutputTokens: 1}
+	prov := &llmtest.FakeProvider{Responses: []llm.Response{response}}
+	messages := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: strings.Repeat("x", 400)}}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: "text", Text: strings.Repeat("x", 400)}}},
+	}
+	ag := agent.New(agent.Config{
+		Model:    "test-model",
+		Provider: prov,
+		Messages: messages,
+		Compactor: compact.Summarizer{
+			Provider:      prov,
+			Model:         "test-model",
+			TriggerTokens: 1,
+			KeepRecent:    1,
+		},
+	})
+
+	if _, err := ag.Send(context.Background(), "continue"); err == nil {
+		t.Fatal("expected unusable summary to fail the turn")
+	}
+
+	want := headlessUsage{InputTokens: 7, OutputTokens: 1, TotalTokens: 8}
+	if got := newHeadlessUsage(ag.Usage()); got != want {
+		t.Fatalf("usage on failure = %+v, want %+v", got, want)
+	}
+}
+
 func TestParseHeadlessArgsRequiresPrompt(t *testing.T) {
 	_, _, err := parseHeadlessArgs([]string{"--json"}, nil)
 	if err == nil {

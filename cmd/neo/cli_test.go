@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,39 @@ func TestRunHeadlessReportsArgumentAndProviderFailures(t *testing.T) {
 			t.Fatalf("stderr = %q, want provider error", errOut.String())
 		}
 	})
+}
+
+// TestRunHeadlessJSONReportsZeroUsageOnProviderFailure covers the case where
+// provider construction fails before an agent.Agent exists: the JSON result
+// must still carry a usage object with every field zero rather than omitting
+// it, and it must still report non-zero usage that happened before a later
+// failure once an agent has run at least one call (covered at the agent
+// level by TestAgent_CountsUsageFromUnusableCompactionResponse).
+func TestRunHeadlessJSONReportsZeroUsageOnProviderFailure(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(root)
+	if err := os.WriteFile(filepath.Join(root, "neo.yaml"), []byte("provider: invalid\nmodel: test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	streams, out, _ := bufferedStdio()
+	streams.in = strings.NewReader("hello")
+
+	if code := run([]string{"run", "--json"}, streams); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+
+	var result headlessResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode JSON result: %v\noutput: %s", err, out.String())
+	}
+	if result.OK {
+		t.Fatalf("result.OK = true, want false on provider failure")
+	}
+	want := headlessUsage{}
+	if result.Usage != want {
+		t.Fatalf("usage = %+v, want zero-value %+v", result.Usage, want)
+	}
 }
 
 func TestRunDoctorReturnsFailureStatusThroughDispatcher(t *testing.T) {
