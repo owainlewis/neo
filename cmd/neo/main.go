@@ -471,8 +471,9 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 		defer cancel()
 	}
 	started := time.Now()
-	cfg, ok := loadConfig(streams.err)
-	if !ok {
+	cfg, err := config.Load()
+	if err != nil {
+		finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Usage: headlessUsage{}, Error: fmt.Sprintf("config: %v", err)}, streams)
 		return 1
 	}
 	providerName, model := cfg.Provider, cfg.Model
@@ -483,9 +484,14 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 	}
 	cwd, _ := os.Getwd()
 	root := workspace.Root(cwd)
-	agentProfile, ok := loadProfile(cwd, agentName, streams.err)
-	if !ok {
-		return 1
+	var agentProfile profile.Profile
+	if agentName != "" {
+		p, err := profile.Load(cwd, agentName)
+		if err != nil {
+			finishHeadless(opts, headlessResult{OK: false, ElapsedMS: time.Since(started).Milliseconds(), Provider: providerName, Model: model, Usage: headlessUsage{}, Error: err.Error()}, streams)
+			return 1
+		}
+		agentProfile = p
 	}
 	sk := loadSkills(cfg, cwd, streams.err)
 	reg := newRegistry(cwd, root)

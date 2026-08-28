@@ -84,8 +84,9 @@ non-zero usage. `input_tokens` is uncached prompt input; cache creation and
 cache read are reported separately because they are billed at different
 rates. `total_tokens` is always `input_tokens + cache_creation_input_tokens +
 cache_read_input_tokens + output_tokens`, computed by Neo rather than copied
-from any provider-reported total. If provider or config construction fails
-before an agent exists, `usage` is still present with all five fields `0`.
+from any provider-reported total. If config loading, provider construction,
+or `--agent` profile loading fails before an agent exists, `usage` is still
+present with all five fields `0`.
 
 ## Process Boundary
 
