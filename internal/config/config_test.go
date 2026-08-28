@@ -58,6 +58,35 @@ func TestLoad_FallsBackToEmbeddedWhenNoLocalConfig(t *testing.T) {
 	})
 }
 
+func TestLoadFileUsesOnlyTheRequestedFile(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: discovered-model\n")
+		explicit := filepath.Join(dir, "headless.yaml")
+		writeFile(t, explicit, "model: explicit-model\n")
+
+		cfg, err := LoadFile(explicit)
+		if err != nil {
+			t.Fatalf("load explicit config: %v", err)
+		}
+		if cfg.Source() != explicit {
+			t.Fatalf("source = %q, want %q", cfg.Source(), explicit)
+		}
+		if cfg.Model != "explicit-model" {
+			t.Fatalf("model = %q, want explicit model", cfg.Model)
+		}
+	})
+}
+
+func TestLoadFileDoesNotFallBackWhenMissing(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "neo.yaml"), "model: discovered-model\n")
+		_, err := LoadFile(filepath.Join(dir, "missing.yaml"))
+		if err == nil || !strings.Contains(err.Error(), "missing.yaml") {
+			t.Fatalf("LoadFile missing error = %v", err)
+		}
+	})
+}
+
 func TestLoad_ConfiguredPhasesExtendAndOverrideDefaults(t *testing.T) {
 	withTempDir(t, func(dir string) {
 		t.Setenv("HOME", dir)

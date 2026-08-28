@@ -284,10 +284,16 @@ AGENT PROMPTS:
     neo run --agent=reviewer "review the current diff"
 
 HEADLESS RUN:
-  neo run --json --timeout 10m "Review this repo without changing files"
+  neo run --config ci.yaml --model test-model --json --timeout 10m "Review this repo without changing files"
   cat prompt.md | neo run --json
 
-  Options: --timeout <duration>, --json`
+  Options:
+    --config <path>  Load only this complete config file. Overrides normal
+                     neo.yaml, user config, and embedded-default discovery.
+    --model <id>     Override the model from the selected config.
+    --timeout <duration>, --json
+
+  Precedence: --model, then --config, then normal config discovery.`
 
 func printUsage(out io.Writer) {
 	fmt.Fprintln(out, usageText)
@@ -415,8 +421,11 @@ func runChat(ctx context.Context, agentName string, streams stdio) int {
 }
 
 type headlessOptions struct {
-	timeout time.Duration
-	json    bool
+	timeout    time.Duration
+	json       bool
+	configPath string
+	model      string
+	modelSet   bool
 }
 
 type headlessResult struct {
@@ -443,9 +452,12 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 		defer cancel()
 	}
 	started := time.Now()
-	cfg, ok := loadConfig(streams.err)
+	cfg, ok := loadHeadlessConfig(opts, streams.err)
 	if !ok {
 		return 1
+	}
+	if opts.modelSet {
+		cfg.Model = opts.model
 	}
 	providerName, model := cfg.Provider, cfg.Model
 	prov, err := checkedProvider(ctx, cfg, providerName)
@@ -510,12 +522,31 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 			return opts, "", fmt.Errorf("--permission has been removed; run Neo inside a sandbox and use tool_approvals for optional interactive confirmations")
 		}
 	}
+	if err := validateHeadlessFlagOperands(args); err != nil {
+		return opts, "", err
+	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.DurationVar(&opts.timeout, "timeout", opts.timeout, "maximum wall-clock duration")
 	fs.BoolVar(&opts.json, "json", false, "print a JSON summary instead of plain text")
+	fs.StringVar(&opts.configPath, "config", "", "load only this complete configuration file")
+	fs.StringVar(&opts.model, "model", "", "override the configured model")
 	if err := fs.Parse(args); err != nil {
 		return opts, "", err
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			opts.modelSet = true
+		}
+	})
+	if strings.TrimSpace(opts.configPath) == "" && flagWasSet(fs, "config") {
+		return opts, "", fmt.Errorf("--config needs a path")
+	}
+	if opts.modelSet {
+		opts.model = strings.TrimSpace(opts.model)
+		if opts.model == "" {
+			return opts, "", fmt.Errorf("--model needs a non-empty id")
+		}
 	}
 	parts := fs.Args()
 	if stdin != nil && !isCharacterDevice(stdin) {
@@ -532,6 +563,74 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 		return opts, "", fmt.Errorf("neo run: missing prompt")
 	}
 	return opts, prompt, nil
+}
+
+// validateHeadlessFlagOperands catches an option where another recognised
+// option was likely supplied instead of its value. It follows flag.Parse's
+// boundary: options after -- or the first positional argument are prompt text.
+func validateHeadlessFlagOperands(args []string) error {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" || arg == "-" || !strings.HasPrefix(arg, "-") {
+			return nil
+		}
+
+		name, _, hasValue := strings.Cut(arg, "=")
+		if hasValue {
+			continue
+		}
+
+		switch name {
+		case "--config", "-config":
+			if i+1 < len(args) && (args[i+1] == "--" || isHeadlessFlag(args[i+1])) {
+				return fmt.Errorf("--config needs a path")
+			}
+			i++
+		case "--model", "-model":
+			if i+1 < len(args) && (args[i+1] == "--" || isHeadlessFlag(args[i+1])) {
+				return fmt.Errorf("--model needs a non-empty id")
+			}
+			i++
+		case "--timeout", "-timeout":
+			i++
+		case "--json", "-json":
+			// Boolean flags do not consume the next argument.
+		default:
+			// flag.Parse will report this unknown flag before parsing later args.
+			return nil
+		}
+	}
+	return nil
+}
+
+func isHeadlessFlag(arg string) bool {
+	name, _, _ := strings.Cut(arg, "=")
+	switch name {
+	case "--config", "-config", "--model", "-model", "--timeout", "-timeout", "--json", "-json":
+		return true
+	default:
+		return false
+	}
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		set = set || f.Name == name
+	})
+	return set
+}
+
+func loadHeadlessConfig(opts headlessOptions, errOut io.Writer) (*config.Config, bool) {
+	if opts.configPath == "" {
+		return loadConfig(errOut)
+	}
+	cfg, err := config.LoadFile(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(errOut, "config: %v\n", err)
+		return nil, false
+	}
+	return cfg, true
 }
 
 func isCharacterDevice(in io.Reader) bool {

@@ -576,6 +576,125 @@ func TestParseHeadlessArgsDefaults(t *testing.T) {
 	}
 }
 
+func TestParseHeadlessArgsConfigAndModelOverrides(t *testing.T) {
+	for _, args := range [][]string{
+		{"--config", "headless.yaml", "--model", "override-model", "prompt"},
+		{"--config=headless.yaml", "--model=override-model", "prompt"},
+	} {
+		opts, prompt, err := parseHeadlessArgs(args, nil)
+		if err != nil {
+			t.Fatalf("parseHeadlessArgs(%q): %v", args, err)
+		}
+		if opts.configPath != "headless.yaml" || opts.model != "override-model" || !opts.modelSet {
+			t.Fatalf("options = %+v", opts)
+		}
+		if prompt != "prompt" {
+			t.Fatalf("prompt = %q", prompt)
+		}
+	}
+}
+
+func TestParseHeadlessArgsRejectsEmptyModel(t *testing.T) {
+	for _, args := range [][]string{
+		{"--model", "", "prompt"},
+		{"--model=", "prompt"},
+		{"--model", "--config", "headless.yaml", "prompt"},
+		{"--model", "--", "prompt"},
+	} {
+		_, _, err := parseHeadlessArgs(args, nil)
+		if err == nil || !strings.Contains(err.Error(), "--model needs a non-empty id") {
+			t.Fatalf("parseHeadlessArgs(%q) error = %v", args, err)
+		}
+	}
+}
+
+func TestParseHeadlessArgsRejectsMissingConfigPath(t *testing.T) {
+	for _, args := range [][]string{
+		{"--config", "", "prompt"},
+		{"--config=", "prompt"},
+		{"--config", "--model", "override-model", "prompt"},
+		{"--config", "--", "prompt"},
+	} {
+		_, _, err := parseHeadlessArgs(args, nil)
+		if err == nil || !strings.Contains(err.Error(), "--config needs a path") {
+			t.Fatalf("parseHeadlessArgs(%q) error = %v", args, err)
+		}
+	}
+}
+
+func TestParseHeadlessArgsPreservesFlagLikePromptTextAndDashPrefixedValues(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		args       []string
+		configPath string
+		model      string
+		prompt     string
+	}{
+		{
+			name:   "prompt after separator",
+			args:   []string{"--", "--config", "--model"},
+			prompt: "--config --model",
+		},
+		{
+			name:   "prompt after first positional argument",
+			args:   []string{"prompt", "--config", "--model"},
+			prompt: "prompt --config --model",
+		},
+		{
+			name:       "dash prefixed config path",
+			args:       []string{"--config", "-ci.yaml", "prompt"},
+			configPath: "-ci.yaml",
+			prompt:     "prompt",
+		},
+		{
+			name:   "dash prefixed model id",
+			args:   []string{"--model", "-test-model", "prompt"},
+			model:  "-test-model",
+			prompt: "prompt",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			opts, prompt, err := parseHeadlessArgs(test.args, nil)
+			if err != nil {
+				t.Fatalf("parseHeadlessArgs(%q): %v", test.args, err)
+			}
+			if opts.configPath != test.configPath || opts.model != test.model {
+				t.Fatalf("options = %+v", opts)
+			}
+			if prompt != test.prompt {
+				t.Fatalf("prompt = %q, want %q", prompt, test.prompt)
+			}
+		})
+	}
+}
+
+func TestLoadHeadlessConfigPrefersExplicitFile(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := os.WriteFile(filepath.Join(root, "neo.yaml"), []byte("model: discovered-model\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	explicit := filepath.Join(root, "headless.yaml")
+	if err := os.WriteFile(explicit, []byte("model: explicit-model\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := loadHeadlessConfig(headlessOptions{configPath: explicit}, io.Discard)
+	if !ok {
+		t.Fatal("loadHeadlessConfig returned false")
+	}
+	if cfg.Model != "explicit-model" {
+		t.Fatalf("model = %q, want explicit model", cfg.Model)
+	}
+}
+
+func TestLoadHeadlessConfigReportsExplicitFileFailure(t *testing.T) {
+	var errOut bytes.Buffer
+	_, ok := loadHeadlessConfig(headlessOptions{configPath: filepath.Join(t.TempDir(), "missing.yaml")}, &errOut)
+	if ok || !strings.Contains(errOut.String(), "config:") || !strings.Contains(errOut.String(), "missing.yaml") {
+		t.Fatalf("ok = %v, stderr = %q", ok, errOut.String())
+	}
+}
+
 func TestParseHeadlessArgsRejectsRemovedPermissionFlag(t *testing.T) {
 	for _, args := range [][]string{
 		{"--permission", "readonly", "prompt"},
