@@ -620,6 +620,52 @@ func TestParseHeadlessArgsRejectsMissingConfigPath(t *testing.T) {
 	}
 }
 
+func TestParseHeadlessArgsPreservesFlagLikePromptTextAndDashPrefixedValues(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		args       []string
+		configPath string
+		model      string
+		prompt     string
+	}{
+		{
+			name:   "prompt after separator",
+			args:   []string{"--", "--config", "--model"},
+			prompt: "--config --model",
+		},
+		{
+			name:   "prompt after first positional argument",
+			args:   []string{"prompt", "--config", "--model"},
+			prompt: "prompt --config --model",
+		},
+		{
+			name:       "dash prefixed config path",
+			args:       []string{"--config", "-ci.yaml", "prompt"},
+			configPath: "-ci.yaml",
+			prompt:     "prompt",
+		},
+		{
+			name:   "dash prefixed model id",
+			args:   []string{"--model", "-test-model", "prompt"},
+			model:  "-test-model",
+			prompt: "prompt",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			opts, prompt, err := parseHeadlessArgs(test.args, nil)
+			if err != nil {
+				t.Fatalf("parseHeadlessArgs(%q): %v", test.args, err)
+			}
+			if opts.configPath != test.configPath || opts.model != test.model {
+				t.Fatalf("options = %+v", opts)
+			}
+			if prompt != test.prompt {
+				t.Fatalf("prompt = %q, want %q", prompt, test.prompt)
+			}
+		})
+	}
+}
+
 func TestLoadHeadlessConfigPrefersExplicitFile(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)

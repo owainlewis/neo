@@ -522,16 +522,8 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 			return opts, "", fmt.Errorf("--permission has been removed; run Neo inside a sandbox and use tool_approvals for optional interactive confirmations")
 		}
 	}
-	for i, arg := range args {
-		if i+1 == len(args) || !strings.HasPrefix(args[i+1], "-") {
-			continue
-		}
-		switch arg {
-		case "--config":
-			return opts, "", fmt.Errorf("--config needs a path")
-		case "--model":
-			return opts, "", fmt.Errorf("--model needs a non-empty id")
-		}
+	if err := validateHeadlessFlagOperands(args); err != nil {
+		return opts, "", err
 	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -571,6 +563,54 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 		return opts, "", fmt.Errorf("neo run: missing prompt")
 	}
 	return opts, prompt, nil
+}
+
+// validateHeadlessFlagOperands catches an option where another recognised
+// option was likely supplied instead of its value. It follows flag.Parse's
+// boundary: options after -- or the first positional argument are prompt text.
+func validateHeadlessFlagOperands(args []string) error {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" || arg == "-" || !strings.HasPrefix(arg, "-") {
+			return nil
+		}
+
+		name, _, hasValue := strings.Cut(arg, "=")
+		if hasValue {
+			continue
+		}
+
+		switch name {
+		case "--config", "-config":
+			if i+1 < len(args) && isHeadlessFlag(args[i+1]) {
+				return fmt.Errorf("--config needs a path")
+			}
+			i++
+		case "--model", "-model":
+			if i+1 < len(args) && isHeadlessFlag(args[i+1]) {
+				return fmt.Errorf("--model needs a non-empty id")
+			}
+			i++
+		case "--timeout", "-timeout":
+			i++
+		case "--json", "-json":
+			// Boolean flags do not consume the next argument.
+		default:
+			// flag.Parse will report this unknown flag before parsing later args.
+			return nil
+		}
+	}
+	return nil
+}
+
+func isHeadlessFlag(arg string) bool {
+	name, _, _ := strings.Cut(arg, "=")
+	switch name {
+	case "--config", "-config", "--model", "-model", "--timeout", "-timeout", "--json", "-json":
+		return true
+	default:
+		return false
+	}
 }
 
 func flagWasSet(fs *flag.FlagSet, name string) bool {
