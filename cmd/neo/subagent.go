@@ -41,7 +41,9 @@ func (p unavailableProvider) Complete(context.Context, llm.Request) (*llm.Respon
 	return nil, p.err
 }
 
-// chatAgentTool builds the agent tool for an interactive chat session.
+// chatAgentTool builds the agent tool for a coordinator session. Both
+// interactive chat and headless `neo run` use it, so they share one
+// construction path and one owner of subagent lifecycle and cancellation.
 func chatAgentTool(prov llm.Provider, model, cwd, root string, cfg *config.Config) (subagent.AgentTool, <-chan subagent.Event, *subagent.AgentRunner) {
 	contextWindowTokens := 0
 	if cfg != nil {
