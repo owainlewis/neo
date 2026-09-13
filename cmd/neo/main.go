@@ -286,8 +286,11 @@ AGENT PROMPTS:
 HEADLESS RUN:
   neo run --json --timeout 10m "Review this repo without changing files"
   cat prompt.md | neo run --json
+  git diff | neo run "Review this diff" -
 
-  Options: --timeout <duration>, --json`
+  Options: --timeout <duration>, --json
+  stdin is the prompt when no prompt argument is given; pass "-" to prepend
+  stdin to a prompt argument.`
 
 func printUsage(out io.Writer) {
 	fmt.Fprintln(out, usageText)
@@ -434,7 +437,7 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 	opts, prompt, err := parseHeadlessArgs(args, streams.in)
 	if err != nil {
 		fmt.Fprintln(streams.err, err)
-		fmt.Fprintln(streams.err, "usage: neo run [--json] [--timeout 10m] <prompt>")
+		fmt.Fprintln(streams.err, "usage: neo run [--json] [--timeout 10m] <prompt> [-]")
 		return 2
 	}
 	if opts.timeout > 0 {
@@ -517,8 +520,12 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 	if err := fs.Parse(args); err != nil {
 		return opts, "", err
 	}
-	parts := fs.Args()
-	if stdin != nil && !isCharacterDevice(stdin) {
+	// stdin is the prompt when no prompt argument is given, and is prepended to
+	// the arguments when one of them is "-". It is never read otherwise: a
+	// harness that keeps an idle pipe open on stdin would block io.ReadAll
+	// forever, and nothing about `neo run "prompt"` asks for stdin.
+	parts, wantStdin := takeStdinMarker(fs.Args())
+	if (wantStdin || len(parts) == 0) && stdin != nil && !isCharacterDevice(stdin) {
 		b, err := io.ReadAll(stdin)
 		if err != nil {
 			return opts, "", fmt.Errorf("read stdin: %w", err)
@@ -532,6 +539,21 @@ func parseHeadlessArgs(args []string, stdin io.Reader) (headlessOptions, string,
 		return opts, "", fmt.Errorf("neo run: missing prompt")
 	}
 	return opts, prompt, nil
+}
+
+// takeStdinMarker removes a literal "-" argument and reports whether one was
+// present, so `cat diff | neo run "review this" -` combines both.
+func takeStdinMarker(args []string) ([]string, bool) {
+	out := make([]string, 0, len(args))
+	found := false
+	for _, arg := range args {
+		if arg == "-" {
+			found = true
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out, found
 }
 
 func isCharacterDevice(in io.Reader) bool {
