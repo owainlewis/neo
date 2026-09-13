@@ -567,6 +567,25 @@ output:
 		if len(cfg.ToolApprovals) != 2 || cfg.Compaction.ContextWindowTokens != 200000 {
 			t.Fatalf("inherited settings: %#v", cfg)
 		}
+		t.Run("null resets", func(t *testing.T) {
+			writeFile(t, "neo.yaml", "features:\n  skills: null\noutput:\n  verbose: null\ntool_approvals: null\n")
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Features.Skills != nil || !cfg.SkillsEnabled() {
+				t.Fatal("null skills did not reset inherited false to the built-in default")
+			}
+			if cfg.Output.Verbose != nil || cfg.VerboseEnabled() {
+				t.Fatal("null verbose did not reset inherited true to the built-in default")
+			}
+			if len(cfg.ToolApprovals) != 0 {
+				t.Fatalf("null approvals did not clear inherited list: %v", cfg.ToolApprovals)
+			}
+			if cfg.AgentsFileEnabled() || cfg.Model != "global-model" {
+				t.Fatal("null resets changed omitted inherited settings")
+			}
+		})
 		for _, tc := range []struct {
 			name, project, model string
 			approvals            int
