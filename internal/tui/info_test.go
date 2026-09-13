@@ -364,6 +364,17 @@ func TestApprovalPromptRepliesFromKeypress(t *testing.T) {
 				t.Fatal("expected pending approval")
 			}
 			m.Update(tt.key)
+			if tt.key.Key().Code != tea.KeyEsc {
+				select {
+				case <-reply:
+					t.Fatal("approval replied before enter")
+				default:
+				}
+				if m.approval == nil {
+					t.Fatal("approval cleared before enter")
+				}
+				m.Update(keyPress(tea.KeyEnter))
+			}
 			if got := <-reply; got != tt.want {
 				t.Fatalf("reply = %v, want %v", got, tt.want)
 			}
@@ -382,6 +393,7 @@ func TestApprovalPromptsAgainAfterApproval(t *testing.T) {
 		reply: reply,
 	})
 	m.Update(keyPress('y'))
+	m.Update(keyPress(tea.KeyEnter))
 	if got := <-reply; !got {
 		t.Fatal("expected first call to be approved")
 	}
@@ -393,6 +405,62 @@ func TestApprovalPromptsAgainAfterApproval(t *testing.T) {
 	})
 	if m.approval == nil {
 		t.Fatal("configured calls should prompt every time")
+	}
+}
+
+func TestApprovalRequiresSelectionImmediatelyBeforeEnter(t *testing.T) {
+	m := makeTestModel()
+	reply := make(chan bool, 1)
+	m.Update(approvalRequestMsg{
+		req:   agent.ApprovalRequest{ToolName: "bash"},
+		reply: reply,
+	})
+
+	m.Update(keyPress('y'))
+	m.Update(keyPress('e'))
+	m.Update(keyPress(tea.KeyEnter))
+
+	select {
+	case <-reply:
+		t.Fatal("typing after y approved the pending call")
+	default:
+	}
+	if m.approval == nil {
+		t.Fatal("approval cleared without an immediate y-enter sequence")
+	}
+}
+
+func TestApprovalSelectionClearsAfterUnrelatedEvents(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "paste", msg: tea.PasteMsg{Content: "unrelated"}},
+		{name: "mouse wheel", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp})},
+		{name: "mouse click", msg: tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := makeTestModel()
+			reply := make(chan bool, 1)
+			m.Update(approvalRequestMsg{
+				req:   agent.ApprovalRequest{ToolName: "bash"},
+				reply: reply,
+			})
+
+			m.Update(keyPress('y'))
+			m.Update(tt.msg)
+			m.Update(keyPress(tea.KeyEnter))
+
+			select {
+			case <-reply:
+				t.Fatal("unrelated event left approval selection armed")
+			default:
+			}
+			if m.approval == nil || m.approval.selected != 0 {
+				t.Fatalf("approval selection = %v, want pending and cleared", m.approval)
+			}
+		})
 	}
 }
 

@@ -13,11 +13,23 @@ import (
 // the inner styled segments, and pads to the input bar's footprint so the
 // layout does not jump.
 func (m *model) approvalBarView() string {
+	yesStyle, noStyle := styTool, styTool
+	if m.approval.selected == 'y' {
+		yesStyle = styAccent
+	}
+	if m.approval.selected == 'n' {
+		noStyle = styAccent
+	}
 	choices := strings.Join([]string{
-		styTool.Render("y") + styMuted.Render(" yes"),
-		styTool.Render("n") + styMuted.Render(" no"),
+		yesStyle.Render("y") + styMuted.Render(" yes"),
+		noStyle.Render("n") + styMuted.Render(" no"),
+		styTool.Render("enter") + styMuted.Render(" confirm"),
 		styTool.Render("esc") + styMuted.Render(" deny"),
 	}, "    ")
 	line := styAccent.Render("approve?") + "  " + choices
-	return lipgloss.NewStyle().Padding(1, 1).Render(line)
+	width := max(m.width, 1)
+	if width <= 2 {
+		return truncate(line, width)
+	}
+	return lipgloss.NewStyle().Padding(1, 1).Render(truncate(line, width-2))
 }

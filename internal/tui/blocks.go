@@ -302,7 +302,7 @@ func (b approvalBlock) render(width int, _ *glamour.TermRenderer) string {
 		sb.WriteString(styMuted.Render(detail))
 	}
 	sb.WriteString("\n")
-	sb.WriteString(styMuted.Render("keys: y approve · n/esc deny"))
+	sb.WriteString(styMuted.Render("keys: y/n select · enter confirm · esc deny"))
 	return accentCard(sb.String(), colApprove)
 }
 

@@ -77,19 +77,43 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) tea.Cmd {
 		m.finishApproval(false)
 		return m.requestQuit()
 	case "y", "Y":
-		m.finishApproval(true)
+		m.approval.selected = 'y'
+		m.layout()
+	case "n", "N":
+		m.approval.selected = 'n'
+		m.layout()
+	case "enter":
+		switch m.approval.selected {
+		case 'y':
+			m.finishApproval(true)
+		case 'n':
+			m.finishApproval(false)
+		}
 	case "pgup":
+		m.approval.selected = 0
 		m.viewport.PageUp()
 	case "pgdown":
+		m.approval.selected = 0
 		m.viewport.PageDown()
 	case "shift+up":
+		m.approval.selected = 0
 		m.viewport.ScrollUp(1)
 	case "shift+down":
+		m.approval.selected = 0
 		m.viewport.ScrollDown(1)
-	case "n", "N", "esc":
+	case "esc":
 		m.finishApproval(false)
+	default:
+		m.approval.selected = 0
 	}
 	return nil
+}
+
+func (m *model) clearApprovalSelection() {
+	if m.approval != nil && m.approval.selected != 0 {
+		m.approval.selected = 0
+		m.layout()
+	}
 }
 
 func (m *model) requestQuit() tea.Cmd {

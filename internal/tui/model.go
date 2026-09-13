@@ -149,8 +149,9 @@ type approvalRequestMsg struct {
 }
 
 type approvalState struct {
-	req   agent.ApprovalRequest
-	reply chan bool
+	req      agent.ApprovalRequest
+	reply    chan bool
+	selected rune
 }
 
 type turnStats struct {
@@ -384,12 +385,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleKey(msg))
 
 	case tea.PasteMsg:
-		if m.models.visible || m.approval != nil || m.quitPending {
+		if m.approval != nil {
+			m.clearApprovalSelection()
+			break
+		}
+		if m.models.visible || m.quitPending {
 			break
 		}
 		cmds = append(cmds, m.updateInput(msg))
 
 	case tea.MouseWheelMsg:
+		m.clearApprovalSelection()
 		// Some terminals and multiplexers report vertical trackpad gestures
 		// with Shift set. The viewport interprets those as horizontal wheel
 		// events, but Neo intentionally disables horizontal transcript scrolling,
@@ -401,6 +407,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		cmds = append(cmds, cmd)
+
+	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseMotionMsg:
+		m.clearApprovalSelection()
 
 	case agentEventMsg:
 		m.handleEvent(msg.ev)
