@@ -15,6 +15,11 @@ type ModelChoice struct {
 	Description string
 }
 
+type modelsLoadedMsg struct {
+	choices []ModelChoice
+	err     error
+}
+
 type modelBrowser struct {
 	visible  bool
 	query    string
@@ -62,13 +67,30 @@ func backendLabel(provider, model string) string {
 	return provider + "/" + model
 }
 
-func (m *model) openModelBrowser() {
-	if len(m.modelChoices) == 0 {
+func (m *model) openModelBrowser() tea.Cmd {
+	if len(m.modelChoices) == 0 && m.modelLoader == nil {
 		m.appendBlock(noticeBlock{text: "model: " + m.modelTag})
-		return
+		return nil
 	}
 	m.models = modelBrowser{visible: true}
 	m.ensureModelSelection()
+	if m.modelsLoading {
+		if m.modelSpinning {
+			return nil
+		}
+		m.modelSpinning = true
+		return m.modelSpin.Tick
+	}
+	if m.modelLoader != nil && !m.modelsLoaded {
+		m.modelsLoading = true
+		m.modelSpinning = true
+		loader, ctx := m.modelLoader, m.ctx
+		return tea.Batch(m.modelSpin.Tick, func() tea.Msg {
+			choices, err := loader(ctx)
+			return modelsLoadedMsg{choices: choices, err: err}
+		})
+	}
+	return nil
 }
 
 func (m *model) closeModelBrowser() {
@@ -135,6 +157,9 @@ func (m *model) ensureModelSelection() {
 }
 
 func (m *model) selectCurrentModel() {
+	if m.modelsLoading {
+		return
+	}
 	items := m.filteredModels()
 	if len(items) == 0 {
 		return
@@ -241,7 +266,14 @@ func (m *model) modelBrowserView() string {
 	sb.WriteString("\n\n")
 	sb.WriteString(query)
 	sb.WriteString("\n\n")
-	sb.WriteString(strings.Join(lines, "\n"))
+	if m.modelsLoading {
+		sb.WriteString(m.modelSpin.View() + " Loading models…")
+	} else {
+		sb.WriteString(strings.Join(lines, "\n"))
+		if m.modelsLoadErr != nil {
+			sb.WriteString("\n\n" + styMuted.Render(m.modelsLoadErr.Error()))
+		}
+	}
 	if m.models.err != nil {
 		sb.WriteString("\n\n")
 		sb.WriteString(styErr.Render("! " + m.models.err.Error()))

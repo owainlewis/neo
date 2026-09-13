@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -144,5 +146,108 @@ func TestModelBrowser_SwitchFailureKeepsCurrentBackend(t *testing.T) {
 	}
 	if m.providerTag != "anthropic" || m.modelTag != "test" {
 		t.Fatalf("model changed after failed switch: %s/%s", m.providerTag, m.modelTag)
+	}
+}
+
+func TestModelBrowser_LazyLoadAndSessionCache(t *testing.T) {
+	for _, closeBeforeResult := range []bool{false, true} {
+		t.Run(fmt.Sprint(closeBeforeResult), func(t *testing.T) {
+			m := makeTestModel()
+			calls := 0
+			warning := errors.New("catalogue unavailable; using default")
+			m.modelLoader = func(ctx context.Context) ([]ModelChoice, error) {
+				calls++
+				return []ModelChoice{{ID: "fallback"}}, warning
+			}
+			if cmd := m.Init(); cmd != nil || calls != 0 {
+				t.Fatal("startup must not load models")
+			}
+			cmd := m.handleSlashCommand("/model")
+			if calls != 0 || !m.modelsLoading || !m.models.visible {
+				t.Fatal("expected deferred load")
+			}
+			if out := plain(m.View().Content); !strings.Contains(out, "Loading models") {
+				t.Fatalf("missing loading indicator: %s", out)
+			}
+			m.handleModelBrowserKey(keyPress(tea.KeyEnter))
+			if !m.models.visible {
+				t.Fatal("enter must not select while loading")
+			}
+			batch := cmd().(tea.BatchMsg)
+			if closeBeforeResult {
+				m.handleModelBrowserKey(keyPress(tea.KeyEscape))
+				if m.models.visible {
+					t.Fatal("escape must close while loading")
+				}
+				m.handleSlashCommand("/model")
+			}
+			// Execute the fetch command separately from the spinner tick.
+			m.Update(batch[1]())
+			if calls != 1 || m.modelsLoading || !m.modelsLoaded {
+				t.Fatal("load did not complete exactly once")
+			}
+			if out := plain(m.View().Content); !strings.Contains(out, "fallback") || !strings.Contains(out, warning.Error()) || strings.Contains(out, "Loading models") {
+				t.Fatalf("missing loaded result: %s", out)
+			}
+			if m.modelChoices[0].ID != "test" {
+				t.Fatal("configured model must remain selectable")
+			}
+			m.closeModelBrowser()
+			if cmd := m.handleSlashCommand("/model"); cmd != nil || calls != 1 {
+				t.Fatal("reopening must use cached result")
+			}
+		})
+	}
+}
+
+func TestModelBrowser_LoadCompletesWhileClosed(t *testing.T) {
+	m := makeTestModel()
+	m.modelLoader = func(context.Context) ([]ModelChoice, error) { return []ModelChoice{{ID: "loaded"}}, nil }
+	batch := m.handleSlashCommand("/model")().(tea.BatchMsg)
+	m.closeModelBrowser()
+	m.Update(batch[1]())
+	if m.models.visible {
+		t.Fatal("completion must not reopen picker")
+	}
+	if cmd := m.openModelBrowser(); cmd != nil {
+		t.Fatal("completed choices should be cached")
+	}
+	if out := plain(m.View().Content); !strings.Contains(out, "loaded") {
+		t.Fatalf("missing cached model: %s", out)
+	}
+}
+
+func TestModelBrowser_ReopenReusesPendingSpinner(t *testing.T) {
+	m := makeTestModel()
+	m.modelSpin = spinner.New(spinner.WithSpinner(spinner.Dot))
+	m.modelLoader = func(context.Context) ([]ModelChoice, error) { return nil, nil }
+	batch := m.openModelBrowser()().(tea.BatchMsg)
+	pending := batch[0]
+	for range 3 {
+		m.closeModelBrowser()
+		if cmd := m.openModelBrowser(); cmd != nil {
+			t.Fatal("reopening with a pending tick must not start another spinner")
+		}
+		_, pending = m.Update(pending())
+		if pending == nil {
+			t.Fatal("pending tick must continue animation after reopening")
+		}
+	}
+
+	m.closeModelBrowser()
+	if _, cmd := m.Update(pending()); cmd != nil {
+		t.Fatal("tick while closed must stop animation")
+	}
+	pending = m.openModelBrowser()
+	if pending == nil {
+		t.Fatal("reopening after animation stops must restart it")
+	}
+	_, pending = m.Update(pending())
+	if pending == nil {
+		t.Fatal("restarted spinner must continue animation")
+	}
+	m.Update(batch[1]())
+	if _, cmd := m.Update(pending()); cmd != nil {
+		t.Fatal("load completion must stop animation")
 	}
 }
