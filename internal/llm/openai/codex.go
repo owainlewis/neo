@@ -105,8 +105,9 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 func (c *CodexClient) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
 	access, accountID, err := c.Source.Token(ctx)
 	if err != nil {
-		// A missing or unrefreshable login does not get better on retry.
-		return nil, 0, retry.Absent(), retry.Permanent(err)
+		// The source decides whether this is permanent (see retry.Permanent):
+		// a missing or rejected login is, a transient refresh failure is not.
+		return nil, 0, retry.Absent(), err
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
