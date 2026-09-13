@@ -44,7 +44,7 @@ func TestModel_SendResultSuppressesGenericMaxTurnsError(t *testing.T) {
 // "Finished with issues" card.
 func TestModel_SendResultDoesNotDuplicateMaxTurnsSummary(t *testing.T) {
 	m := makeTestModel()
-	m.turn = turnStats{tools: 3, phase: "Review"}
+	m.turn = turnStats{tools: 3, label: "Review"}
 
 	m.handleEvent(agent.Event{Kind: agent.EventMaxTurnsReached, MaxTurns: 50, Err: agent.ErrMaxTurns})
 	m.Update(sendResultMsg{err: fmt.Errorf("agent stopped: %w", agent.ErrMaxTurns)})

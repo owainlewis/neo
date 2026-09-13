@@ -481,13 +481,13 @@ func (b errorBlock) render(width int, _ *glamour.TermRenderer) string {
 
 type maxTurnsBlock struct {
 	limit int
-	phase string
+	label string
 }
 
 func (b maxTurnsBlock) render(width int, _ *glamour.TermRenderer) string {
 	prefix := "Paused"
-	if strings.TrimSpace(b.phase) != "" {
-		prefix = strings.TrimSpace(b.phase) + " paused"
+	if strings.TrimSpace(b.label) != "" {
+		prefix = strings.TrimSpace(b.label) + " paused"
 	}
 	msg := prefix + " after reaching Neo's safety step limit. Reply to continue."
 	if b.limit > 0 {

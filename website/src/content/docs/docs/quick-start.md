@@ -91,23 +91,23 @@ Summarize this repository and suggest a good first change.
 
 If you built Neo locally but did not install it onto your `PATH`, run `./neo` instead.
 
-## Built-in phases
+## Built-in skills
 
 Neo includes four named prompts that appear as slash commands and as the active
 label beside normal workflow progress:
 
-| Phase | What it does |
+| Skill | What it does |
 |------|------|
 | `/design <goal>` | Design a product change, feature, or bug fix without implementing it |
 | `/plan <goal>` | Break accepted work into small tasks with checks |
 | `/build <goal>` | Implement, test, self-review, and verify the change |
-| `/review [scope]` | Review and improve code, PR feedback, or CI results |
+| `/review [scope]` | Review code, PR feedback, or CI results and report findings |
 
-Phases activate only through these slash commands. Ordinary prose containing a
-phase name is sent unchanged and does not activate one.
+Skills activate only through these slash commands or a `$name` mention.
+Ordinary prose containing a skill name is sent unchanged.
 
-Add or override named prompts with the `phases` map in `neo.yaml`. The
-[configuration reference](/docs/reference/config/) includes an example.
+Add a skill, or replace a built-in one, with `.neo/skills/<name>/SKILL.md` in
+the project or `~/.neo/skills/<name>/SKILL.md` globally.
 
 ## Common commands
 

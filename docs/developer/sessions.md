@@ -69,12 +69,12 @@ Provider failures that return no response have no reported usage to add.
 Older session files without `usage` load as zero usage. Resumed
 sessions continue accumulating from the saved totals. Clearing a transcript also
 clears the saved usage and conversation-scoped TUI activity for that session.
-The selected backend, working directory, skills, named phases, and presentation
+The selected backend, working directory, skills, and presentation
 settings remain active for the new conversation.
 
 ## Visible Prompt Text
 
-User messages may store `display_text` when Neo sends expanded named-phase or
+User messages may store `display_text` when Neo sends expanded
 skill instructions to the model. Transcript replay, session titles, and local
 search use this visible value, while provider adapters continue using the full
 text content. Older messages without `display_text` behave as before.

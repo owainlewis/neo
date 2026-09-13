@@ -34,31 +34,67 @@ func writeSkill(t *testing.T, base, name, body string) {
 	}
 }
 
-func TestLoad_NoSkillsReturnsEmpty(t *testing.T) {
+// builtinNames lists the skills every Load result starts with.
+var builtinNames = []string{"design", "plan", "build", "review"}
+
+// discovered strips the built-ins so tests can assert on what Load found.
+func discovered(sk []Skill) []Skill {
+	var out []Skill
+	for _, s := range sk {
+		if !strings.HasPrefix(s.Path, "builtin:") {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func TestDefaults_ShipInProductOrderWithBodies(t *testing.T) {
+	got := Defaults()
+	if len(got) != len(builtinNames) {
+		t.Fatalf("defaults = %d, want %d", len(got), len(builtinNames))
+	}
+	for i, name := range builtinNames {
+		if got[i].Name != name || got[i].Description == "" || got[i].Body == "" {
+			t.Fatalf("default %d = %+v, want %q with description and body", i, got[i], name)
+		}
+	}
+}
+
+func TestLoad_NoUserSkillsReturnsOnlyBuiltins(t *testing.T) {
 	_, cwd, _ := repo(t)
 	got, err := Load(cwd)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected no skills, got %v", got)
+	if len(discovered(got)) != 0 || len(got) != len(builtinNames) {
+		t.Fatalf("expected only built-ins, got %d skills", len(got))
+	}
+	for i, name := range builtinNames {
+		if got[i].Name != name {
+			t.Fatalf("built-in order lost: %d = %q, want %q", i, got[i].Name, name)
+		}
 	}
 }
 
 func TestLoad_ParsesFrontmatterAndBody(t *testing.T) {
 	root, cwd, _ := repo(t)
-	writeSkill(t, root, "review", "---\nname: review\ndescription: audit a diff\n---\nLook for bugs.")
+	writeSkill(t, root, "audit", "---\nname: audit\ndescription: audit a diff\n---\nLook for bugs.")
 
 	got, err := Load(cwd)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(got))
+	found := discovered(got)
+	if len(found) != 1 {
+		t.Fatalf("expected 1 discovered skill, got %d", len(found))
 	}
-	s := got[0]
-	if s.Name != "review" || s.Description != "audit a diff" || s.Body != "Look for bugs." {
+	s := found[0]
+	if s.Name != "audit" || s.Description != "audit a diff" || s.Body != "Look for bugs." {
 		t.Fatalf("unexpected skill: %+v", s)
+	}
+	// Discovered skills follow the built-ins.
+	if got[len(got)-1].Name != "audit" {
+		t.Fatalf("discovered skill should come after built-ins, got %q last", got[len(got)-1].Name)
 	}
 }
 
@@ -69,25 +105,49 @@ func TestLoad_NameDefaultsToDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 1 || got[0].Name != "commit" {
-		t.Fatalf("expected name from directory, got %+v", got)
+	found := discovered(got)
+	if len(found) != 1 || found[0].Name != "commit" {
+		t.Fatalf("expected name from directory, got %+v", found)
 	}
 }
 
 func TestLoad_ProjectOverridesGlobal(t *testing.T) {
 	root, cwd, home := repo(t)
-	writeSkill(t, home, "review", "---\ndescription: global\n---\nglobal body")
-	writeSkill(t, root, "review", "---\ndescription: project\n---\nproject body")
+	writeSkill(t, home, "audit", "---\ndescription: global\n---\nglobal body")
+	writeSkill(t, root, "audit", "---\ndescription: project\n---\nproject body")
 
 	got, err := Load(cwd)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 merged skill, got %d", len(got))
+	found := discovered(got)
+	if len(found) != 1 {
+		t.Fatalf("expected 1 merged skill, got %d", len(found))
 	}
-	if got[0].Body != "project body" {
-		t.Fatalf("project skill should win, got %q", got[0].Body)
+	if found[0].Body != "project body" {
+		t.Fatalf("project skill should win, got %q", found[0].Body)
+	}
+}
+
+// A user skill named after a built-in replaces it in place: same slot in the
+// order, user body and description.
+func TestLoad_UserSkillReplacesBuiltin(t *testing.T) {
+	root, cwd, _ := repo(t)
+	writeSkill(t, root, "review", "---\ndescription: house review policy\n---\nApply the house policy.")
+
+	got, err := Load(cwd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got) != len(builtinNames) {
+		t.Fatalf("skills = %d, want the built-in count with review replaced", len(got))
+	}
+	review, ok := Find(got, "/review")
+	if !ok || review.Body != "Apply the house policy." || review.Description != "house review policy" {
+		t.Fatalf("review = %+v, want the project override", review)
+	}
+	if got[3].Name != "review" {
+		t.Fatalf("override moved review out of its slot: %v", got)
 	}
 }
 
@@ -98,8 +158,23 @@ func TestLoad_SkipsBodylessSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected bodyless skill skipped, got %v", got)
+	if found := discovered(got); len(found) != 0 {
+		t.Fatalf("expected bodyless skill skipped, got %v", found)
+	}
+}
+
+func TestFindAndDisplayName(t *testing.T) {
+	sk := Defaults()
+	for _, q := range []string{"review", "/review", "$review", " Review "} {
+		if s, ok := Find(sk, q); !ok || s.Name != "review" {
+			t.Fatalf("Find(%q) = %+v, %v", q, s, ok)
+		}
+	}
+	if _, ok := Find(sk, "/nope"); ok {
+		t.Fatal("Find matched an unknown skill")
+	}
+	if got := DisplayName("code-review"); got != "Code review" {
+		t.Fatalf("DisplayName = %q", got)
 	}
 }
 

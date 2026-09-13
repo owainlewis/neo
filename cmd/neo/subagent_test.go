@@ -15,6 +15,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/profile"
+	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/workflow"
@@ -118,15 +119,15 @@ func TestChatSystemNamesNoUnregisteredTool(t *testing.T) {
 	}
 }
 
-func TestChatSystemAdvertisesNamedPhasesWithoutPromptBodies(t *testing.T) {
-	system, _ := chatSystem(&config.Config{}, t.TempDir(), nil, profile.Profile{}, chatRegistry(), io.Discard)
-	for _, want := range []string{"# Named phases", "/design", "/plan", "/build", "/review"} {
+func TestChatSystemAdvertisesBuiltInSkillsWithoutPromptBodies(t *testing.T) {
+	system, _ := chatSystem(&config.Config{}, "", skills.Defaults(), profile.Profile{}, nil, io.Discard)
+	for _, want := range []string{"# Available skills", "$design", "$plan", "$build", "$review"} {
 		if !strings.Contains(system, want) {
-			t.Fatalf("system prompt missing %q named phase catalog:\n%s", want, system)
+			t.Fatalf("system prompt missing %q skill catalog:\n%s", want, system)
 		}
 	}
-	if strings.Contains(system, "Design the requested change before implementation.") {
-		t.Fatalf("system prompt included named phase body:\n%s", system)
+	if strings.Contains(system, "Design the requested change before implementation") {
+		t.Fatalf("system prompt included skill body:\n%s", system)
 	}
 }
 

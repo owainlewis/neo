@@ -6,7 +6,7 @@ The flattened `Request.System` string remains available for providers that do no
 
 ## Current Block Layout
 
-1. Static base instructions plus the phase and skill catalogs. This block is marked cacheable when `features.prompt_caching` is enabled.
+1. Static base instructions plus the skill catalog. This block is marked cacheable when `features.prompt_caching` is enabled.
 2. Dynamic environment section: working directory, repository root, platform, date. Not cacheable.
 3. Dynamic AGENTS.md project context. Not cacheable.
 

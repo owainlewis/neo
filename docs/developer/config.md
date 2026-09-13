@@ -44,13 +44,6 @@ features:
 
 output:
   verbose: false
-
-# Optional named prompt additions or overrides.
-# phases:
-#   security:
-#     description: Review authentication and trust boundaries
-#     prompt: |
-#       Inspect the requested security boundary and verify any fixes.
 ```
 
 The compaction window applies consistently to the coordinator and child
@@ -96,29 +89,14 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 | `output.verbose: false` | (default) | Show live in-flight activity and concise completed receipts (e.g. a file read or command run). Errors, failures, and direct `!` command output always render in full. |
 | `output.verbose: true` | | Restore full tool call/result cards, including complete file contents and command output. |
 
-## Named Phases
+## Skills
 
-Neo always provides `/design`, `/plan`, `/build`, and `/review`. The optional
-`phases` map adds custom named prompts or overrides default fields by name.
-Default phases that are not mentioned remain available even though Neo config
-files otherwise use first-hit resolution rather than merging.
-
-```yaml
-phases:
-  security:
-    description: Review authentication and trust boundaries
-    prompt: |
-      Inspect the requested security boundary.
-      Report and fix actionable findings, then rerun relevant checks.
-
-  review:
-    prompt: |
-      Apply this project's review policy to the requested scope.
-```
-
-Names must use lowercase letters, numbers, hyphens, or underscores. `help`,
-`clear`, and `model` are reserved for native commands. See
-[Named phases](phases.md) for runtime behavior and boundaries.
+Skills are files, not config. Neo always provides `/design`, `/plan`,
+`/build`, and `/review`; add or replace one with
+`.neo/skills/<name>/SKILL.md` in the project or `~/.neo/skills/<name>/SKILL.md`
+globally. The `features.skills` flag controls discovery of those files; the
+built-ins stay available either way. A `phases` key in `neo.yaml` is rejected
+with a message pointing at the skill layout. See [Skills](skills.md).
 
 ## Tool Approvals
 
