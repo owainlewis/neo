@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -213,5 +214,40 @@ func TestModelBrowser_LoadCompletesWhileClosed(t *testing.T) {
 	}
 	if out := plain(m.View().Content); !strings.Contains(out, "loaded") {
 		t.Fatalf("missing cached model: %s", out)
+	}
+}
+
+func TestModelBrowser_ReopenReusesPendingSpinner(t *testing.T) {
+	m := makeTestModel()
+	m.modelSpin = spinner.New(spinner.WithSpinner(spinner.Dot))
+	m.modelLoader = func(context.Context) ([]ModelChoice, error) { return nil, nil }
+	batch := m.openModelBrowser()().(tea.BatchMsg)
+	pending := batch[0]
+	for range 3 {
+		m.closeModelBrowser()
+		if cmd := m.openModelBrowser(); cmd != nil {
+			t.Fatal("reopening with a pending tick must not start another spinner")
+		}
+		_, pending = m.Update(pending())
+		if pending == nil {
+			t.Fatal("pending tick must continue animation after reopening")
+		}
+	}
+
+	m.closeModelBrowser()
+	if _, cmd := m.Update(pending()); cmd != nil {
+		t.Fatal("tick while closed must stop animation")
+	}
+	pending = m.openModelBrowser()
+	if pending == nil {
+		t.Fatal("reopening after animation stops must restart it")
+	}
+	_, pending = m.Update(pending())
+	if pending == nil {
+		t.Fatal("restarted spinner must continue animation")
+	}
+	m.Update(batch[1]())
+	if _, cmd := m.Update(pending()); cmd != nil {
+		t.Fatal("load completion must stop animation")
 	}
 }

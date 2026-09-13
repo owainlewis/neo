@@ -75,10 +75,15 @@ func (m *model) openModelBrowser() tea.Cmd {
 	m.models = modelBrowser{visible: true}
 	m.ensureModelSelection()
 	if m.modelsLoading {
+		if m.modelSpinning {
+			return nil
+		}
+		m.modelSpinning = true
 		return m.modelSpin.Tick
 	}
 	if m.modelLoader != nil && !m.modelsLoaded {
 		m.modelsLoading = true
+		m.modelSpinning = true
 		loader, ctx := m.modelLoader, m.ctx
 		return tea.Batch(m.modelSpin.Tick, func() tea.Msg {
 			choices, err := loader(ctx)

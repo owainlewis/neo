@@ -255,6 +255,7 @@ type model struct {
 	modelChoices  []ModelChoice
 	modelLoader   func(context.Context) ([]ModelChoice, error)
 	modelsLoading bool
+	modelSpinning bool
 	modelsLoaded  bool
 	modelsLoadErr error
 	modelSpin     spinner.Model
@@ -517,10 +518,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ensureModelSelection()
 
 	case spinner.TickMsg:
-		if m.modelsLoading && m.models.visible {
-			var cmd tea.Cmd
-			m.modelSpin, cmd = m.modelSpin.Update(msg)
-			cmds = append(cmds, cmd)
+		if msg.ID == m.modelSpin.ID() {
+			if m.modelsLoading && m.models.visible {
+				var cmd tea.Cmd
+				m.modelSpin, cmd = m.modelSpin.Update(msg)
+				cmds = append(cmds, cmd)
+			} else {
+				m.modelSpinning = false
+			}
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
