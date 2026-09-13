@@ -5,7 +5,7 @@ Neo exposes a small built-in tool surface to the model.
 | Tool | Surface | Description |
 | --- | --- | --- |
 | `agent` | Interactive chat | Spawn a fresh subagent with a self-contained prompt. `mode: "work"` is writable and serial; `mode: "inspect"` is read-only and parallel-safe. |
-| `bash` | Chat and headless | Run a shell command via `/bin/bash -c`. Returns bounded combined stdout and stderr, retaining the start and end when truncated. |
+| `bash` | Chat and headless | Run a shell command via `/bin/bash -c`. Returns bounded combined stdout and stderr, retaining the start and end when truncated. Optional `timeout` in seconds. |
 | `edit_file` | Chat and headless | Replace exactly one occurrence of `old_string` with `new_string`. Fails if the old text is missing, appears more than once, or the file changed since the agent last read it. `old_string` matches the file's raw text, so the line-number gutter `read_file` adds must be stripped first. |
 | `glob` | Chat and headless | List workspace files matching a glob pattern, honouring `.gitignore`. Supports `**` for recursive matches. Returns one path per line. |
 | `grep` | Chat and headless | Search the workspace with a regular expression, honouring `.gitignore`. Returns matching lines as `path:line:text`. |
@@ -25,6 +25,27 @@ head-and-tail at that size so a failing command's trailing error survives;
 same cap as a backstop for any tool that does not bound itself. A single line
 longer than the limit cannot be read by `read_file`, since pagination cuts on
 line boundaries; use `bash` for that.
+
+## Command timeouts
+
+`bash` kills a command that outruns its deadline, along with its process group,
+and returns an error naming the duration. The host sets the default
+(`tools.DefaultBashTimeout`, 2 minutes; the chat host gives subagents 5). The
+model can pass `timeout` in seconds to change it for a single call — usually to
+raise it for a cold build or a full test suite — up to `tools.MaxBashTimeout`
+(10 minutes), or the host default if that is longer, so asking for more time
+never yields less than saying nothing.
+
+A request above the ceiling is clamped rather than rejected, so an over-eager
+number still runs the command instead of wasting a turn. A value that is not a
+positive number is an error: falling back to the default would kill the long
+command anyway, with a message that never mentions the ignored argument.
+
+The command's own deadline is not the only one it can hit. `neo run` bounds the
+whole session (10 minutes by default, `--timeout` to change it), and when that
+expires first the error says so rather than blaming the requested timeout. It
+also means a `timeout` near the ceiling is only reachable in interactive chat or
+with a raised headless budget.
 
 ## Stale edits
 

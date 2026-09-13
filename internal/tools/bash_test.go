@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -165,4 +166,160 @@ func waitForProcessExit(t *testing.T, pid int) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("process %d is still running", pid)
+}
+
+func TestBash_RequestedTimeoutOverridesDefault(t *testing.T) {
+	// The point of the argument: a command the model knows is slow must
+	// survive a default that would otherwise kill it.
+	b := Bash{Timeout: 50 * time.Millisecond}
+	out, err := b.Run(context.Background(), map[string]any{"command": "sleep 0.4; echo done", "timeout": float64(30)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v (out=%q)", err, out)
+	}
+	if !strings.Contains(out, "done") {
+		t.Fatalf("expected command to finish, got %q", out)
+	}
+}
+
+func TestBash_RequestedTimeoutFires(t *testing.T) {
+	out, err := Bash{}.Run(context.Background(), map[string]any{"command": "sleep 5", "timeout": float64(1)})
+	if err == nil {
+		t.Fatalf("expected timeout error, got nil (out=%q)", out)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "exceeded timeout 1s") {
+		t.Fatalf("expected deadline error naming the requested timeout, got %v", err)
+	}
+}
+
+func TestBash_TimeoutForResolution(t *testing.T) {
+	b := Bash{Timeout: 30 * time.Second}
+	cases := []struct {
+		name  string
+		input map[string]any
+		want  time.Duration
+	}{
+		{"absent uses configured default", map[string]any{}, 30 * time.Second},
+		{"null uses configured default", map[string]any{"timeout": nil}, 30 * time.Second},
+		{"json number", map[string]any{"timeout": float64(90)}, 90 * time.Second},
+		{"int", map[string]any{"timeout": 90}, 90 * time.Second},
+		{"int64", map[string]any{"timeout": int64(90)}, 90 * time.Second},
+		{"numeric string", map[string]any{"timeout": "90"}, 90 * time.Second},
+		{"above ceiling clamps", map[string]any{"timeout": float64(4000)}, MaxBashTimeout},
+		// Seconds beyond ~9.2e9 overflow a Duration, so these must be clamped
+		// in the float domain or they come out negative and expire at once.
+		{"overflowing value clamps", map[string]any{"timeout": 1e12}, MaxBashTimeout},
+		{"infinity clamps", map[string]any{"timeout": "Inf"}, MaxBashTimeout},
+		{"out of range string clamps", map[string]any{"timeout": "1e400"}, MaxBashTimeout},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := b.timeoutFor(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("timeoutFor = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBash_TimeoutForRejectsUnusableValues(t *testing.T) {
+	// Falling back to the default would kill a long command at two minutes
+	// with an error that never mentions the ignored argument.
+	for _, v := range []any{"soon", "5m", "", float64(0), float64(-5), "1e-400", math.NaN(), "NaN", true} {
+		if got, err := (Bash{}).timeoutFor(map[string]any{"timeout": v}); err == nil {
+			t.Fatalf("timeout %v: expected error, got %s", v, got)
+		}
+	}
+}
+
+func TestBash_ZeroTimeoutUsesPackageDefault(t *testing.T) {
+	got, err := (Bash{}).timeoutFor(map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != DefaultBashTimeout {
+		t.Fatalf("timeoutFor = %s, want %s", got, DefaultBashTimeout)
+	}
+}
+
+func TestBash_TimeoutForKeepsAHostDefaultAboveTheCeiling(t *testing.T) {
+	// A host that allows longer than the ceiling must not have a request for
+	// more time resolve to less than saying nothing at all.
+	b := Bash{Timeout: 15 * time.Minute}
+	got, err := b.timeoutFor(map[string]any{"timeout": float64(900)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 15*time.Minute {
+		t.Fatalf("timeoutFor = %s, want %s", got, 15*time.Minute)
+	}
+}
+
+func TestBash_UnusableTimeoutFailsBeforeRunning(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
+	out, err := Bash{}.Run(context.Background(), map[string]any{
+		"command": "touch " + shellQuote(marker),
+		"timeout": "soon",
+	})
+	if err == nil {
+		t.Fatalf("expected error for unusable timeout, got nil (out=%q)", out)
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("error should name the offending argument, got %v", err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("command ran despite an unusable timeout")
+	}
+}
+
+func TestBash_OuterDeadlineIsNotBlamedOnTheRequestedTimeout(t *testing.T) {
+	// The agent's run budget can expire first. Reporting the requested
+	// timeout then tells the model a command it just started took 10 minutes.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	out, err := Bash{}.Run(ctx, map[string]any{"command": "sleep 5", "timeout": float64(600)})
+	if err == nil {
+		t.Fatalf("expected deadline error, got nil (out=%q)", out)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected a deadline error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "agent's deadline") {
+		t.Fatalf("error should attribute the stop to the outer deadline, got %v", err)
+	}
+}
+
+func TestBash_SpecAdvertisesTimeout(t *testing.T) {
+	spec := Bash{Timeout: 2 * time.Minute}.Spec()
+	props, ok := spec.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("spec has no properties: %#v", spec.InputSchema)
+	}
+	prop, ok := props["timeout"].(map[string]any)
+	if !ok {
+		t.Fatalf("spec does not advertise timeout: %#v", props)
+	}
+	if prop["maximum"] != int(MaxBashTimeout.Seconds()) {
+		t.Fatalf("advertised maximum = %v, want %d", prop["maximum"], int(MaxBashTimeout.Seconds()))
+	}
+	desc, _ := prop["description"].(string)
+	if !strings.Contains(desc, "120") || !strings.Contains(desc, "600") {
+		t.Fatalf("description should name the default and maximum, got %q", desc)
+	}
+}
+
+func TestBash_SpecAdvertisesAHostDefaultAboveTheCeiling(t *testing.T) {
+	// Advertising the ceiling here would tell the model its own default is
+	// out of range.
+	spec := Bash{Timeout: 15 * time.Minute}.Spec()
+	props := spec.InputSchema["properties"].(map[string]any)
+	prop := props["timeout"].(map[string]any)
+	if prop["maximum"] != 900 {
+		t.Fatalf("advertised maximum = %v, want 900", prop["maximum"])
+	}
+	if desc, _ := prop["description"].(string); !strings.Contains(desc, "900") {
+		t.Fatalf("description should name the raised maximum, got %q", desc)
+	}
 }
