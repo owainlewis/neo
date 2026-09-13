@@ -103,13 +103,14 @@ func TestSkillLabelStaysAheadOfWorkflowProgress(t *testing.T) {
 		t.Fatal("expected review skill to start")
 	}
 	m.handleWorkflowEvent(workflow.Event{
-		Action: "create",
+		Generation: m.conversationGeneration,
+		Action:     "create",
 		State: workflow.State{Title: "Review current change", Items: []workflow.Item{
 			{ID: "1", Text: "Inspect full diff", Status: workflow.Pending},
 			{ID: "2", Text: "Run checks", Status: workflow.Pending},
 		}},
 	})
-	m.handleWorkflowEvent(workflow.Event{Action: "start", ID: "1"})
+	m.handleWorkflowEvent(workflow.Event{Generation: m.conversationGeneration, Action: "start", ID: "1"})
 
 	got := plain(m.statusLine())
 	if !strings.Contains(got, "Review · 1/2 Inspect full diff") {
@@ -207,5 +208,25 @@ func TestWorkflowToolPreservesStepsAndAttachesActivity(t *testing.T) {
 	}
 	if got := m.workflow.items[0].Detail; got != "Reading AGENTS.md" {
 		t.Fatalf("active step detail = %q, want attached activity", got)
+	}
+}
+
+// A workflow event produced by the previous turn but delivered after the next
+// one starts must not become the live checklist.
+func TestLateWorkflowEventFromPreviousTurnIsIgnored(t *testing.T) {
+	m := makeTestModel()
+	previous := m.conversationGeneration
+	m.submitUserTurn("next", "next", nil)
+	t.Cleanup(func() {
+		if m.sendCancel != nil {
+			m.sendCancel()
+		}
+	})
+
+	m.handleWorkflowEvent(workflow.Event{Generation: previous, Action: "create",
+		State: workflow.State{Title: "Old", Items: []workflow.Item{{ID: "1", Text: "old"}}}})
+
+	if m.workflow != nil {
+		t.Fatalf("late event from the previous turn became the live workflow: %+v", m.workflow)
 	}
 }

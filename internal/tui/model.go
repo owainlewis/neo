@@ -228,8 +228,9 @@ type model struct {
 	steer           func(string) bool
 	pendingSteering []string
 	queued          *queuedTurn
-	// conversationGeneration separates buffered workflow and subagent events
-	// produced before /clear from activity in the new conversation.
+	// conversationGeneration tags the work started by the current turn. It
+	// advances on every send and on /clear, so buffered workflow events from
+	// an earlier turn are recognised as stale and ignored.
 	conversationGeneration uint64
 
 	// mdStyleName is the glamour style chosen at startup. We re-use it when
@@ -619,9 +620,13 @@ func (m *model) restoreInput(texts ...string) {
 
 func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, images []string, expandSkillRefs bool) tea.Cmd {
 	// The previous turn's checklist stays in the transcript but stops being
-	// the live one, so a new plan never inherits stale running items.
+	// the live one, so a new plan never inherits stale running items. Workflow
+	// events travel on a buffered channel, so the generation advances per
+	// turn: a late event from the previous turn is then ignored rather than
+	// restored as the live plan.
 	m.workflow = nil
 	m.clearInflight()
+	m.conversationGeneration++
 	m.appendBlock(userBlock{text: displayText})
 	if len(images) > 0 {
 		m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
@@ -1234,7 +1239,7 @@ func (m *model) handleEvent(e agent.Event) {
 		}
 		// The agent tool reports a failed child inside a successful result.
 		failed := e.IsError || (e.Name == "agent" && !runStepOK(e.Text))
-		if e.IsError {
+		if failed {
 			m.turn.errors++
 		}
 		if !m.verbose && !failed && completed != nil {

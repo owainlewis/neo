@@ -194,8 +194,8 @@ func TestOldActivityStaysStaleAfterNewTurnStarts(t *testing.T) {
 		},
 	})
 
-	if m.conversationGeneration != newGeneration {
-		t.Fatalf("new turn changed conversation generation: got %d want %d", m.conversationGeneration, newGeneration)
+	if m.conversationGeneration == newGeneration || m.conversationGeneration == oldGeneration {
+		t.Fatalf("new turn should advance the generation past %d and %d, got %d", oldGeneration, newGeneration, m.conversationGeneration)
 	}
 	if m.workflow != nil {
 		t.Fatalf("old activity was relabeled for new turn: workflow=%#v", m.workflow)
