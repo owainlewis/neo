@@ -139,7 +139,7 @@ Add `EventParallelStart`. It is emitted only for groups containing at least two 
 
 Group IDs are opaque and unique within a turn. Positions are zero-based source positions. Consumers must not derive identity from names, arguments, timestamps, or arrival order.
 
-Tool execution context carries the same metadata internally. `AgentTool` passes it to `Supervisor.RunAgentPrompt`. Attributed factory events add:
+Tool execution context carries the same metadata internally. `AgentTool` passes it to `Supervisor.RunAgentPrompt`. Attributed subagent events add:
 
 ```go
 CallID   string
@@ -171,7 +171,7 @@ No event is added for group completion. The TUI settles a group when every decla
 - Unit-test status priority with workflow, subagents, tools, approval, queue, and narrow widths.
 - Add plain-text golden snapshots for tool and subagent groups at 40, 80, and 120 columns.
 - Test missing, duplicate, and late events.
-- Run the race detector over agent, factory, and TUI packages.
+- Run the race detector over agent, subagent, and TUI packages.
 - Manually verify a three-read group and three inspect subagents in a real TUI session.
 
 ## Risks
@@ -179,7 +179,7 @@ No event is added for group completion. The TUI settles a group when every decla
 - More event metadata can couple runtime and UI. Mitigation: keep IDs opaque and lifecycle semantics generic.
 - Parallel child activity can be noisy. Mitigation: show only the latest child line and hide successful result bodies in concise mode.
 - New blocks can recreate earlier layout jumping. Mitigation: allocate every row atomically at group start and never collapse a live or completed group.
-- Dropped factory events can leave stale child detail. Mitigation: use parent tool results as the authoritative completion fallback.
+- Dropped subagent events can leave stale child detail. Mitigation: use parent tool results as the authoritative completion fallback.
 
 ## Out of scope
 
