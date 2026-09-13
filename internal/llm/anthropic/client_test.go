@@ -544,3 +544,37 @@ func TestWireMessages_DropsRawAndUnsupportedBlocks(t *testing.T) {
 		t.Fatalf("raw replay data must not reach the wire: %+v", out[0].Content[0])
 	}
 }
+
+// The Messages API requires input on every tool_use. ContentBlock.Input is
+// omitempty, so an empty map used to vanish from the wire and the replayed
+// transcript was rejected.
+func TestWireMessages_KeepsEmptyToolUseInput(t *testing.T) {
+	for _, input := range []map[string]any{nil, {}} {
+		out := wireMessages([]llm.Message{
+			{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+				{Type: "tool_use", ID: "t1", Name: "ls", Input: input},
+			}},
+		}, false)
+		b, err := json.Marshal(out[0].Content[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatal(err)
+		}
+		in, ok := got["input"].(map[string]any)
+		if !ok || len(in) != 0 {
+			t.Fatalf("input %v: wire = %s, want \"input\":{}", input, b)
+		}
+	}
+	out := wireMessages([]llm.Message{
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{
+			{Type: "tool_use", ID: "t1", Name: "read", Input: map[string]any{"path": "a"}},
+		}},
+	}, false)
+	b, _ := json.Marshal(out[0].Content[0])
+	if !strings.Contains(string(b), `"input":{"path":"a"}`) {
+		t.Fatalf("non-empty input lost: %s", b)
+	}
+}

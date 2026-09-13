@@ -196,8 +196,7 @@ func toMessages(m llm.Message) []Message {
 			case "text":
 				content.WriteString(b.Text)
 			case "tool_use":
-				args, _ := json.Marshal(b.Input)
-				calls = append(calls, ToolCall{ID: b.ID, Type: "function", Function: FunctionCall{Name: b.Name, Arguments: string(args)}})
+				calls = append(calls, ToolCall{ID: b.ID, Type: "function", Function: FunctionCall{Name: b.Name, Arguments: string(llm.MarshalToolInput(b.Input))}})
 			}
 		}
 		if content.Len() == 0 && len(calls) == 0 {

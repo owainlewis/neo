@@ -105,3 +105,17 @@ type Provider interface {
 	Name() string
 	Complete(ctx context.Context, req Request) (*Response, error)
 }
+
+// MarshalToolInput renders a tool call's input for the wire. A nil or empty
+// map becomes {} rather than null or nothing: every provider requires an
+// object on a tool call, and a zero-argument call is a legal call.
+func MarshalToolInput(input map[string]any) json.RawMessage {
+	if len(input) == 0 {
+		return json.RawMessage("{}")
+	}
+	b, err := json.Marshal(input)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return b
+}

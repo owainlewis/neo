@@ -201,7 +201,7 @@ type inlineData struct {
 type functionCall struct {
 	ID   string         `json:"id,omitempty"`
 	Name string         `json:"name"`
-	Args map[string]any `json:"args,omitempty"`
+	Args map[string]any `json:"args"`
 }
 
 type functionResponse struct {
@@ -314,7 +314,11 @@ func toParts(blocks []llm.ContentBlock, toolRefs map[string]toolRef) []part {
 				parts = append(parts, p)
 				wireID = p.FunctionCall.ID
 			} else {
-				parts = append(parts, part{FunctionCall: &functionCall{ID: b.ID, Name: b.Name, Args: b.Input}})
+				args := b.Input
+				if args == nil {
+					args = map[string]any{}
+				}
+				parts = append(parts, part{FunctionCall: &functionCall{ID: b.ID, Name: b.Name, Args: args}})
 			}
 			toolRefs[b.ID] = toolRef{name: b.Name, wireID: wireID}
 		case "tool_result":
