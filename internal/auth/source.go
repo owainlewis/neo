@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -31,8 +32,13 @@ func NewTokenSource(store *Store, key string) *TokenSource {
 	return &TokenSource{store: store, key: key, refresh: RefreshOpenAI}
 }
 
+// ErrLoginRequired marks credential failures that only `neo login` can fix:
+// nothing stored, no refresh token, or a refresh the token endpoint rejected.
+// Callers use it to avoid retrying what cannot succeed.
+var ErrLoginRequired = errors.New("run `neo login`")
+
 // Token returns current, non-expired credentials, refreshing if needed. It
-// returns an error if no credentials are stored (the user must log in).
+// returns an error wrapping ErrLoginRequired when the user must log in again.
 func (ts *TokenSource) Token(ctx context.Context) (Credentials, error) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
@@ -42,13 +48,13 @@ func (ts *TokenSource) Token(ctx context.Context) (Credentials, error) {
 		return Credentials{}, err
 	}
 	if !ok {
-		return Credentials{}, fmt.Errorf("not logged in: run `neo login`")
+		return Credentials{}, fmt.Errorf("not logged in: %w", ErrLoginRequired)
 	}
 	if !creds.Expired(refreshSkew) {
 		return creds, nil
 	}
 	if creds.RefreshToken == "" {
-		return Credentials{}, fmt.Errorf("session expired and no refresh token; run `neo login`")
+		return Credentials{}, fmt.Errorf("session expired and no refresh token; %w", ErrLoginRequired)
 	}
 
 	refreshed, err := ts.refresh(ctx, ts.httpc, creds.RefreshToken)

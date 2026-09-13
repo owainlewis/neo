@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/owainlewis/neo/internal/llm/google"
 	"github.com/owainlewis/neo/internal/llm/openai"
 	"github.com/owainlewis/neo/internal/llm/openrouter"
+	"github.com/owainlewis/neo/internal/llm/retry"
 	"github.com/owainlewis/neo/internal/session"
 	"github.com/owainlewis/neo/internal/tui"
 )
@@ -79,6 +81,12 @@ type codexCredentials struct{ ts *auth.TokenSource }
 func (c codexCredentials) Token(ctx context.Context) (accessToken, accountID string, err error) {
 	cr, err := c.ts.Token(ctx)
 	if err != nil {
+		// Only `neo login` fixes a missing or rejected login, so the provider
+		// must not spend its retry budget on it. A transient refresh failure
+		// (network, token endpoint 5xx) stays retryable.
+		if errors.Is(err, auth.ErrLoginRequired) {
+			err = retry.Permanent(err)
+		}
 		return "", "", err
 	}
 	return cr.AccessToken, cr.AccountID, nil

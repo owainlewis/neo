@@ -65,6 +65,18 @@ Unknown stop reasons fail the turn instead of repeating provider calls.
 Anthropic's `model_context_window_exceeded` ends the turn with a typed truncation
 error and preserves any partial response text.
 
+Provider HTTP clients set no total timeout: a fixed deadline caps how long one
+generation may take, and the previous five-minute limit cut off long reasoning
+turns and then retried them. Instead `retry.NewHTTPClient` bounds the wait for
+response headers (10 minutes, generous because a non-streaming API sends them
+only when generation finishes) and every body read is guarded by
+`retry.IdleBody`, which cancels the request when the provider sends nothing for
+3 minutes. The retry helper repeats transient transport errors and retryable
+statuses only; timeouts, context deadlines, and errors marked with
+`retry.Permanent` (a missing login, a malformed stream) fail after one attempt.
+The caller's context remains the overall bound (Ctrl-C in chat, `--timeout` in
+headless runs).
+
 Provider HTTP failures surface as `llm.HTTPError`. Every adapter, and the retry
 helper when it gives up, parses the shared `{"error":{...}}` body shape into one
 line such as `anthropic 401 authentication_error: API key is invalid. (check

@@ -57,9 +57,9 @@ func Do(ctx context.Context, opts Options, attemptFn AttemptFunc) (AttemptResult
 				logx.Debug("provider request canceled", "provider", opts.Provider, "error", ctx.Err().Error())
 				return AttemptResult{}, ctx.Err()
 			}
-			if attempt == maxRetries {
+			if attempt == maxRetries || !retryableTransportError(err) {
 				logx.Debug("provider transport failed", "provider", opts.Provider, "attempt", attempt+1, "error", err.Error())
-				return AttemptResult{}, err
+				return AttemptResult{}, unwrapPermanent(err)
 			}
 			delay := Delay(baseDelay, attempt, Absent())
 			logx.Debug("provider retry scheduled",

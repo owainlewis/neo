@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -293,5 +294,47 @@ func TestTokenSource_NotLoggedIn(t *testing.T) {
 	ts := NewTokenSource(store, ProviderOpenAICodex)
 	if _, err := ts.Token(context.Background()); err == nil {
 		t.Fatal("expected error when not logged in")
+	}
+}
+
+func TestTokenSourceMarksLoginRequired(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	src := NewTokenSource(store, ProviderOpenAICodex)
+	if _, err := src.Token(context.Background()); !errors.Is(err, ErrLoginRequired) {
+		t.Fatalf("missing credentials error = %v, want ErrLoginRequired", err)
+	}
+
+	expired := Credentials{AccessToken: "old", ExpiresAt: time.Now().Add(-time.Hour)}
+	if err := store.Set(ProviderOpenAICodex, expired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Token(context.Background()); !errors.Is(err, ErrLoginRequired) {
+		t.Fatalf("no refresh token error = %v, want ErrLoginRequired", err)
+	}
+
+	expired.RefreshToken = "rt"
+	if err := store.Set(ProviderOpenAICodex, expired); err != nil {
+		t.Fatal(err)
+	}
+	src.refresh = func(context.Context, *http.Client, string) (Credentials, error) {
+		return Credentials{}, errors.New("connection reset")
+	}
+	if _, err := src.Token(context.Background()); err == nil || errors.Is(err, ErrLoginRequired) {
+		t.Fatalf("transient refresh error = %v, want a plain error", err)
+	}
+}
+
+func TestPostTokenRejectedGrantRequiresLogin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer srv.Close()
+	old := openAITokenURL
+	openAITokenURL = srv.URL
+	defer func() { openAITokenURL = old }()
+	_, err := RefreshOpenAI(context.Background(), srv.Client(), "rt")
+	if err == nil || !errors.Is(err, ErrLoginRequired) {
+		t.Fatalf("400 from token endpoint = %v, want ErrLoginRequired", err)
 	}
 }

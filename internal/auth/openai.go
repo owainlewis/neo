@@ -267,6 +267,11 @@ func postToken(ctx context.Context, httpc *http.Client, form url.Values) (Creden
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized {
+			// invalid_grant and friends: the stored token is no good. Anything
+			// else (5xx, 429) may be transient and is left retryable.
+			return Credentials{}, fmt.Errorf("openai token endpoint %d: %s; %w", resp.StatusCode, string(body), ErrLoginRequired)
+		}
 		return Credentials{}, fmt.Errorf("openai token endpoint %d: %s", resp.StatusCode, string(body))
 	}
 

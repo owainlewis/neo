@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"time"
@@ -35,7 +34,7 @@ func New() (*Client, error) {
 	return &Client{
 		APIKey:     key,
 		Endpoint:   defaultEndpoint,
-		HTTP:       &http.Client{Timeout: 5 * time.Minute},
+		HTTP:       retry.NewHTTPClient(),
 		MaxRetries: 4,
 		BaseDelay:  500 * time.Millisecond,
 	}, nil
@@ -94,6 +93,8 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 // doRequest issues one POST and returns the body, status, and any Retry-After
 // hint from the response header.
 func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, retry.Absent(), err
@@ -105,10 +106,9 @@ func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry
 	if err != nil {
 		return nil, 0, retry.Absent(), err
 	}
-	defer resp.Body.Close()
 	// Propagate the read error. Discarding it turns a cancelled request into an
 	// apparently successful empty body, which then surfaces as a confusing
 	// decode failure instead of the cancellation that actually happened.
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := retry.ReadAllIdle(resp.Body, cancel)
 	return raw, resp.StatusCode, retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()), err
 }
