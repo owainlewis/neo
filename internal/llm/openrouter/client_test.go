@@ -17,6 +17,15 @@ func TestNewRequiresAPIKey(t *testing.T) {
 	if !strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
 		t.Fatalf("error = %q", err.Error())
 	}
+	for _, want := range []string{
+		"https://openrouter.ai/keys",
+		"export OPENROUTER_API_KEY=\"your-api-key\"",
+		"neo doctor",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
 }
 
 func TestNewUsesOpenRouterDefaults(t *testing.T) {

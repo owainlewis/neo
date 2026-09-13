@@ -39,6 +39,15 @@ func TestNew_MissingAPIKey(t *testing.T) {
 	if !strings.Contains(err.Error(), "GOOGLE_API_KEY") {
 		t.Fatalf("error should mention GOOGLE_API_KEY, got %v", err)
 	}
+	for _, want := range []string{
+		"https://aistudio.google.com/app/apikey",
+		"export GOOGLE_API_KEY=\"your-api-key\"",
+		"neo doctor",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
 }
 
 func TestComplete_BuildsRequestWithSystemPromptMessagesAndTools(t *testing.T) {

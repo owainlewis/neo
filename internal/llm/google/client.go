@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 const (
 	DefaultEndpoint = "https://generativelanguage.googleapis.com/v1beta/models"
 	DefaultModel    = "gemini-3.5-flash"
+	apiKeyURL       = "https://aistudio.google.com/app/apikey"
 )
 
 // Client talks to Google's Gemini GenerateContent API.
@@ -34,9 +34,9 @@ type Client struct {
 
 // New constructs a Gemini provider from GOOGLE_API_KEY.
 func New() (*Client, error) {
-	key := os.Getenv("GOOGLE_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("GOOGLE_API_KEY is not set")
+	key, err := llm.APIKeyFromEnv("GOOGLE_API_KEY", apiKeyURL)
+	if err != nil {
+		return nil, err
 	}
 	return &Client{
 		APIKey:     key,

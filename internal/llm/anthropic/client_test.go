@@ -87,6 +87,25 @@ func newTestClient(srv *httptest.Server) *Client {
 	}
 }
 
+func TestNewAPIKeyGuidance(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	_, err := New()
+	if err == nil {
+		t.Fatal("expected missing key error")
+	}
+	for _, want := range []string{
+		"ANTHROPIC_API_KEY",
+		"https://console.anthropic.com/settings/keys",
+		"export ANTHROPIC_API_KEY=\"your-api-key\"",
+		"neo doctor",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
 func TestComplete_HappyPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("x-api-key"); got != "test" {
