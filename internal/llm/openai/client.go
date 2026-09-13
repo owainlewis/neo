@@ -75,7 +75,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			"status", status,
 			"body", logx.PayloadValue(string(raw)),
 		)
-		return nil, fmt.Errorf("openai %d: %s", status, string(raw))
+		return nil, llm.NewHTTPError("openai", status, raw)
 	}
 
 	var out apiResponse

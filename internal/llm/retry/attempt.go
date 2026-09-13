@@ -2,9 +2,9 @@ package retry
 
 import (
 	"context"
-	"fmt"
 	"time"
 
+	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
 )
 
@@ -76,7 +76,7 @@ func Do(ctx context.Context, opts Options, attemptFn AttemptFunc) (AttemptResult
 		}
 
 		if retryable(result.Status) {
-			lastErr = fmt.Errorf("%s %d: %s", label, result.Status, string(result.Body))
+			lastErr = llm.NewHTTPError(label, result.Status, result.Body)
 			if attempt == maxRetries {
 				logx.Debug("provider retries exhausted",
 					"provider", opts.Provider,

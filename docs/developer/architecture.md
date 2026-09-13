@@ -64,3 +64,13 @@ while `pause_turn` explicitly replays the assistant response and continues.
 Unknown stop reasons fail the turn instead of repeating provider calls.
 Anthropic's `model_context_window_exceeded` ends the turn with a typed truncation
 error and preserves any partial response text.
+
+Provider HTTP failures surface as `llm.HTTPError`. Every adapter, and the retry
+helper when it gives up, parses the shared `{"error":{...}}` body shape into one
+line such as `anthropic 401 authentication_error: API key is invalid. (check
+ANTHROPIC_API_KEY)`; 401 and 403 responses carry a hint naming the credential
+to check, and an unparseable body is trimmed to a short excerpt. The raw body
+stays on the error for debug logs but is never printed. The agent both emits an
+`EventError` and returns the same error from `Send`; the TUI renders it once,
+from the returned error, and treats cancellation as a notice rather than an
+error.

@@ -258,7 +258,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 			"status", result.Status,
 			"body", logx.PayloadValue(string(result.Body)),
 		)
-		return nil, fmt.Errorf("anthropic %d: %s", result.Status, string(result.Body))
+		return nil, llm.NewHTTPError("anthropic", result.Status, result.Body)
 	}
 	logx.Debug("provider response",
 		"provider", c.Name(),

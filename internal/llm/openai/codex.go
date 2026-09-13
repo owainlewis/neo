@@ -88,7 +88,7 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 			"status", status,
 			"body", logx.PayloadValue(string(raw)),
 		)
-		return nil, fmt.Errorf("openai-codex %d: %s", status, string(raw))
+		return nil, llm.NewHTTPError("openai-codex", status, raw)
 	}
 
 	logx.Debug("provider response",

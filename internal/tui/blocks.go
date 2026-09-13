@@ -23,7 +23,12 @@ type userBlock struct{ text string }
 
 func (b userBlock) render(width int, _ *glamour.TermRenderer) string {
 	prefix := styAccent.Render("›")
-	return prefix + " " + b.text
+	return prefix + " " + indentContinuation(wrap(b.text, width-2))
+}
+
+// indentContinuation keeps wrapped lines aligned under a two-cell prefix.
+func indentContinuation(s string) string {
+	return strings.ReplaceAll(s, "\n", "\n  ")
 }
 
 type textBlock struct{ text string }
@@ -465,13 +470,13 @@ func runStepOK(text string) bool {
 type noticeBlock struct{ text string }
 
 func (b noticeBlock) render(width int, _ *glamour.TermRenderer) string {
-	return styMuted.Render("· " + b.text)
+	return styMuted.Render("· " + indentContinuation(wrap(b.text, width-2)))
 }
 
 type errorBlock struct{ err error }
 
 func (b errorBlock) render(width int, _ *glamour.TermRenderer) string {
-	return styErr.Render("! " + b.err.Error())
+	return styErr.Render("! " + indentContinuation(wrap(b.err.Error(), width-2)))
 }
 
 type maxTurnsBlock struct {
