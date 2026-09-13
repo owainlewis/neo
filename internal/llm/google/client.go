@@ -313,8 +313,8 @@ func toParts(blocks []llm.ContentBlock, toolRefs map[string]toolRef) []part {
 			if p, ok := replayPart(b); ok && p.FunctionCall != nil && p.FunctionCall.Name == b.Name {
 				if p.FunctionCall.Args == nil {
 					// Gemini omits args on a zero-argument call; args is
-					// required on replay, so send {} rather than null.
-					p.FunctionCall.Args = map[string]any{}
+					// required on replay, so send {} rather than nothing.
+					p = withEmptyArgs(p)
 				}
 				parts = append(parts, p)
 				wireID = p.FunctionCall.ID
@@ -350,6 +350,40 @@ func toParts(blocks []llm.ContentBlock, toolRefs map[string]toolRef) []part {
 		}
 	}
 	return parts
+}
+
+// withEmptyArgs sets functionCall.args to {} on a preserved part. The raw
+// bytes are patched rather than dropped so any opaque fields Gemini attached
+// to the call are still replayed verbatim.
+func withEmptyArgs(p part) part {
+	p.FunctionCall.Args = map[string]any{}
+	if len(p.Raw) == 0 {
+		return p
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(p.Raw, &raw); err != nil {
+		p.Raw = nil
+		return p
+	}
+	var call map[string]json.RawMessage
+	if err := json.Unmarshal(raw["functionCall"], &call); err != nil {
+		p.Raw = nil
+		return p
+	}
+	call["args"] = json.RawMessage("{}")
+	callBytes, err := json.Marshal(call)
+	if err != nil {
+		p.Raw = nil
+		return p
+	}
+	raw["functionCall"] = callBytes
+	patched, err := json.Marshal(raw)
+	if err != nil {
+		p.Raw = nil
+		return p
+	}
+	p.Raw = patched
+	return p
 }
 
 // replayPart accepts Gemini thought metadata and raw function-call parts. The
