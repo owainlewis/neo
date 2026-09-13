@@ -81,7 +81,7 @@ This encourages native multi-call output. The runtime does not need to force or 
 
 Live child events may interleave because the work is genuinely concurrent. Existing node IDs preserve attribution. The parent-facing transcript remains deterministic.
 
-The parent tool-call metadata is carried through the internal execution context into the supervisor. Factory events include the parent call and group identity so the TUI can correlate each child with its source-ordered placeholder. This metadata is runtime-only and never appears in the model-facing tool schema. See `docs/parallel-execution-ui/design.md`.
+The parent tool-call metadata is carried through the internal execution context into the supervisor. Subagent events include the parent call and group identity so the TUI can correlate each child with its source-ordered placeholder. This metadata is runtime-only and never appears in the model-facing tool schema. See `docs/parallel-execution-ui/design.md`.
 
 ## Compatibility
 
@@ -143,8 +143,8 @@ Inspection without shell cannot query diffs, staged state, blame, or history. Th
 ## Checks
 
 ```sh
-go test ./internal/factory ./internal/agent ./cmd/neo
-go test -race ./internal/factory ./internal/agent ./internal/tui
+go test ./internal/subagent ./internal/agent ./cmd/neo
+go test -race ./internal/subagent ./internal/agent ./internal/tui
 go test ./...
 ```
 
@@ -158,10 +158,10 @@ Manual smoke test:
 
 ## Relevant Code
 
-- `internal/factory/supervisor.go`
-- `internal/factory/runner.go`
-- `internal/factory/supervisor_test.go`
-- `internal/factory/runner_test.go`
+- `internal/subagent/supervisor.go`
+- `internal/subagent/runner.go`
+- `internal/subagent/supervisor_test.go`
+- `internal/subagent/runner_test.go`
 - `internal/agent/agent.go`
-- `cmd/neo/factory.go`
+- `cmd/neo/subagent.go`
 - `docs/developer/tools.md`

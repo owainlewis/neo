@@ -2,7 +2,7 @@
 
 > **Status:** Current implementation
 >
-> **Verification basis:** `b70f4a1` (`origin/main` on 2026-08-01)
+> **Verification basis:** `97c27d3` (`origin/main` on 2026-09-13)
 
 ## 1. Executive Summary
 
@@ -86,7 +86,7 @@ internal/llm          internal/tools          internal/approval
      └──────────── internal/agent ────────────────────┘
                               ▲
                               │
-              internal/factory and internal/tui
+             internal/subagent and internal/tui
                               ▲
                               │
                            cmd/neo
@@ -105,7 +105,7 @@ Key rules:
 - `internal/tools` defines executable capabilities.
 - `internal/approval` matches optional interactive confirmation preferences.
 - `internal/agent` coordinates providers, tools, and confirmation barriers.
-- `internal/factory` reuses the core loop for supervised child agents.
+- `internal/subagent` reuses the core loop for supervised child agents.
 - `internal/tui` consumes events and supplies user interaction. It does not
   implement agent decisions.
 - `cmd/neo` owns construction, feature selection, and cross-package wiring.
@@ -334,7 +334,7 @@ arguments cannot declare themselves parallel-safe.
 | `grep` | `internal/tools` | Regex search under the workspace, capped by match count. |
 | `glob` | `internal/tools` | Glob search under the workspace, capped by match count. |
 | `workflow` | `internal/workflow` | Emits checklist state for the interactive UI. |
-| `agent` | `internal/factory` | Runs a supervised child agent and returns its report. |
+| `agent` | `internal/subagent` | Runs a supervised child agent and returns its report. |
 
 The composition root decides which tools are present. The core loop does not
 special-case any tool name.
@@ -403,7 +403,7 @@ cards. Errors and direct shell command output remain visible.
 
 ## 8. Subagent Architecture
 
-Interactive chat can expose the `agent` tool implemented by `internal/factory`.
+Interactive chat can expose the `agent` tool implemented by `internal/subagent`.
 The parent chat agent remains the coordinator. Each child is a fresh core
 `agent.Agent` with a self-contained prompt, no parent transcript, and no nested
 `agent` tool.
@@ -515,7 +515,7 @@ expanded into a user turn when the user references `$name` or invokes
 | `internal/auth/` | Device-code login, token refresh, credential storage | Used only for OpenAI subscription auth. |
 | `internal/compact/` | Compactor interface, transcript summarization, safe splitting | No session persistence or UI. |
 | `internal/config/` | Config discovery, defaults, validation, feature flags | No provider construction. |
-| `internal/factory/` | Child runner, supervisor budgets, attribution, `agent` tool | Does not interpret child results or permit nested children. |
+| `internal/subagent/` | Child runner, supervisor budgets, attribution, `agent` tool | Does not interpret child results or permit nested children. |
 | `internal/llm/` | Shared request, response, message, content, usage, and provider types | No network transport in the root package. |
 | `internal/llm/chatcompletions/` | Reusable OpenAI-compatible wire conversion and HTTP client | Used by provider setup packages such as OpenRouter. |
 | `internal/llm/<provider>/` | Vendor wire conversion, HTTP transport, retry integration | Does not execute tools or own transcripts. |

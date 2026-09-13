@@ -20,9 +20,8 @@ const defaultEndpoint = "https://api.anthropic.com/v1/messages"
 const defaultVersion = "2023-06-01"
 
 // defaultMaxTokens caps output for a single completion. Current Claude models
-// allow far more, but Neo sends non-streaming requests, so the ceiling is what
-// fits comfortably inside the HTTP timeout rather than what the model supports.
-// Raise this once responses stream.
+// allow far more, but this conservative default keeps individual responses
+// bounded while the streaming transport supports longer generation times.
 const defaultMaxTokens = 16384
 
 type Client struct {

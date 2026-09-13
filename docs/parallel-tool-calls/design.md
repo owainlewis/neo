@@ -126,8 +126,8 @@ Out of scope:
 ## Checks
 
 ```sh
-go test ./internal/agent ./internal/tools ./internal/factory
-go test -race ./internal/agent ./internal/tools ./internal/factory ./internal/tui
+go test ./internal/agent ./internal/tools ./internal/subagent
+go test -race ./internal/agent ./internal/tools ./internal/subagent ./internal/tui
 go test ./...
 ```
 
