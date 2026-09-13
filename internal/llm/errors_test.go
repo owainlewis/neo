@@ -3,6 +3,7 @@ package llm
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestNewHTTPErrorParsesProviderShapes(t *testing.T) {
@@ -36,5 +37,10 @@ func TestNewHTTPErrorTrimsLongUnparseableBodies(t *testing.T) {
 	got := NewHTTPError("openai", 500, []byte(strings.Repeat("x", 1000))).Error()
 	if len(got) > 240 || !strings.HasSuffix(got, "…") {
 		t.Fatalf("long body not trimmed: %d chars", len(got))
+	}
+	// Multibyte bodies are cut on a rune boundary, not a byte boundary.
+	got = NewHTTPError("openai", 500, []byte(strings.Repeat("é", 1000))).Error()
+	if !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
+		t.Fatalf("multibyte body cut mid-rune: %q", got[len(got)-12:])
 	}
 }

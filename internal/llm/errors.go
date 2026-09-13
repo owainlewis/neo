@@ -84,10 +84,12 @@ func (e *HTTPError) hint() string {
 	return ""
 }
 
+// excerpt collapses whitespace and cuts at n runes, never mid-character.
 func excerpt(s string, n int) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(runes[:n]) + "…"
 }
