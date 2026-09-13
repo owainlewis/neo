@@ -383,7 +383,7 @@ steering. It does not call providers directly.
 
 ```text
 Agent events ───────────────┐
-Factory supervisor events ─┼─→ Bubble Tea messages → model.Update → View
+Subagent supervisor events ┼─→ Bubble Tea messages → model.Update → View
 Workflow tool events ──────┘
 
 Approval request ←──────────── TUI choice
