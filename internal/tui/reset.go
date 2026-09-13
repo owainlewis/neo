@@ -26,6 +26,7 @@ func (m *model) resetConversation() {
 
 	m.ag.Clear()
 	m.blocks = nil
+	m.rendered = nil
 	m.busy = false
 	m.busySince = time.Time{}
 	m.currentTool = nil

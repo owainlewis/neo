@@ -65,6 +65,7 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.updateInput(msg)
 	case "ctrl+l":
 		m.blocks = nil
+		m.rendered = nil
 		m.refreshViewport()
 	case "ctrl+o":
 		m.toggleLatestToolResultExpansion()
