@@ -94,7 +94,7 @@ func (r *AgentRunner) compactor(provider llm.Provider, model string) compact.Com
 func (r *AgentRunner) registryWithOptions(dir string, opts RunOptions) *tools.Registry {
 	bashTimeout := r.BashTimeout
 	if bashTimeout <= 0 {
-		bashTimeout = 2 * time.Minute
+		bashTimeout = tools.DefaultBashTimeout
 	}
 	all := tools.NewRegistry(append([]tools.Tool{
 		tools.Bash{Timeout: bashTimeout, CWD: dir},
