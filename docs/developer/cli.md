@@ -44,7 +44,7 @@ the agent they were started with, so `neo resume` keeps it unless a different
 - `neo run` applies a `10m` timeout, does not create or update sessions, and supports `--json` for a machine-readable summary containing elapsed time and tool counts.
 - Headless runs receive the standard tool registry and do not use interactive `tool_approvals`. Run Neo inside a VM or sandbox that provides the required filesystem, process, network, and credential boundaries.
 - The removed `--permission` option returns migration guidance instead of being silently accepted.
-- `neo run` accepts prompt text as arguments and prepends piped stdin when present, e.g. `cat prompt.md | neo run --json`.
+- `neo run` accepts prompt text as arguments. Piped stdin is the prompt when no argument is given (`cat prompt.md | neo run --json`), and is prepended to the arguments when one of them is `-` (`git diff | neo run "Review this diff" -`). stdin is not read otherwise, so a harness that holds an idle pipe open cannot block the run.
 - `neo doctor` is local-first: it checks config, required credential presence, session store access, git availability, and whether the current directory is a git workspace without calling providers or printing secrets.
 - The interactive `@` file picker indexes files under Neo's effective startup working directory and inserts paths relative to that directory.
 - `neo login` prints the OpenAI Codex device-code URL and one-time code, then stores refreshable subscription credentials in `~/.neo/auth.json` with file permissions intended to protect secrets.

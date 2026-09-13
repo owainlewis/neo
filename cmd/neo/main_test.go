@@ -636,12 +636,48 @@ func TestParseHeadlessArgsReadsInjectedPipedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, prompt, err := parseHeadlessArgs([]string{"from", "args"}, input)
+	_, prompt, err := parseHeadlessArgs(nil, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prompt != "from stdin" {
+		t.Fatalf("prompt = %q, want piped stdin as the prompt", prompt)
+	}
+
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, prompt, err = parseHeadlessArgs([]string{"from", "args", "-"}, input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if prompt != "from stdin from args" {
-		t.Fatalf("prompt = %q, want piped stdin followed by arguments", prompt)
+		t.Fatalf("prompt = %q, want piped stdin followed by arguments when - is given", prompt)
+	}
+}
+
+// A prompt argument must not read stdin: a harness that keeps an idle pipe
+// open would otherwise block forever.
+func TestParseHeadlessArgsIgnoresStdinWhenPromptGiven(t *testing.T) {
+	r, w := io.Pipe()
+	t.Cleanup(func() { _ = w.Close() })
+	done := make(chan struct{})
+	var prompt string
+	var err error
+	go func() {
+		defer close(done)
+		_, prompt, err = parseHeadlessArgs([]string{"from", "args"}, r)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parseHeadlessArgs blocked on an idle stdin pipe")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prompt != "from args" {
+		t.Fatalf("prompt = %q, want arguments only", prompt)
 	}
 }
 
