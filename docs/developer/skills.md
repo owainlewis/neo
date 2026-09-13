@@ -21,8 +21,8 @@ model unchanged.
 | `build` | Implement, test, self-review, simplify, and verify a complete change. |
 | `review` | Review code, PR feedback, or CI results with fresh context and report prioritized findings. It does not change code unless asked. |
 
-The built-ins are embedded from `internal/skills/defaults/<name>/SKILL.md` and
-are always available, even when `features.skills` is off.
+The built-ins are embedded from `internal/skills/defaults/<name>.md` and are
+always available, even when `features.skills` is off.
 
 ## Discovery and override
 

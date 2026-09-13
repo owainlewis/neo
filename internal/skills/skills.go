@@ -31,17 +31,18 @@ import (
 const fileName = "SKILL.md"
 
 // defaultsFS holds the skills Neo ships with: design, plan, build, and
-// review. They are ordinary SKILL.md files, so a user or project skill with
-// the same name replaces one outright.
+// review. Each is an ordinary SKILL.md body stored flat as <name>.md (a
+// build/ directory would trip common global gitignores), so a user or project
+// skill with the same name replaces one outright.
 //
-//go:embed defaults/*/SKILL.md
+//go:embed defaults/*.md
 var defaultsFS embed.FS
 
 // Defaults returns fresh copies of the built-in skills in product order.
 func Defaults() []Skill {
 	var out []Skill
 	for _, name := range []string{"design", "plan", "build", "review"} {
-		path := "defaults/" + name + "/" + fileName
+		path := "defaults/" + name + ".md"
 		b, err := fs.ReadFile(defaultsFS, path)
 		if err != nil {
 			panic("skills: missing embedded default " + path)
