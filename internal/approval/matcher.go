@@ -3,7 +3,6 @@ package approval
 import (
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
 // Matcher reports whether an interactive tool call needs user confirmation.
@@ -37,16 +36,15 @@ func (m Matcher) requiresCommand(command string) bool {
 		if len(words) == 0 {
 			continue
 		}
-		segment := strings.Join(words, " ")
 		for _, rule := range m.rules {
-			if hasCommandPrefix(segment, strings.Join(strings.Fields(rule), " ")) {
+			if prefix := commandSegments(rule); len(prefix) == 1 && hasWordPrefix(words, prefix[0]) {
 				return true
 			}
 		}
 		// Inspect the literal script supplied to the common shell -c wrappers.
 		// Other wrappers and shell expansions are deliberately not evaluated.
-		if len(words) >= 3 && (words[0] == "sh" || words[0] == "bash") && words[1] == "-c" {
-			if m.requiresCommand(words[2]) {
+		if script, ok := shellScript(words); ok {
+			if m.requiresCommand(script) {
 				return true
 			}
 		}
@@ -61,7 +59,7 @@ func commandSegments(command string) [][]string {
 	var words []string
 	var word strings.Builder
 	var quote rune
-	started, escaped := false, false
+	started, escaped, comment := false, false, false
 	flushWord := func() {
 		if started {
 			words = append(words, word.String())
@@ -77,6 +75,13 @@ func commandSegments(command string) [][]string {
 		}
 	}
 	for _, ch := range command {
+		if comment {
+			if ch == '\n' {
+				comment = false
+				flushSegment()
+			}
+			continue
+		}
 		if escaped {
 			if ch != '\n' {
 				// In double quotes, backslashes only escape shell-special characters.
@@ -102,6 +107,8 @@ func commandSegments(command string) [][]string {
 			continue
 		}
 		switch {
+		case ch == '#' && !started:
+			comment = true
 		case ch == '\'' || ch == '"':
 			quote = ch
 			started = true
@@ -136,14 +143,51 @@ func isAssignment(word string) bool {
 	return true
 }
 
-func hasCommandPrefix(command, prefix string) bool {
-	if command == prefix {
-		return true
-	}
-	if !strings.HasPrefix(command, prefix) {
+// Compare decoded words so quoted whitespace does not erase argument boundaries.
+func hasWordPrefix(words, prefix []string) bool {
+	if len(prefix) == 0 || len(words) < len(prefix) {
 		return false
 	}
+	for i, word := range prefix {
+		if words[i] != word {
+			return false
+		}
+	}
+	return true
+}
 
-	next, _ := utf8.DecodeRuneInString(command[len(prefix):])
-	return unicode.IsSpace(next)
+// shellScript locates the script after shell invocation options without
+// interpreting expansions or reading startup files.
+func shellScript(words []string) (string, bool) {
+	if len(words) == 0 || (words[0] != "sh" && words[0] != "bash") {
+		return "", false
+	}
+	command := false
+	for i := 1; i < len(words); i++ {
+		option := words[i]
+		if option == "--" {
+			if command && i+1 < len(words) {
+				return words[i+1], true
+			}
+			return "", false
+		}
+		if len(option) < 2 || (option[0] != '-' && option[0] != '+') {
+			return option, command
+		}
+		if strings.HasPrefix(option, "--") {
+			if option == "--rcfile" || option == "--init-file" {
+				i++ // These options consume a filename, not the command string.
+			}
+			continue
+		}
+		for _, flag := range option[1:] {
+			if flag == 'c' {
+				command = true
+			}
+			if flag == 'o' || flag == 'O' {
+				i++ // Named shell/shopt option.
+			}
+		}
+	}
+	return "", false
 }

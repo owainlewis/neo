@@ -111,15 +111,19 @@ tool_approvals:
 ```
 
 Each entry matches both an exact tool name and a Bash command prefix.
-Matching is case-sensitive and requires whitespace or the end after the
-prefix, so `git` matches `git status` but not `github`.
+Matching is case-sensitive and compares complete decoded words, so `git`
+matches `git status` but not `github`. Rules use the same quote and escape
+normalization as commands: `git "foo bar"` matches `git foo\ bar`, but not
+`git foo bar` (two separate arguments).
 
 Bash commands are split at unquoted `&&`, `||`, `;`, `|`, `&`, and newlines.
 Leading `VAR=value` assignments are stripped from each segment, and whitespace
 between words is normalized before matching. Quotes and escapes keep argument
 text together, so `echo "a; rm -rf b"` does not match `rm -rf`. Literal scripts
-passed to `sh -c` and `bash -c` are inspected too. For example, a `git push`
-entry matches `cd sub && git push`, `git  push`, `VAR=1 git push`, and
+passed to `sh -c` and `bash -c` are inspected too, including combined short
+options (`bash -ec`) and preceding options (`bash --noprofile -c`). Unquoted
+`#` at the start of a word begins a comment; its text is ignored until newline.
+For example, a `git push` entry matches `cd sub && git push`, `git  push`, `VAR=1 git push`, and
 `sh -c "git push"`.
 
 Entries are trimmed when loaded. Empty entries are rejected and exact

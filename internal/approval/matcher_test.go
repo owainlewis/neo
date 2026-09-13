@@ -86,3 +86,64 @@ func TestMatcherShellCommands(t *testing.T) {
 		t.Fatal("command matching must only apply to bash")
 	}
 }
+
+func TestMatcherQuotedRules(t *testing.T) {
+	tests := []struct {
+		rule, command string
+		want          bool
+	}{
+		{`git "foo bar"`, `git "foo bar"`, true},
+		{`git 'foo bar'`, `git foo\ bar extra`, true},
+		{`git foo\ bar`, `VAR=1 git "foo bar"`, true},
+		{`git "foo  bar"`, `git 'foo  bar'`, true},
+		{`git "foo bar"`, `git foo bar`, false},
+		{`git push`, `"git push"`, false},
+		{`git ""`, `git "" extra`, true},
+		{`git ""`, `git extra`, false},
+		{`git "#tag"`, `git \#tag`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command+"/"+tt.rule, func(t *testing.T) {
+			if got := New([]string{tt.rule}).Requires("bash", map[string]any{"command": tt.command}); got != tt.want {
+				t.Fatalf("rule %q, command %q: got %v, want %v", tt.rule, tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatcherShellOptionsAndComments(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{`bash -ec 'git push'`, true},
+		{`bash +c 'git push'`, true},
+		{`bash +ec 'git push'`, true},
+		{`bash --noprofile -c 'git push'`, true},
+		{`bash -e -c 'git push'`, true},
+		{`sh -ce 'git push'`, true},
+		{`bash -o pipefail -c 'git push'`, true},
+		{`bash -O extglob -c 'git push'`, true},
+		{`bash --rcfile 'git push' -c 'echo ok'`, false},
+		{`bash --init-file startup -ec 'git push'`, true},
+		{`bash -c -- 'git push'`, true},
+		{`bash -- -c 'git push'`, false},
+		{`bash script -c 'git push'`, false},
+		{`bash -ec 'echo ok' 'git push'`, false},
+		{`echo ok #; git push`, false},
+		{"# git push\ngit push", true},
+		{"echo ok #; git push\necho ok", false},
+		{"echo ok # ignored \\\ngit push", true},
+		{`echo ok#; git push`, true},
+		{`echo '#' ; git push`, true},
+		{`echo \#; git push`, true},
+		{`bash -ec 'echo ok #; git push'`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			if got := New([]string{"git push"}).Requires("bash", map[string]any{"command": tt.command}); got != tt.want {
+				t.Fatalf("command %q: got %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
