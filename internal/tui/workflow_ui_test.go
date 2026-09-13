@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
@@ -62,31 +61,7 @@ func TestWorkflowProgressDistinguishesFailedPlan(t *testing.T) {
 	}
 }
 
-func TestWorkflowPanel_TabTogglesVisibility(t *testing.T) {
-	m := makeTestModel()
-	m.workflow = &workflowBlock{title: "Workflow", items: []workflow.Item{{ID: "1", Text: "first"}}}
-	m.workflowVisible = true
-	m.layout()
-
-	if got := plain(m.workflowPanelView()); !strings.Contains(got, "Workflow") {
-		t.Fatalf("expected workflow panel visible, got %q", got)
-	}
-
-	m.Update(keyPress(tea.KeyTab))
-	if m.workflowVisible {
-		t.Fatal("expected Tab to hide workflow panel")
-	}
-	if got := m.workflowPanelView(); got != "" {
-		t.Fatalf("expected hidden panel to render empty, got %q", got)
-	}
-
-	m.Update(keyPress(tea.KeyTab))
-	if !m.workflowVisible {
-		t.Fatal("expected second Tab to show workflow panel")
-	}
-}
-
-func TestWorkflowStartsCollapsedWithProgressInStatus(t *testing.T) {
+func TestWorkflowCreateAppendsChecklistBlockAndReportsProgress(t *testing.T) {
 	m := makeTestModel()
 	m.busy = true
 	m.busySince = time.Now()
@@ -99,19 +74,24 @@ func TestWorkflowStartsCollapsedWithProgressInStatus(t *testing.T) {
 	})
 	m.handleWorkflowEvent(workflow.Event{Action: "start", ID: "1"})
 
-	if m.workflowVisible {
-		t.Fatal("new workflow should not expand over the transcript")
+	if len(m.blocks) != 1 {
+		t.Fatalf("blocks = %d, want the checklist appended to the transcript", len(m.blocks))
 	}
-	if got := m.workflowPanelView(); got != "" {
-		t.Fatalf("collapsed workflow panel = %q, want empty", got)
+	wb, ok := m.blocks[0].(*workflowBlock)
+	if !ok || wb != m.workflow {
+		t.Fatalf("block = %T, want the live workflow block", m.blocks[0])
 	}
-	if got := plain(m.statusLine()); !strings.Contains(got, "1/2 Inspect") || !strings.Contains(got, "tab show workflow") {
-		t.Fatalf("status should carry compact workflow progress: %q", got)
+	if got := renderPlain(wb, 80); !strings.Contains(got, "Code change") || !strings.Contains(got, "● Inspect") {
+		t.Fatalf("checklist render = %q", got)
+	}
+	if got := plain(m.statusLine()); !strings.Contains(got, "1/2 Inspect") || strings.Contains(got, "tab") {
+		t.Fatalf("status should carry compact workflow progress and no panel hint: %q", got)
 	}
 
-	m.Update(keyPress(tea.KeyTab))
-	if got := plain(m.workflowPanelView()); !strings.Contains(got, "Code change") || !strings.Contains(got, "● Inspect") {
-		t.Fatalf("Tab should expand the full workflow: %q", got)
+	// Updates mutate the same block in place rather than appending.
+	m.handleWorkflowEvent(workflow.Event{Action: "complete", ID: "1"})
+	if len(m.blocks) != 1 || !strings.Contains(renderPlain(wb, 80), "✓ Inspect") {
+		t.Fatalf("update did not mutate the checklist in place: %d blocks, %q", len(m.blocks), renderPlain(wb, 80))
 	}
 }
 
@@ -159,70 +139,34 @@ func TestFailedSkillWorkflowKeepsLabelInCompletionReceipt(t *testing.T) {
 	}
 }
 
-func TestWorkflowPanel_TabDoesNotStealPickerAcceptance(t *testing.T) {
-	withSlashCommands(t, []slashCommand{
-		{"/help", "show this list"},
-		{"/resume", "resume a session"},
-	})
+// A new turn detaches the previous checklist even if it was left running
+// (for example after Esc), so stale items never absorb the next turn's activity.
+// The old block stays in the transcript as history.
+func TestNewTurnDetachesPreviousWorkflow(t *testing.T) {
 	m := makeTestModel()
-	m.workflow = &workflowBlock{title: "Workflow", items: []workflow.Item{{ID: "1", Text: "first"}}}
-	m.workflowVisible = true
-	m.input.SetValue("/")
-	m.updateSlashPicker()
-	m.Update(keyPress(tea.KeyDown))
-
-	m.Update(keyPress(tea.KeyTab))
-
-	if got := m.input.Value(); got != "/resume" {
-		t.Fatalf("Tab should accept slash picker before toggling workflow, got %q", got)
-	}
-	if !m.workflowVisible {
-		t.Fatal("workflow visibility changed while picker handled Tab")
-	}
-}
-
-func TestWorkflowPanel_UserExpansionSurvivesTurnCompletion(t *testing.T) {
-	m := makeTestModel()
-	m.height = 24
-	m.busy = true
-	m.busySince = time.Now()
-	m.turn = turnStats{workflow: true}
-	m.workflow = &workflowBlock{title: "Workflow", items: []workflow.Item{
-		{ID: "1", Text: "inspect", Status: workflow.Done},
-		{ID: "2", Text: "test", Status: workflow.Done},
-	}}
-	m.workflowVisible = true
-	m.layout()
-	before := m.viewport.Height()
-
-	m.Update(sendResultMsg{})
-
-	if m.workflow == nil {
-		t.Fatal("completed workflow should remain available for inspection")
-	}
-	if !m.workflowVisible {
-		t.Fatal("completed workflow should remain expanded until the user closes it")
-	}
-	if got := m.viewport.Height(); got != before {
-		t.Fatalf("turn completion changed viewport height from %d to %d", before, got)
-	}
-}
-
-func TestWorkflowPanel_ClearsCompletedWorkflowBeforeNextTurn(t *testing.T) {
-	m := makeTestModel()
-	m.workflow = &workflowBlock{title: "Old plan", items: []workflow.Item{
+	old := &workflowBlock{title: "Old plan", items: []workflow.Item{
 		{ID: "1", Text: "old", Status: workflow.Done},
-		{ID: "2", Text: "done", Status: workflow.Skipped},
+		{ID: "2", Text: "still running", Status: workflow.Running},
 	}}
-	m.workflowVisible = true
+	m.workflow = old
+	m.blocks = append(m.blocks, old)
 
 	m.submitUserTurn("hello", "hello", nil)
+	t.Cleanup(func() {
+		if m.sendCancel != nil {
+			m.sendCancel()
+		}
+	})
 
 	if m.workflow != nil {
-		t.Fatalf("completed workflow should be cleared before next turn, got %+v", m.workflow)
+		t.Fatalf("previous workflow should be detached before the next turn, got %+v", m.workflow)
 	}
-	if m.workflowVisible {
-		t.Fatal("cleared workflow should not remain visible")
+	if m.blocks[0] != block(old) {
+		t.Fatal("previous checklist should remain in the transcript")
+	}
+	m.handleEvent(agent.Event{Kind: agent.EventToolCall, Name: "read_file", Args: map[string]any{"path": "a.go"}})
+	if old.items[1].Detail != "" {
+		t.Fatalf("stale running item absorbed new activity: %q", old.items[1].Detail)
 	}
 }
 

@@ -57,11 +57,6 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if m.acceptInlinePicker(true) {
 			break
 		}
-		if m.workflow != nil {
-			m.workflowVisible = !m.workflowVisible
-			m.layout()
-			break
-		}
 		return m.updateInput(msg)
 	case "ctrl+l":
 		m.blocks = nil

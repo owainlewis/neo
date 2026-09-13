@@ -378,13 +378,12 @@ constrained by capability selection: their registry contains only `read_file`,
 ## 7. Interactive TUI and Event Flow
 
 `internal/tui` is a Bubble Tea application. It owns input, transcript rendering,
-tool cards, workflow state, subagent trees, model selection, approvals, and
+tool receipts, the workflow checklist block, model selection, approvals, and
 steering. It does not call providers directly.
 
 ```text
-Agent events ───────────────┐
-Factory supervisor events ─┼─→ Bubble Tea messages → model.Update → View
-Workflow tool events ──────┘
+Agent events ──────────┬─→ Bubble Tea messages → model.Update → View
+Workflow tool events ──┘
 
 Approval request ←──────────── TUI choice
 User send/steer ─────────────→ Agent

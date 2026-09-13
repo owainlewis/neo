@@ -11,8 +11,6 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-
-	"github.com/owainlewis/neo/internal/workflow"
 )
 
 func TestNewModelKeepsTranscriptMouseWheelStateStable(t *testing.T) {
@@ -241,30 +239,19 @@ func TestViewSeparatesTranscriptFromProgress(t *testing.T) {
 		}
 	}
 
-	assertGap("collapsed plan", "Understanding request")
-	m.workflow = &workflowBlock{title: "Plan", items: []workflow.Item{
-		{ID: "1", Text: "Inspect", Status: workflow.Running},
-		{ID: "2", Text: "Implement", Status: workflow.Pending},
-	}}
-	m.workflowVisible = true
-	m.layout()
-	m.refreshViewport()
-	assertGap("expanded plan", "Plan  0/2 complete")
+	assertGap("busy", "Understanding request")
 }
 
 func TestViewFitsShortTerminal(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		height        int
-		workflowItems int
-		pickerItems   int
-		wantClipped   bool
+		name        string
+		height      int
+		pickerItems int
+		wantClipped bool
 	}{
-		{name: "collapsed", height: 9},
-		{name: "expanded", height: 20, workflowItems: 8},
-		{name: "long expanded", height: 12, workflowItems: 20, wantClipped: true},
+		{name: "short", height: 9},
 		{name: "long picker", height: 12, pickerItems: 20, wantClipped: true},
 	}
 	for _, tc := range tests {
@@ -274,14 +261,6 @@ func TestViewFitsShortTerminal(t *testing.T) {
 			m.busy = true
 			m.busySince = time.Now()
 			m.blocks = []block{toolCallBlock{name: "bash", args: map[string]any{"command": "test"}}}
-			if tc.workflowItems > 0 {
-				items := make([]workflow.Item, tc.workflowItems)
-				for i := range items {
-					items[i] = workflow.Item{ID: string(rune('a' + i)), Text: "Step", Status: workflow.Pending}
-				}
-				m.workflow = &workflowBlock{title: "Plan", items: items}
-				m.workflowVisible = true
-			}
 			if tc.pickerItems > 0 {
 				m.picker.matches = make([]slashCommand, tc.pickerItems)
 				for i := range m.picker.matches {
@@ -297,9 +276,6 @@ func TestViewFitsShortTerminal(t *testing.T) {
 			if got := lipgloss.Height(view); got > m.height {
 				t.Fatalf("rendered height = %d, want <= terminal height %d:\n%s", got, m.height, plain(view))
 			}
-			if tc.workflowItems > 0 && tc.wantClipped && !strings.Contains(plain(view), "more") {
-				t.Fatalf("clipped workflow has no visible more marker:\n%s", plain(view))
-			}
 			if tc.pickerItems > 0 {
 				out := plain(view)
 				if !strings.Contains(out, "cmdt") || !strings.Contains(out, "20/20") {
@@ -307,63 +283,5 @@ func TestViewFitsShortTerminal(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestWorkflowToggleKeepsBottomedTranscriptFollowing(t *testing.T) {
-	t.Parallel()
-
-	m := makeTestModel()
-	m.height = 18
-	m.blocks = []block{textBlock{text: numberedLines(24)}}
-	m.workflow = &workflowBlock{title: "Plan", items: []workflow.Item{
-		{ID: "1", Text: "Inspect", Status: workflow.Running},
-		{ID: "2", Text: "Implement", Status: workflow.Pending},
-	}}
-	m.layout()
-	m.refreshViewport()
-	if !m.viewport.AtBottom() {
-		t.Fatal("viewport should start at the bottom")
-	}
-
-	m.Update(keyPress(tea.KeyTab))
-	m.appendBlock(textBlock{text: "latest live output"})
-
-	if !m.viewport.AtBottom() {
-		t.Fatal("opening the workflow stopped live output following")
-	}
-	if got := plain(m.viewport.View()); !strings.Contains(got, "latest live output") {
-		t.Fatalf("latest output hidden after workflow toggle:\n%s", got)
-	}
-}
-
-func TestWorkflowTogglePreservesManualScrollPosition(t *testing.T) {
-	t.Parallel()
-
-	m := makeTestModel()
-	m.height = 18
-	m.blocks = []block{textBlock{text: numberedLines(24)}}
-	m.workflow = &workflowBlock{title: "Plan", items: []workflow.Item{
-		{ID: "1", Text: "Inspect", Status: workflow.Running},
-		{ID: "2", Text: "Implement", Status: workflow.Pending},
-	}}
-	m.layout()
-	m.refreshViewport()
-	m.viewport.ScrollUp(5)
-	before := m.viewport.YOffset()
-	if before == 0 || m.viewport.AtBottom() {
-		t.Fatalf("test setup did not create a manually scrolled viewport: offset=%d", before)
-	}
-
-	m.Update(keyPress(tea.KeyTab))
-
-	if got := m.viewport.YOffset(); got != before {
-		t.Fatalf("opening workflow moved manually scrolled transcript to %d, want %d", got, before)
-	}
-
-	m.Update(keyPress(tea.KeyTab))
-
-	if got := m.viewport.YOffset(); got != before {
-		t.Fatalf("closing workflow moved manually scrolled transcript to %d, want %d", got, before)
 	}
 }
