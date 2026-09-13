@@ -51,15 +51,25 @@ with a raised headless budget. Which deadline fired is read when the command is
 stopped, not after it is reaped, so a slow reap that outlasts the run budget
 still reports the command's own timeout.
 
+## File writes
+
+`write_file` and `edit_file` write source files in place, following symlinks and
+preserving existing file identity, hard links, ownership, and permissions.
+New files use mode `0644` (subject to the process umask). These writes are not
+atomic: an interrupted or failed write can leave partial content. Atomic
+replacement is reserved for session and credential storage.
+
 ## Stale edits
 
-`read_file` records each file's modification time and size. `edit_file` refuses
+`read_file` records each file's identity, modification time, and size. `edit_file` refuses
 when they no longer match and tells the model to read the file again, which
 catches a change the model could not observe: the user saving in an editor, a
 `git checkout`, or a concurrent `work`-mode subagent. A file the agent has never
 read is not stale and edits normally — the guard is for invisible changes, not
 for model error. `write_file` and `edit_file` re-record after writing so the
-agent's own writes are never mistaken for external ones.
+agent's own writes are never mistaken for external ones. Recording a file also
+refreshes previously tracked symlink and hard-link aliases of the same file.
+Replacing or retargeting a tracked path still counts as an external change.
 
 `tools.NewFileTools` constructs `read_file`, `write_file`, and `edit_file`
 sharing one record. Build a fresh set per agent so a subagent's reads never
