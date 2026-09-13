@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"charm.land/bubbles/v2/viewport"
 
@@ -49,21 +48,5 @@ func BenchmarkLargeTranscriptRefresh(b *testing.B) {
 
 	for b.Loop() {
 		m.refreshViewport()
-	}
-}
-
-func BenchmarkActiveSubagentTreeRender(b *testing.B) {
-	tree := newTreeBlock()
-	now := time.Now()
-	for id := 1; id <= 20; id++ {
-		tree.roots = append(tree.roots, id)
-		tree.nodes[id] = &treeNode{id: id, task: fmt.Sprintf("task %d", id), startAt: now, lastLine: "running focused verification"}
-	}
-	b.ReportAllocs()
-
-	for b.Loop() {
-		if rendered := tree.render(100, nil); len(rendered) == 0 {
-			b.Fatal("empty subagent tree render")
-		}
 	}
 }

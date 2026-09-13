@@ -85,7 +85,7 @@ func TestModel_SendResultShowsCancellationNoticeAndClearsBusy(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.busy = true
-	m.currentTool = &toolCallBlock{name: "bash"}
+	m.trackToolCall("t", &toolCallBlock{name: "bash"})
 	m.layout()
 	busyViewportHeight := m.viewport.Height()
 	canceled := false
@@ -96,8 +96,8 @@ func TestModel_SendResultShowsCancellationNoticeAndClearsBusy(t *testing.T) {
 	if m.busy {
 		t.Fatal("model stayed busy after cancellation")
 	}
-	if m.currentTool != nil {
-		t.Fatalf("currentTool = %#v, want nil", m.currentTool)
+	if len(m.inflight) != 0 {
+		t.Fatalf("inflight = %#v, want none", m.inflight)
 	}
 	if m.sendCancel != nil {
 		t.Fatal("sendCancel was not cleared")

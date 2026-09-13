@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
 	"github.com/owainlewis/neo/internal/skills"
-	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/workflow"
 )
@@ -33,7 +33,6 @@ type Options struct {
 	ModelChoices   []ModelChoice
 	Provider       string
 	ModelSwitcher  func(string) error
-	StepEvents     <-chan subagent.Event
 	WorkflowEvents <-chan workflow.Event
 	Verbose        bool
 	Input          io.Reader
@@ -54,13 +53,6 @@ func WithModelSwitcher(provider string, choices []ModelChoice, fn func(string) e
 		opts.ModelChoices = choices
 		opts.ModelSwitcher = fn
 	}
-}
-
-// WithStepEvents subscribes the TUI to the subagent supervisor's event
-// stream, which the chat view folds into live subagent activity while agent
-// calls execute.
-func WithStepEvents(ch <-chan subagent.Event) Option {
-	return func(opts *Options) { opts.StepEvents = ch }
 }
 
 func WithWorkflowEvents(ch <-chan workflow.Event) Option {
@@ -102,15 +94,6 @@ func Run(ctx context.Context, ag *agent.Agent, model, version, cwd string, sk []
 	// Pipe agent events directly into the Bubble Tea program. This avoids a
 	// hand-rolled channel pump and the back-pressure that came with it.
 	ag.SetEventHandler(func(e agent.Event) { p.Send(agentEventMsg{ev: e}) })
-	// Supervisor events (subagent activity during agent calls) arrive the same
-	// way. The channel is already non-blocking on the producer side.
-	if opts.StepEvents != nil {
-		go func() {
-			for ev := range opts.StepEvents {
-				p.Send(stepEventMsg{ev: ev})
-			}
-		}()
-	}
 	if opts.WorkflowEvents != nil {
 		go func() {
 			for ev := range opts.WorkflowEvents {
@@ -158,7 +141,6 @@ type sendResultMsg struct {
 }
 type persistenceRetryResultMsg struct{ err error }
 type agentEventMsg struct{ ev agent.Event }
-type stepEventMsg struct{ ev subagent.Event }
 type workflowEventMsg struct{ ev workflow.Event }
 type branchMsg struct{ branch string }
 type approvalRequestMsg struct {
@@ -223,29 +205,32 @@ type model struct {
 	rendered      []string
 	renderedWidth int
 
-	busy            bool
-	busySince       time.Time
-	spinning        bool // a spinner tick is scheduled
-	currentTool     *toolCallBlock
-	parallelGroups  map[string]*parallelBlock
-	parallelCalls   map[string]*parallelCallRow
-	workflow        *workflowBlock
-	workflowVisible bool
-	turn            turnStats
-	activeTree      *treeBlock         // block receiving new subagent activity
-	treeIndex       map[int]*treeBlock // supervisor node id -> the block holding it
-	approval        *approvalState
-	quitting        bool
-	quitPending     bool
-	persistenceErr  error
+	busy      bool
+	busySince time.Time
+	spinning  bool // a spinner tick is scheduled
+	// inflight holds the tool calls the agent has started and not yet
+	// finished, keyed by tool-use ID. Serial calls hold one entry; a parallel
+	// group holds several. The status line reads it; receipts are appended
+	// as each result arrives.
+	inflight map[string]*toolCallBlock
+	// workflow is the checklist block for the current turn, if the workflow
+	// tool created one. It lives in the transcript like any other block and
+	// is updated in place until the next turn starts.
+	workflow       *workflowBlock
+	turn           turnStats
+	approval       *approvalState
+	quitting       bool
+	quitPending    bool
+	persistenceErr error
 
 	// cancel for the currently in-flight Send, if any.
 	sendCancel      context.CancelFunc
 	steer           func(string) bool
 	pendingSteering []string
 	queued          *queuedTurn
-	// conversationGeneration separates buffered workflow and subagent events
-	// produced before /clear from activity in the new conversation.
+	// conversationGeneration tags the work started by the current turn. It
+	// advances on every send and on /clear, so buffered workflow events from
+	// an earlier turn are recognised as stale and ignored.
 	conversationGeneration uint64
 
 	// mdStyleName is the glamour style chosen at startup. We re-use it when
@@ -420,7 +405,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentEventMsg:
 		m.handleEvent(msg.ev)
 		// Tie the dot's color to whether a tool is currently running.
-		if m.currentTool != nil || m.activeParallelGroup("") != nil {
+		if len(m.inflight) > 0 {
 			m.setDotColor(colDotTool)
 		} else if m.busy {
 			m.setDotColor(colDotThinking)
@@ -436,8 +421,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sendResultMsg:
 		elapsed := time.Since(m.busySince)
 		m.busy = false
-		m.currentTool = nil
-		m.settleParallel(msg.err)
+		m.clearInflight()
 		m.layout()
 		if m.sendCancel != nil {
 			m.sendCancel()
@@ -510,14 +494,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.spinning = false
 		}
-		// Live subagent activity shows elapsed time; repaint on
-		// the spinner's cadence so the counters don't freeze between events.
-		if (m.activeTree != nil && m.activeTree.running()) || m.activeParallelGroup("") != nil {
-			m.refreshViewport()
-		}
-
-	case stepEventMsg:
-		m.handleStepEvent(msg.ev)
 
 	case workflowEventMsg:
 		m.handleWorkflowEvent(msg.ev)
@@ -563,15 +539,7 @@ func (m *model) View() tea.View {
 		bottom = m.approvalBarView()
 	}
 
-	parts := []string{m.viewport.View(), ""}
-	if workflow := m.workflowPanelView(); workflow != "" {
-		parts = append(parts, workflow, "")
-	}
-	parts = append(parts,
-		status,
-		"",
-		bottom,
-	)
+	parts := []string{m.viewport.View(), "", status, "", bottom}
 	if picker != "" {
 		parts = append(parts, picker)
 	}
@@ -651,9 +619,14 @@ func (m *model) restoreInput(texts ...string) {
 }
 
 func (m *model) submitUserTurnWithSkillExpansion(displayText, agentText string, images []string, expandSkillRefs bool) tea.Cmd {
-	m.clearTerminalWorkflow()
-	m.parallelGroups = map[string]*parallelBlock{}
-	m.parallelCalls = map[string]*parallelCallRow{}
+	// The previous turn's checklist stays in the transcript but stops being
+	// the live one, so a new plan never inherits stale running items. Workflow
+	// events travel on a buffered channel, so the generation advances per
+	// turn: a late event from the previous turn is then ignored rather than
+	// restored as the live plan.
+	m.workflow = nil
+	m.clearInflight()
+	m.conversationGeneration++
 	m.appendBlock(userBlock{text: displayText})
 	if len(images) > 0 {
 		m.appendBlock(noticeBlock{text: "attached image: " + strings.Join(shortPaths(images), ", ")})
@@ -894,14 +867,6 @@ func (m *model) statusLine() string {
 	} else if m.turn.direct {
 		fullHint = "ctrl+↩ queue · esc interrupt"
 	}
-	if m.workflow != nil {
-		workflowHint := "tab show workflow"
-		if m.workflowVisible {
-			workflowHint = "tab hide workflow"
-		}
-		fullHint = workflowHint + " · " + fullHint
-		compactHint = workflowHint + " · " + compactHint
-	}
 	activity := m.statusActivity()
 	prefix := " " + m.spin.View() + " "
 	timing := " · " + formatElapsedCompact(elapsed)
@@ -943,13 +908,14 @@ func (m *model) statusActivity() string {
 	if workflow := m.workflowProgress(); workflow != "" {
 		parts = append(parts, workflow)
 	}
-	if group := m.activeParallelGroup("subagents"); group != nil {
-		parts = append(parts, fmt.Sprintf("%d subagents in parallel", len(group.rows)))
-	} else if group := m.activeParallelGroup(""); group != nil {
-		parts = append(parts, fmt.Sprintf("%d %s in parallel", len(group.rows), group.kind))
-	}
-	if m.currentTool != nil {
-		parts = append(parts, capitalize(toolVerb(m.currentTool.name, m.currentTool.args)))
+	if running := m.inflightTools(); len(running) > 1 {
+		noun := "tools"
+		if allAgents(running) {
+			noun = "subagents"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s in parallel", len(running), noun))
+	} else if len(running) == 1 {
+		parts = append(parts, capitalize(toolVerb(running[0].name, running[0].args)))
 	}
 	if len(parts) == 0 {
 		if m.turn.tools > 0 {
@@ -958,6 +924,44 @@ func (m *model) statusActivity() string {
 		return "Understanding request"
 	}
 	return strings.Join(parts, " · ")
+}
+
+func allAgents(calls []*toolCallBlock) bool {
+	for _, call := range calls {
+		if call.name != "agent" {
+			return false
+		}
+	}
+	return len(calls) > 0
+}
+
+// trackToolCall records a started tool call so the status line can describe
+// it and its receipt can carry an elapsed time.
+func (m *model) trackToolCall(id string, tc *toolCallBlock) {
+	if m.inflight == nil {
+		m.inflight = map[string]*toolCallBlock{}
+	}
+	m.inflight[id] = tc
+}
+
+// finishToolCall removes and returns the tracked call, or nil if unknown.
+func (m *model) finishToolCall(id string) *toolCallBlock {
+	tc := m.inflight[id]
+	delete(m.inflight, id)
+	return tc
+}
+
+func (m *model) clearInflight() { m.inflight = nil }
+
+// inflightTools lists running calls oldest first, so a single running call
+// is described deterministically.
+func (m *model) inflightTools() []*toolCallBlock {
+	out := make([]*toolCallBlock, 0, len(m.inflight))
+	for _, tc := range m.inflight {
+		out = append(out, tc)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].startAt.Before(out[j].startAt) })
+	return out
 }
 
 func (m *model) workflowProgress() string {
@@ -1056,9 +1060,7 @@ func (m *model) syncInputHeight() {
 func (m *model) layout() {
 	followOutput := m.viewport.AtBottom()
 	previousOffset := m.viewport.YOffset()
-	workflowHeight := m.workflowPanelHeight()
-	chrome := m.fixedChromeHeight() + workflowHeight
-	vpH := m.height - chrome
+	vpH := m.height - m.fixedChromeHeight()
 	if vpH < minimumTranscriptHeight {
 		vpH = minimumTranscriptHeight
 	}
@@ -1126,66 +1128,6 @@ func (m *model) toggleLatestToolResultExpansion() bool {
 	return false
 }
 
-func (m *model) workflowPanelView() string {
-	if m.workflow == nil || !m.workflowVisible {
-		return ""
-	}
-	panel := m.workflow.render(m.width, nil)
-	lines := strings.Split(panel, "\n")
-	maxLines := m.maxWorkflowPanelLines()
-	if maxLines <= 0 {
-		return ""
-	}
-	if len(lines) <= maxLines {
-		return panel
-	}
-	if maxLines == 1 {
-		return truncate(lines[0]+styMuted.Render("  … more"), max(m.width, 1))
-	}
-	visible := append([]string(nil), lines[:maxLines]...)
-	hidden := len(lines) - (maxLines - 1)
-	visible[maxLines-1] = styMuted.Render(fmt.Sprintf("… %d more", hidden))
-	return strings.Join(visible, "\n")
-}
-
-func (m *model) maxWorkflowPanelLines() int {
-	// Expanded plans yield rows to the transcript and retain their trailing
-	// margin before the fixed status line.
-	return max(m.height-m.fixedChromeHeight()-minimumTranscriptHeight-1, 0)
-}
-
-func (m *model) workflowPanelHeight() int {
-	panel := m.workflowPanelView()
-	if panel == "" {
-		return 0
-	}
-	return strings.Count(panel, "\n") + 2 // panel lines plus one-line margin before status
-}
-
-func (m *model) workflowTerminal() bool {
-	if m.workflow == nil || len(m.workflow.items) == 0 {
-		return false
-	}
-	for _, item := range m.workflow.items {
-		switch item.Status {
-		case workflow.Done, workflow.Failed, workflow.Skipped:
-			continue
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func (m *model) clearTerminalWorkflow() {
-	if !m.workflowTerminal() {
-		return
-	}
-	m.workflow = nil
-	m.workflowVisible = false
-	m.layout()
-}
-
 func (m *model) refreshViewport() {
 	if m.width == 0 {
 		return
@@ -1228,11 +1170,8 @@ func (m *model) refreshViewport() {
 // mutableBlock reports whether a block is updated in place after it is
 // appended, which makes its cached rendering stale.
 func mutableBlock(b block) bool {
-	switch b.(type) {
-	case *parallelBlock, *treeBlock, *workflowBlock:
-		return true
-	}
-	return false
+	_, ok := b.(*workflowBlock)
+	return ok
 }
 
 // invalidateRenderedFrom drops cached renderings from index i onward. Callers
@@ -1255,14 +1194,13 @@ func blockSeparator(previous, next block) string {
 func (m *model) handleEvent(e agent.Event) {
 	switch e.Kind {
 	case agent.EventParallelStart:
-		m.startParallelGroup(e)
+		// Each call in the group also arrives as its own tool_call event, so
+		// the group announcement carries nothing the transcript needs.
 	case agent.EventAssistantText:
-		m.activeTree = nil // assistant commentary splits subagent activity
 		if strings.TrimSpace(e.Text) != "" {
 			m.appendBlock(textBlock{text: e.Text})
 		}
 	case agent.EventAssistantCommentary:
-		m.activeTree = nil
 		if strings.TrimSpace(e.Text) != "" {
 			m.appendBlock(thinkingBlock{text: e.Text})
 		}
@@ -1279,23 +1217,14 @@ func (m *model) handleEvent(e agent.Event) {
 		}
 		m.turn.tools++
 		m.noteWorkflowActivity(capitalize(toolVerb(e.Name, e.Args)))
-		if e.GroupID != "" {
-			break
-		}
-		tc := toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now(), verbose: m.verbose}
-		m.currentTool = &tc
-		if e.Name == "agent" {
-			// The supervisor's "start" event draws this call as activity
-			// node; no generic tool card.
-			break
-		}
-		m.activeTree = nil
+		tc := &toolCallBlock{name: e.Name, args: e.Args, startAt: time.Now(), verbose: m.verbose}
+		m.trackToolCall(e.ToolUseID, tc)
 		if m.verbose {
-			m.appendBlock(tc)
+			m.appendBlock(*tc)
 		}
 	case agent.EventToolResult:
 		if e.Name == "workflow" {
-			// Successful workflow calls are represented by the checklist UI, but
+			// Successful workflow calls are represented by the checklist, but
 			// failures may not produce a workflow event and must remain visible.
 			if e.IsError {
 				m.turn.errors++
@@ -1303,42 +1232,26 @@ func (m *model) handleEvent(e agent.Event) {
 			}
 			break
 		}
-		if e.GroupID != "" {
-			m.settleParallelCall(e)
-			break
-		}
 		elapsed := time.Duration(0)
-		if m.currentTool != nil {
-			elapsed = time.Since(m.currentTool.startAt)
+		completed := m.finishToolCall(e.ToolUseID)
+		if completed != nil {
+			elapsed = time.Since(completed.startAt)
 		}
-		completedTool := m.currentTool
-		m.currentTool = nil
-		if e.IsError {
+		// The agent tool reports a failed child inside a successful result.
+		failed := e.IsError || (e.Name == "agent" && !runStepOK(e.Text))
+		if failed {
 			m.turn.errors++
 		}
-		if e.Name == "agent" {
-			// Success renders in the activity block. Failures keep an error card
-			// so the output is inspectable.
-			if e.IsError || !runStepOK(e.Text) {
-				m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: true, elapsed: elapsed})
-			}
-			break
-		}
-		if !m.verbose && !e.IsError && completedTool != nil {
-			completedTool.elapsed = elapsed
-			m.appendBlock(*completedTool)
+		if !m.verbose && !failed && completed != nil {
+			completed.elapsed = elapsed
+			m.appendBlock(*completed)
 		}
 		// In concise mode, routine successful result bodies add no scannable
-		// information beyond the compact receipt, so only errors render.
+		// information beyond the compact receipt, so only failures render.
 		// Direct ! commands are user-requested output, not intermediate agent
 		// activity, and must remain visible in either mode.
-		if m.verbose || e.IsError || m.turn.direct {
-			m.appendBlock(toolResultBlock{
-				name:    e.Name,
-				text:    e.Text,
-				isError: e.IsError,
-				elapsed: elapsed,
-			})
+		if m.verbose || failed || m.turn.direct {
+			m.appendBlock(toolResultBlock{name: e.Name, text: e.Text, isError: failed, elapsed: elapsed})
 		}
 	case agent.EventError:
 		// The same error comes back from Send and is rendered once from
@@ -1346,125 +1259,8 @@ func (m *model) handleEvent(e agent.Event) {
 	case agent.EventMaxTurnsReached:
 		m.appendBlock(maxTurnsBlock{limit: e.MaxTurns, label: m.turn.label})
 	case agent.EventDone:
-		m.settleParallel(nil)
+		m.clearInflight()
 	}
-}
-
-func (m *model) startParallelGroup(e agent.Event) {
-	if e.GroupID == "" || len(e.Calls) < 2 {
-		return
-	}
-	if m.parallelGroups == nil {
-		m.parallelGroups = map[string]*parallelBlock{}
-		m.parallelCalls = map[string]*parallelCallRow{}
-	}
-	if _, exists := m.parallelGroups[e.GroupID]; exists {
-		logx.Debug("duplicate parallel group ignored", "group_id", e.GroupID)
-		return
-	}
-	kind := "tools"
-	agents := 0
-	for _, call := range e.Calls {
-		if call.Name == "agent" {
-			agents++
-		}
-	}
-	if agents == len(e.Calls) {
-		kind = "subagents"
-	} else if agents > 0 {
-		kind = "tasks"
-	}
-	now := time.Now()
-	group := &parallelBlock{id: e.GroupID, kind: kind, startAt: now}
-	seen := map[string]bool{}
-	for _, call := range e.Calls {
-		if call.ID == "" {
-			continue
-		}
-		if seen[call.ID] || m.parallelCalls[call.ID] != nil {
-			logx.Debug("duplicate parallel call ignored", "group_id", e.GroupID, "call_id", call.ID)
-			continue
-		}
-		seen[call.ID] = true
-		row := &parallelCallRow{id: call.ID, groupID: e.GroupID, name: call.Name, args: call.Args, startAt: now}
-		group.rows = append(group.rows, row)
-	}
-	if len(group.rows) < 2 {
-		logx.Debug("invalid parallel group ignored", "group_id", e.GroupID, "calls", len(group.rows))
-		return
-	}
-	for _, row := range group.rows {
-		m.parallelCalls[row.id] = row
-	}
-	m.parallelGroups[e.GroupID] = group
-	m.activeTree = nil
-	m.appendBlock(group)
-}
-
-func (m *model) settleParallelCall(e agent.Event) {
-	row := m.parallelCalls[e.ToolUseID]
-	group := m.parallelGroups[e.GroupID]
-	if row == nil || group == nil || row.groupID != e.GroupID {
-		logx.Debug("unknown parallel result ignored", "group_id", e.GroupID, "call_id", e.ToolUseID)
-		return
-	}
-	if row.parentSettled {
-		logx.Debug("duplicate parallel result ignored", "group_id", e.GroupID, "call_id", e.ToolUseID)
-		return
-	}
-	row.parentSettled = true
-	failed := e.IsError || (row.name == "agent" && !runStepOK(e.Text))
-	if failed && isCancelledResult(e.Text) {
-		row.state = parallelCancelled
-	} else if failed {
-		row.state = parallelFailed
-	} else {
-		row.state = parallelSucceeded
-	}
-	if row.elapsed == 0 {
-		row.elapsed = time.Since(row.startAt)
-	}
-	if failed && row.state == parallelFailed && !row.errorShown {
-		row.errorShown = true
-		m.turn.errors++
-		m.appendBlock(toolResultBlock{name: row.name, text: e.Text, isError: true, elapsed: row.elapsed})
-	}
-	row.detail = ""
-	m.refreshViewport()
-}
-
-func isCancelledResult(text string) bool {
-	text = strings.ToLower(text)
-	return strings.Contains(text, "canceled") || strings.Contains(text, "cancelled") || strings.Contains(text, "steered")
-}
-
-func (m *model) settleParallel(err error) {
-	for _, group := range m.parallelGroups {
-		for _, row := range group.rows {
-			if row.state != parallelRunning {
-				continue
-			}
-			row.elapsed = time.Since(row.startAt)
-			if errors.Is(err, context.Canceled) {
-				row.state = parallelCancelled
-			} else if err != nil {
-				row.state = parallelFailed
-			} else {
-				row.state = parallelCancelled
-			}
-			row.detail = ""
-		}
-	}
-}
-
-func (m *model) activeParallelGroup(kind string) *parallelBlock {
-	for i := len(m.blocks) - 1; i >= 0; i-- {
-		group, ok := m.blocks[i].(*parallelBlock)
-		if ok && group.running() && (kind == "" || group.kind == kind) {
-			return group
-		}
-	}
-	return nil
 }
 
 func (m *model) appendTranscript(messages []llm.Message) {

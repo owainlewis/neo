@@ -36,7 +36,7 @@ var keyBindings = []struct {
 	{"wheel/pgup/pgdn", "scroll transcript"},
 	{"shift+↑/↓", "scroll transcript one line"},
 	{"shift+drag", "select terminal text"},
-	{"tab", "toggle workflow panel (accepts picker selection first)"},
+	{"tab", "accept the picker selection"},
 	{"ctrl+o", "expand/collapse latest truncated tool output"},
 	{"esc", "cancel the current turn"},
 	{"ctrl+l", "clear the screen"},

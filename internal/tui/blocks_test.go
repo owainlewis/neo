@@ -443,7 +443,7 @@ func TestStatusLineShowsOneLineOfRealActivity(t *testing.T) {
 	m := makeTestModel()
 	m.busy = true
 	m.busySince = time.Now().Add(-4 * time.Second)
-	m.currentTool = &toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}}
+	m.trackToolCall("t", &toolCallBlock{name: "read_file", args: map[string]any{"path": "internal/tui/model.go"}})
 
 	out := plain(m.statusLine())
 	for _, want := range []string{"● Reading internal/tui/model.go · 4s", "↩ steer", "ctrl+↩ queue"} {
@@ -452,7 +452,7 @@ func TestStatusLineShowsOneLineOfRealActivity(t *testing.T) {
 		}
 	}
 
-	m.currentTool = nil
+	m.clearInflight()
 	out = plain(m.statusLine())
 	if !strings.Contains(out, "Understanding request · 4s") || strings.Contains(out, "Reading") {
 		t.Fatalf("generic working state should not invent activity: %q", out)
@@ -469,10 +469,10 @@ func TestStatusLineCombinesWorkflowStepAndToolActivity(t *testing.T) {
 		{ID: "2", Text: "Refine progress UI", Status: workflow.Running},
 		{ID: "3", Text: "Verify", Status: workflow.Pending},
 	}}
-	m.currentTool = &toolCallBlock{name: "edit_file", args: map[string]any{"path": "internal/tui/blocks.go"}}
+	m.trackToolCall("t", &toolCallBlock{name: "edit_file", args: map[string]any{"path": "internal/tui/blocks.go"}})
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"2/3 Refine progress UI", "Editing internal/tui/", "7s", "tab show workflow"} {
+	for _, want := range []string{"2/3 Refine progress UI", "Editing internal/tui/", "7s"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status line missing %q: %q", want, out)
 		}
@@ -487,12 +487,12 @@ func TestStatusLinePreservesElapsedAndControlsWithLongActivity(t *testing.T) {
 	m.workflow = &workflowBlock{items: []workflow.Item{
 		{ID: "1", Text: "Implement a deliberately long workflow step description", Status: workflow.Running},
 	}}
-	m.currentTool = &toolCallBlock{name: "edit_file", args: map[string]any{
+	m.trackToolCall("t", &toolCallBlock{name: "edit_file", args: map[string]any{
 		"path": "a/very/long/path/to/internal/tui/progress_renderer.go",
-	}}
+	}})
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"9s", "tab show workflow", "esc interrupt"} {
+	for _, want := range []string{"9s", "esc interrupt"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("long status line hid %q: %q", want, out)
 		}
@@ -511,7 +511,7 @@ func TestStatusLineKeepsApprovalControlWithWorkflow(t *testing.T) {
 	m.approval = &approvalState{}
 
 	out := plain(m.statusLine())
-	for _, want := range []string{"Waiting for", "tab show workflow", "esc to deny"} {
+	for _, want := range []string{"Waiting for", "esc to deny"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("approval status missing %q: %q", want, out)
 		}
@@ -539,7 +539,7 @@ func TestStatusLineHeightTracksActivityDetail(t *testing.T) {
 	if got := m.statusLineHeight(); got != 1 {
 		t.Fatalf("generic working status height = %d, want 1", got)
 	}
-	m.currentTool = &toolCallBlock{name: "read_file"}
+	m.trackToolCall("t", &toolCallBlock{name: "read_file"})
 	if got := m.statusLineHeight(); got != 1 {
 		t.Fatalf("activity status height = %d, want 1", got)
 	}
@@ -550,10 +550,10 @@ func TestStatusLineUsesApprovalHintAndFitsNarrowWidth(t *testing.T) {
 	m.width = 80
 	m.busy = true
 	m.busySince = time.Now()
-	m.currentTool = &toolCallBlock{
+	m.trackToolCall("t", &toolCallBlock{
 		name: "read_file",
 		args: map[string]any{"path": "a/very/long/path/to/internal/tui/model.go"},
-	}
+	})
 	m.approval = &approvalState{}
 
 	approvalLine := strings.Split(plain(m.statusLine()), "\n")[0]

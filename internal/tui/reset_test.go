@@ -10,7 +10,6 @@ import (
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
 	"github.com/owainlewis/neo/internal/skills"
-	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/tools"
 	"github.com/owainlewis/neo/internal/workflow"
 )
@@ -30,20 +29,13 @@ func TestResetConversationClearsConversationState(t *testing.T) {
 	m.blocks = []block{noticeBlock{text: "old transcript"}}
 	m.busy = true
 	m.busySince = time.Now()
-	m.currentTool = &toolCallBlock{name: "read_file"}
-	group := &parallelBlock{id: "group"}
-	row := &parallelCallRow{id: "call", groupID: "group"}
-	m.parallelGroups = map[string]*parallelBlock{"group": group}
-	m.parallelCalls = map[string]*parallelCallRow{"call": row}
+	m.trackToolCall("t", &toolCallBlock{name: "read_file"})
+	m.trackToolCall("call", &toolCallBlock{name: "bash"})
 	m.workflow = &workflowBlock{
 		title: "Old workflow",
 		items: []workflow.Item{{ID: "step", Text: "Old step", Status: workflow.Running}},
 	}
-	m.workflowVisible = true
 	m.turn = turnStats{tools: 2, errors: 1, workflow: true, direct: true, label: "Review"}
-	tree := newTreeBlock()
-	m.activeTree = tree
-	m.treeIndex = map[int]*treeBlock{1: tree}
 	approvalReply := make(chan bool, 1)
 	m.approval = &approvalState{req: agent.ApprovalRequest{ToolName: "bash"}, reply: approvalReply}
 	canceled := false
@@ -69,17 +61,17 @@ func TestResetConversationClearsConversationState(t *testing.T) {
 	if len(m.blocks) != 0 || m.viewport.TotalLineCount() != 0 {
 		t.Fatalf("rendered transcript was not cleared: blocks=%d lines=%d", len(m.blocks), m.viewport.TotalLineCount())
 	}
-	if m.busy || !m.busySince.IsZero() || m.currentTool != nil {
-		t.Fatalf("active turn state remains: busy=%v since=%v tool=%#v", m.busy, m.busySince, m.currentTool)
+	if m.busy || !m.busySince.IsZero() || len(m.inflight) != 0 {
+		t.Fatalf("active turn state remains: busy=%v since=%v tools=%#v", m.busy, m.busySince, m.inflight)
 	}
-	if m.parallelGroups != nil || m.parallelCalls != nil {
-		t.Fatalf("parallel state remains: groups=%#v calls=%#v", m.parallelGroups, m.parallelCalls)
+	if m.inflight != nil {
+		t.Fatalf("inflight tool state remains: %#v", m.inflight)
 	}
-	if m.workflow != nil || m.workflowVisible {
-		t.Fatalf("workflow state remains: workflow=%#v visible=%v", m.workflow, m.workflowVisible)
+	if m.workflow != nil {
+		t.Fatalf("workflow state remains: %#v", m.workflow)
 	}
-	if m.turn != (turnStats{}) || m.activeTree != nil || m.treeIndex != nil {
-		t.Fatalf("turn or tree state remains: turn=%+v active=%#v index=%#v", m.turn, m.activeTree, m.treeIndex)
+	if m.turn != (turnStats{}) {
+		t.Fatalf("turn state remains: %+v", m.turn)
 	}
 	if m.approval != nil || m.sendCancel != nil || m.pendingSteering != nil || m.queued != nil {
 		t.Fatalf("pending activity remains: approval=%#v cancel=%v steering=%#v queued=%#v",
@@ -172,16 +164,9 @@ func TestResetConversationIgnoresBufferedActivityFromOldGeneration(t *testing.T)
 			Items: []workflow.Item{{ID: "old", Text: "Old step"}},
 		},
 	})
-	m.handleStepEvent(subagent.Event{
-		Generation: oldGeneration,
-		Node:       1,
-		Task:       "Old subagent",
-		Ev:         subagent.AgentEvent{Kind: "start"},
-	})
 
-	if m.workflow != nil || m.workflowVisible || m.activeTree != nil || m.treeIndex != nil || len(m.blocks) != 0 {
-		t.Fatalf("old activity repopulated reset state: workflow=%#v visible=%v tree=%#v index=%#v blocks=%#v",
-			m.workflow, m.workflowVisible, m.activeTree, m.treeIndex, m.blocks)
+	if m.workflow != nil || len(m.blocks) != 0 {
+		t.Fatalf("old activity repopulated reset state: workflow=%#v blocks=%#v", m.workflow, m.blocks)
 	}
 }
 
@@ -208,18 +193,12 @@ func TestOldActivityStaysStaleAfterNewTurnStarts(t *testing.T) {
 			Items: []workflow.Item{{ID: "old", Text: "Old step"}},
 		},
 	})
-	m.handleStepEvent(subagent.Event{
-		Generation: oldGeneration,
-		Node:       1,
-		Task:       "Old subagent",
-		Ev:         subagent.AgentEvent{Kind: "start"},
-	})
 
-	if m.conversationGeneration != newGeneration {
-		t.Fatalf("new turn changed conversation generation: got %d want %d", m.conversationGeneration, newGeneration)
+	if m.conversationGeneration == newGeneration || m.conversationGeneration == oldGeneration {
+		t.Fatalf("new turn should advance the generation past %d and %d, got %d", oldGeneration, newGeneration, m.conversationGeneration)
 	}
-	if m.workflow != nil || m.activeTree != nil || m.treeIndex != nil {
-		t.Fatalf("old activity was relabeled for new turn: workflow=%#v tree=%#v index=%#v", m.workflow, m.activeTree, m.treeIndex)
+	if m.workflow != nil {
+		t.Fatalf("old activity was relabeled for new turn: workflow=%#v", m.workflow)
 	}
 	if len(m.blocks) != 1 {
 		t.Fatalf("old activity appended blocks to new turn: %#v", m.blocks)

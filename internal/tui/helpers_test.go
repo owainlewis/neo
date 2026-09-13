@@ -195,3 +195,9 @@ func TestPadRight(t *testing.T) {
 		})
 	}
 }
+
+// renderPlain renders a block with ANSI styling stripped, so tests can
+// assert on visible content.
+func renderPlain(b block, width int) string {
+	return ansi.Strip(b.render(width, nil))
+}

@@ -653,7 +653,6 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	// prompts directly from the conversation. Sequencing is the agent's
 	// judgment, not a stored workflow artifact.
 	var extra []tools.Tool
-	var stepEvents <-chan subagent.Event
 	var agentRunner *subagent.AgentRunner
 	var agentRunnerFollowsCoordinator bool
 	var workflowEvents <-chan workflow.Event
@@ -664,7 +663,7 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 		var at subagent.AgentTool
 		workerProvider, workerModel, followsCoordinator := subagentBackend(ctx, cfg, prov, model)
 		agentRunnerFollowsCoordinator = followsCoordinator
-		at, stepEvents, agentRunner = chatAgentTool(workerProvider, workerModel, cwd, root, cfg)
+		at, _, agentRunner = chatAgentTool(workerProvider, workerModel, cwd, root, cfg)
 		extra = append(extra, at)
 	}
 	reg := newRegistry(cwd, root, extra...)
@@ -722,7 +721,6 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 	if err := tui.Run(ctx, ag, model, Version, cwd, sk,
 		tui.WithAfterSend(saveSession),
 		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName, streams.err), switchModel),
-		tui.WithStepEvents(stepEvents),
 		tui.WithWorkflowEvents(workflowEvents),
 		tui.WithVerbose(cfg.VerboseEnabled()),
 		tui.WithIO(streams.in, streams.out),

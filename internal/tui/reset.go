@@ -29,14 +29,9 @@ func (m *model) resetConversation() {
 	m.rendered = nil
 	m.busy = false
 	m.busySince = time.Time{}
-	m.currentTool = nil
-	m.parallelGroups = nil
-	m.parallelCalls = nil
+	m.inflight = nil
 	m.workflow = nil
-	m.workflowVisible = false
 	m.turn = turnStats{}
-	m.activeTree = nil
-	m.treeIndex = nil
 	m.pendingSteering = nil
 	m.queued = nil
 	m.models = modelBrowser{}
