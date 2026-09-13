@@ -1,5 +1,4 @@
-// Package config loads neo's single configuration file
-// (neo.yaml / ~/.neo/config.yaml / embedded default).
+// Package config layers project and user configuration over embedded defaults.
 package config
 
 import (
@@ -119,14 +118,18 @@ func featureEnabled(flag *bool, def bool) bool {
 	return *flag
 }
 
-// Load reads the first available config file:
-//
-//	./neo.yaml → ~/.neo/config.yaml → embedded default
-//
-// First hit wins — no merging.
+// Load overlays user and project configuration on embedded defaults.
+// Missing files are skipped; malformed or unreadable files fail the load.
 func Load() (*Config, error) {
+	cfg, err := parseConfig(embeddedConfigYAML, "embedded:neo.yaml")
+	if err != nil {
+		return nil, err
+	}
+	// Resolve the provider-dependent model only after all overlays. An explicit
+	// model in either user file is inherited normally, even across providers.
+	cfg.Model = ""
+	cfg.source = "embedded"
 	home, _ := os.UserHomeDir()
-
 	for _, path := range configPaths(home) {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -135,28 +138,25 @@ func Load() (*Config, error) {
 			}
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
-		cfg, err := parseConfig(b, path)
-		if err != nil {
+		// Validate each file independently so overlays cannot hide invalid or
+		// removed settings. Decode raw values to avoid inheriting derived defaults.
+		if _, err := parseConfig(b, path); err != nil {
 			return nil, err
 		}
+		if err := yaml.Unmarshal(b, cfg); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 		cfg.source = path
-		return cfg, nil
 	}
-
-	cfg, err := parseConfig(embeddedConfigYAML, "embedded:neo.yaml")
-	if err != nil {
-		return nil, err
-	}
-	cfg.source = "embedded"
-	return cfg, nil
+	return normalizeConfig(cfg, cfg.source)
 }
 
 func configPaths(home string) []string {
-	paths := []string{projectConfigName}
+	var paths []string
 	if home != "" {
 		paths = append(paths, filepath.Join(home, userConfigDir, userConfigName))
 	}
-	return paths
+	return append(paths, projectConfigName)
 }
 
 func parseConfig(b []byte, source string) (*Config, error) {
@@ -175,6 +175,10 @@ func parseConfig(b []byte, source string) (*Config, error) {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", source, err)
 	}
+	return normalizeConfig(&c, source)
+}
+
+func normalizeConfig(c *Config, source string) (*Config, error) {
 	if c.Provider == "" {
 		c.Provider = defaultProvider
 	}
@@ -213,7 +217,7 @@ func parseConfig(b []byte, source string) (*Config, error) {
 		approvals = append(approvals, entry)
 	}
 	c.ToolApprovals = approvals
-	return &c, nil
+	return c, nil
 }
 
 func knownProvider(provider string) bool {
@@ -258,6 +262,6 @@ func defaultModelFor(provider, openAIAuth string) string {
 	}
 }
 
-// Source describes where this Config was loaded from (a file path or
-// "embedded"). Useful in error messages and diagnostics.
+// Source returns the highest-precedence file loaded, or "embedded" if neither
+// user nor project configuration exists. Values may come from earlier layers.
 func (c *Config) Source() string { return c.source }

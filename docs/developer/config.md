@@ -1,12 +1,26 @@
 # Configuration
 
-Neo loads the first available config:
+Neo merges configuration in increasing precedence:
 
-1. `./neo.yaml`
+1. Embedded defaults from `internal/config/defaults/neo.yaml`
 2. `~/.neo/config.yaml`
-3. Embedded defaults from `internal/config/defaults/neo.yaml`
+3. `./neo.yaml`
 
-First hit wins. Config files are not merged.
+Missing files are skipped. Invalid or unreadable files fail loading, even when a
+higher-precedence file exists. Project files can contain only the settings they
+want to override; nested fields inherit individually. Explicit `false` and zero
+values override inherited values. Lists replace inherited lists; use
+`tool_approvals: []` to clear global approvals. YAML null resets pointer and list
+fields; scalar and nested struct fields retain their inherited values.
+
+When neither user file supplies a model, Neo chooses the default for the merged
+provider and OpenAI auth mode. An explicit global model is inherited even if the
+project changes provider; set `model: ""` to select that provider's default.
+Subagent backend defaults are also resolved after merging. `Source()` reports
+the highest-precedence file loaded (or `embedded` when neither file exists).
+
+The repository ignores its local `/neo.yaml` so personal project overrides stay
+out of commits.
 
 ## Default Config
 
@@ -72,7 +86,7 @@ The top-level `provider` selects the backend for a session. In the TUI, `/model`
 
 ## Feature Flags
 
-Each feature flag is tri-state in Go: absent means use the built-in default, while explicit `false` disables that capability.
+Each feature flag is tri-state in Go: absent means inherit the lower-precedence value or built-in default, while explicit `false` disables that capability.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
@@ -82,7 +96,7 @@ Each feature flag is tri-state in Go: absent means use the built-in default, whi
 
 ## Output
 
-`output.verbose` is tri-state, same as feature flags: absent or `false` means concise mode (the default).
+`output.verbose` is tri-state, same as feature flags: absent inherits the lower-precedence value; `false` selects concise mode (the default).
 
 | Setting | Default | Effect |
 | --- | --- | --- |
