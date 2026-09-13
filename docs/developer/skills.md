@@ -36,7 +36,13 @@ replaces a built-in of the same name. To change how `/review` behaves in one
 repository, create `.neo/skills/review/SKILL.md`. Built-ins keep their order
 at the front of the slash picker; discovered skills follow, sorted by name.
 
-A `SKILL.md` has optional YAML frontmatter and a markdown body:
+Symlinked skill directories are followed, including user-global links to a
+separate dotfiles directory. Files with read or YAML errors are skipped with
+path-specific warnings; valid skills and lower-priority fallbacks remain usable.
+Each discovered `SKILL.md`, including frontmatter, is limited to 32 KiB; larger
+files are skipped with a warning instead of injecting partial instructions.
+
+A `SKILL.md` has optional YAML frontmatter (LF or CRLF) and a markdown body:
 
 ```markdown
 ---
