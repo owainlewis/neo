@@ -149,8 +149,9 @@ type approvalRequestMsg struct {
 }
 
 type approvalState struct {
-	req   agent.ApprovalRequest
-	reply chan bool
+	req      agent.ApprovalRequest
+	reply    chan bool
+	selected rune
 }
 
 type turnStats struct {

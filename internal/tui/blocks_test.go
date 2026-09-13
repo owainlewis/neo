@@ -51,7 +51,7 @@ func TestApprovalBlockRenderShowsToolAndChoices(t *testing.T) {
 	if !strings.Contains(firstLine(out), "approval required") {
 		t.Fatalf("approval prompt should stay on the first line, got:\n%s", out)
 	}
-	for _, want := range []string{"write notes.md", "2 lines", "keys: y approve", "n/esc deny"} {
+	for _, want := range []string{"write notes.md", "2 lines", "keys: y/n select", "enter confirm", "esc deny"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("approval block missing %q:\n%s", want, out)
 		}

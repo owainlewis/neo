@@ -47,8 +47,9 @@ Neo trims entries when loading configuration, rejects empty entries, and keeps
 the first exact duplicate. It does not parse command chains or attempt to find
 equivalent commands.
 
-Each match prompts every time. Press `y` to run the call or `n`/`esc` to reject
-it. Direct `!` commands use the same matcher.
+Each match prompts every time. Press `y` or `n` to select an answer, then Enter
+to confirm it. Escape rejects immediately. Direct `!` commands use the same
+matcher.
 
 ## Scope
 
