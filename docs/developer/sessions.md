@@ -9,7 +9,9 @@ Neo stores resumable conversations under `~/.neo/sessions/` by default.
 | `index.json` | Metadata index used by `neo sessions`. |
 | `<session-id>.json` | Full session metadata and transcript. |
 
-Session files are written atomically with a sibling temp file and rename.
+Session files are written atomically with a sibling temp file and rename. The
+temp file is synced before rename. The parent directory is not synced, so
+rename durability across a crash depends on the filesystem.
 
 ## Resume Surfaces
 

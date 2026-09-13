@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/owainlewis/neo/internal/atomicfile"
 	"github.com/owainlewis/neo/internal/llm"
 )
 
@@ -271,7 +270,7 @@ func (w WriteFile) Run(ctx context.Context, input map[string]any) (string, error
 	if err != nil {
 		return "", err
 	}
-	if err := atomicWrite(path, []byte(content)); err != nil {
+	if err := writeSourceFile(path, []byte(content)); err != nil {
 		return "", err
 	}
 	// Re-stamp so this write does not read as an external change later.
@@ -333,7 +332,7 @@ func (e EditFile) Run(ctx context.Context, input map[string]any) (string, error)
 		return "", fmt.Errorf("edit_file: old_string found %d times in %s; include more surrounding text so it is unique", n, path)
 	}
 	out := strings.Replace(s, oldStr, newStr, 1)
-	if err := atomicWrite(path, []byte(out)); err != nil {
+	if err := writeSourceFile(path, []byte(out)); err != nil {
 		return "", err
 	}
 	// The agent has seen the result of its own edit, so it is not stale.
@@ -341,6 +340,10 @@ func (e EditFile) Run(ctx context.Context, input map[string]any) (string, error)
 	return fmt.Sprintf("edited %s", path), nil
 }
 
-func atomicWrite(path string, content []byte) error {
-	return atomicfile.WritePreserveMode(path, content, 0o644, 0o755)
+func writeSourceFile(path string, content []byte) error {
+	// Write in place so symlinks, hard links, and ownership are preserved.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o644)
 }

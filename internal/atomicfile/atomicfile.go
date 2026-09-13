@@ -1,4 +1,4 @@
-// Package atomicfile provides small helpers for crash-safe file replacement.
+// Package atomicfile provides small helpers for atomic file replacement.
 package atomicfile
 
 import (
@@ -9,7 +9,8 @@ import (
 
 // Write replaces path with b by writing a sibling temp file and renaming it
 // into place. Parent directories are created with dirPerm and the replacement
-// file is written with perm.
+// file is written with perm. The temp file is synced before rename, but the
+// parent directory is not synced, so rename durability depends on the filesystem.
 func Write(path string, b []byte, perm, dirPerm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
@@ -29,6 +30,10 @@ func Write(path string, b []byte, perm, dirPerm os.FileMode) error {
 	if _, err := tmp.Write(b); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)

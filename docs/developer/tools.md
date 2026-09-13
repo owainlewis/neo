@@ -51,6 +51,14 @@ with a raised headless budget. Which deadline fired is read when the command is
 stopped, not after it is reaped, so a slow reap that outlasts the run budget
 still reports the command's own timeout.
 
+## File writes
+
+`write_file` and `edit_file` write source files in place, following symlinks and
+preserving existing file identity, hard links, ownership, and permissions.
+New files use mode `0644` (subject to the process umask). These writes are not
+atomic: an interrupted or failed write can leave partial content. Atomic
+replacement is reserved for session and credential storage.
+
 ## Stale edits
 
 `read_file` records each file's modification time and size. `edit_file` refuses
