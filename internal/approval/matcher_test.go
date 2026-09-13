@@ -18,7 +18,7 @@ func TestMatcherRequiresToolOrBashPrefix(t *testing.T) {
 		{name: "exact command", tool: "bash", args: map[string]any{"command": "git"}, want: true},
 		{name: "token boundary", tool: "bash", args: map[string]any{"command": "github status"}, want: false},
 		{name: "case sensitive", tool: "bash", args: map[string]any{"command": "Git status"}, want: false},
-		{name: "not at command start", tool: "bash", args: map[string]any{"command": "cd repo && git status"}, want: false},
+		{name: "later command", tool: "bash", args: map[string]any{"command": "cd repo && git status"}, want: true},
 	}
 
 	for _, tt := range tests {
@@ -37,5 +37,52 @@ func TestMatcherCopiesRules(t *testing.T) {
 
 	if !matcher.Requires("bash", map[string]any{"command": "git status"}) {
 		t.Fatal("matcher rules changed with caller slice")
+	}
+}
+
+func TestMatcherShellCommands(t *testing.T) {
+	matcher := New([]string{"git push", "rm -rf"})
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{"cd sub && git push", true},
+		{"git  push", true},
+		{"git\tpush origin main", true},
+		{"VAR=1 git push", true},
+		{"_VAR2='two words' OTHER= git push", true},
+		{`sh -c "git push"`, true},
+		{`bash -c 'cd sub && VAR=1 git  push'`, true},
+		{`sh -c 'sh -c "git push"'`, true},
+		{"echo a; rm -rf b", true},
+		{"false || git push", true},
+		{"echo a | git push", true},
+		{"echo a\ngit push", true},
+		{"echo a & git push", true},
+		{"git pushy", false},
+		{"Git push", false},
+		{"echo git push", false},
+		{`echo "a; rm -rf b"`, false},
+		{`echo 'a && git push'`, false},
+		{`echo a\; rm -rf b`, false},
+		{`VAR="a; b" git push`, true},
+		{`VAR="git push"`, false},
+		{"1VAR=1 git push", false},
+		{"VAR-NAME=1 git push", false},
+		{"=1 git push", false},
+		{`sh -c 'echo git push'`, false},
+		{`sh -c 'echo ok' git push`, false},
+		{"", false},
+		{" ; && \n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			if got := matcher.Requires("bash", map[string]any{"command": tt.command}); got != tt.want {
+				t.Fatalf("Requires(%q) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+	if matcher.Requires("read_file", map[string]any{"command": "git push"}) {
+		t.Fatal("command matching must only apply to bash")
 	}
 }
