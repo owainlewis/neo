@@ -110,13 +110,26 @@ tool_approvals:
   - write_file
 ```
 
-Each entry matches both an exact tool name and the start of a Bash command.
-Matching is literal and case-sensitive. The next command character must be
-whitespace or the end, so `git` matches `git status` but not `github`.
+Each entry matches both an exact tool name and a Bash command prefix.
+Matching is case-sensitive and compares complete decoded words, so `git`
+matches `git status` but not `github`. Rules use the same quote and escape
+normalization as commands: `git "foo bar"` matches `git foo\ bar`, but not
+`git foo bar` (two separate arguments).
+
+Bash commands are split at unquoted `&&`, `||`, `;`, `|`, `&`, and newlines.
+Leading `VAR=value` assignments are stripped from each segment, and whitespace
+between words is normalized before matching. Quotes and escapes keep argument
+text together, so `echo "a; rm -rf b"` does not match `rm -rf`. Literal scripts
+passed to `sh -c` and `bash -c` are inspected too, including combined short
+options (`bash -ec`) and preceding options (`bash --noprofile -c`). Unquoted
+`#` at the start of a word begins a comment; its text is ignored until newline.
+For example, a `git push` entry matches `cd sub && git push`, `git  push`, `VAR=1 git push`, and
+`sh -c "git push"`.
 
 Entries are trimmed when loaded. Empty entries are rejected and exact
-duplicates keep their first position. Neo does not parse shell chains,
-wrappers, aliases, variables, scripts, or substitutions.
+duplicates keep their first position. This is lexical matching, not full shell
+parsing: other wrappers, aliases, variable expansion, script files, and
+substitutions are not resolved.
 
 This is optional user-interface friction, not a security boundary. It is not
 passed to `neo run` or child agents. The VM or sandbox must control filesystem,
