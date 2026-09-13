@@ -31,7 +31,7 @@ type PromptOptions struct {
 
 // Budget is enforced by the runtime regardless of what an agent asks for.
 type Budget struct {
-	MaxAgents int           // session-wide cap on subagents
+	MaxAgents int           // maximum in-flight subagents
 	MaxWall   time.Duration // per subagent
 }
 
