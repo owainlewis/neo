@@ -1,6 +1,6 @@
 # neo default configuration.
 # Override by creating ./neo.yaml in a project, or ~/.neo/config.yaml globally.
-# The first file found wins — config files are NOT merged.
+# Defaults are overlaid by global config, then project config, field by field.
 
 # LLM backend: "anthropic" (default), "openai", "openrouter", or "google".
 # anthropic  → requires ANTHROPIC_API_KEY
@@ -63,10 +63,10 @@ output:
 # Example provider configurations
 # ----------------------------------------------------------------------------
 # Copy ONE of the blocks below over the `provider`/`model` lines above to switch
-# backends. Remember: the first config file found wins, so edit the file neo is
-# actually loading (./neo.yaml in a project, or ~/.neo/config.yaml globally).
+# backends. Project settings override global settings; omitted fields inherit.
 #
-# Leave `model` unset to use the provider's built-in default. Model names move
+# Set `model: ""` to use the provider's built-in default instead of an inherited
+# model (also used when neither user file supplies a model). Model names move
 # fast — check each provider's current model list rather than copying an id from
 # here verbatim.
 #

@@ -515,3 +515,134 @@ func TestPermissions_RejectsRemovedConfigWithMigration(t *testing.T) {
 		}
 	})
 }
+
+func TestLoad_MergesLayers(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		if err := os.MkdirAll(filepath.Join(dir, ".neo"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		global := filepath.Join(dir, ".neo", "config.yaml")
+		writeFile(t, global, `provider: openai
+openai_auth: subscription
+model: global-model
+subagents:
+  provider: google
+  model: global-worker
+features:
+  agents_file: false
+  skills: false
+output:
+  verbose: true
+tool_approvals: [git, write_file]
+`)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Source() != global || cfg.Model != "global-model" || cfg.Compaction.ContextWindowTokens != 200000 {
+			t.Fatalf("global config did not inherit defaults: %#v", cfg)
+		}
+		writeFile(t, "neo.yaml", `model: project-model
+subagents:
+  model: project-worker
+features:
+  skills: true
+output:
+  verbose: false
+`)
+		cfg, err = Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Source() != "neo.yaml" || cfg.Model != "project-model" || !cfg.SubscriptionAuth() {
+			t.Fatalf("project backend: %#v", cfg)
+		}
+		if cfg.Subagents.Provider != "google" || cfg.Subagents.Model != "project-worker" {
+			t.Fatalf("subagent merge: %#v", cfg.Subagents)
+		}
+		if cfg.AgentsFileEnabled() || !cfg.SkillsEnabled() || !cfg.PromptCachingEnabled() || cfg.VerboseEnabled() {
+			t.Fatal("nested flags did not inherit or override correctly")
+		}
+		if len(cfg.ToolApprovals) != 2 || cfg.Compaction.ContextWindowTokens != 200000 {
+			t.Fatalf("inherited settings: %#v", cfg)
+		}
+		t.Run("null resets", func(t *testing.T) {
+			writeFile(t, "neo.yaml", "features:\n  skills: null\noutput:\n  verbose: null\ntool_approvals: null\n")
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Features.Skills != nil || !cfg.SkillsEnabled() {
+				t.Fatal("null skills did not reset inherited false to the built-in default")
+			}
+			if cfg.Output.Verbose != nil || cfg.VerboseEnabled() {
+				t.Fatal("null verbose did not reset inherited true to the built-in default")
+			}
+			if len(cfg.ToolApprovals) != 0 {
+				t.Fatalf("null approvals did not clear inherited list: %v", cfg.ToolApprovals)
+			}
+			if cfg.AgentsFileEnabled() || cfg.Model != "global-model" {
+				t.Fatal("null resets changed omitted inherited settings")
+			}
+		})
+		for _, tc := range []struct {
+			name, project, model string
+			approvals            int
+		}{
+			{"empty file", "", "global-model", 2},
+			{"replace list", "tool_approvals: [read_file]\n", "global-model", 1},
+			{"clear list", "tool_approvals: []\n", "global-model", 0},
+			{"inherited explicit model", "provider: google\n", "global-model", 2},
+			{"reset model", "provider: google\nmodel: \"\"\n", defaultGoogleModel, 2},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				writeFile(t, "neo.yaml", tc.project+"compaction:\n  context_window_tokens: 0\n")
+				cfg, err := Load()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Model != tc.model || len(cfg.ToolApprovals) != tc.approvals || cfg.Compaction.ContextWindowTokens != 0 {
+					t.Fatalf("merged config: %#v", cfg)
+				}
+			})
+		}
+	})
+}
+
+func TestLoad_ResolvesDefaultsAfterMerging(t *testing.T) {
+	withTempDir(t, func(dir string) {
+		t.Setenv("HOME", dir)
+		if err := os.MkdirAll(filepath.Join(dir, ".neo"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(dir, ".neo", "config.yaml"), "provider: openai\nsubagents:\n  model: worker\n")
+		writeFile(t, "neo.yaml", "openai_auth: subscription\n")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Model != defaultCodexModel || cfg.Subagents.Provider != "openai" || cfg.Subagents.Model != "worker" {
+			t.Fatalf("derived defaults: %#v", cfg)
+		}
+	})
+}
+
+func TestLoad_DoesNotHideInvalidGlobalConfig(t *testing.T) {
+	for _, body := range []string{"model: [unclosed", "permissions: {}", "phases: {}", "openai_auth: invalid", "tool_approvals: ['']", "features: wrong-type"} {
+		t.Run(body, func(t *testing.T) {
+			withTempDir(t, func(dir string) {
+				t.Setenv("HOME", dir)
+				if err := os.MkdirAll(filepath.Join(dir, ".neo"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				global := filepath.Join(dir, ".neo", "config.yaml")
+				writeFile(t, global, body)
+				writeFile(t, "neo.yaml", "model: valid\n")
+				if _, err := Load(); err == nil || !strings.Contains(err.Error(), global) {
+					t.Fatalf("expected global config error, got %v", err)
+				}
+			})
+		})
+	}
+}
