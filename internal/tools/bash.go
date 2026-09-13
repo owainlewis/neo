@@ -112,7 +112,15 @@ func (b Bash) timeoutFor(input map[string]any) (time.Duration, error) {
 	if seconds >= ceiling.Seconds() {
 		return ceiling, nil
 	}
-	return time.Duration(seconds * float64(time.Second)), nil
+	// A positive number can still round to nothing: a Duration counts whole
+	// nanoseconds, so 1e-10 seconds truncates to zero and the deadline expires
+	// before the command starts. Saying so beats an instant cancellation the
+	// model would read as the command being slow.
+	d := time.Duration(seconds * float64(time.Second))
+	if d <= 0 {
+		return 0, fmt.Errorf("input timeout is too small to run a command, got %v seconds", v)
+	}
+	return d, nil
 }
 
 func (b Bash) Run(ctx context.Context, input map[string]any) (string, error) {
@@ -146,11 +154,19 @@ func (b Bash) Run(ctx context.Context, input map[string]any) (string, error) {
 	}()
 
 	var runErr error
-	var ctxErr error
+	var ctxErr, parentErr error
+	var stopped time.Duration
 	select {
 	case runErr = <-done:
 	case <-ctx.Done():
 		ctxErr = ctx.Err()
+		// Record which deadline fired and how long the command had run now,
+		// not after the wait below: a process that is slow to reap can outlive
+		// the agent's budget, and then a command that really did outrun its
+		// own timeout would be blamed on a deadline that had not yet expired
+		// when it was killed, and reported as having run for the reap too.
+		parentErr = parent.Err()
+		stopped = time.Since(start)
 		killProcessGroup(c)
 		runErr = <-done
 	}
@@ -161,8 +177,8 @@ func (b Bash) Run(ctx context.Context, input map[string]any) (string, error) {
 			// The command's own deadline is not the only one: the agent's run
 			// budget can expire first. Blaming the requested timeout then
 			// tells the model a fast command was slow.
-			if parent.Err() == context.DeadlineExceeded {
-				return out, fmt.Errorf("bash command stopped after %s by the agent's deadline, before its %s timeout: %w", time.Since(start).Round(time.Second), timeout, ctxErr)
+			if parentErr == context.DeadlineExceeded {
+				return out, fmt.Errorf("bash command stopped after %s by the agent's deadline, before its %s timeout: %w", stopped.Round(time.Millisecond), timeout, ctxErr)
 			}
 			return out, fmt.Errorf("bash command exceeded timeout %s: %w", timeout, ctxErr)
 		}

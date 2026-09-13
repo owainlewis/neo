@@ -5,7 +5,9 @@ import (
 	"errors"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -227,7 +229,9 @@ func TestBash_TimeoutForResolution(t *testing.T) {
 func TestBash_TimeoutForRejectsUnusableValues(t *testing.T) {
 	// Falling back to the default would kill a long command at two minutes
 	// with an error that never mentions the ignored argument.
-	for _, v := range []any{"soon", "5m", "", float64(0), float64(-5), "1e-400", math.NaN(), "NaN", true} {
+	// A positive value that truncates to a zero Duration belongs here too:
+	// running with it would cancel the command before it started.
+	for _, v := range []any{"soon", "5m", "", float64(0), float64(-5), "1e-400", 1e-10, "1e-10", math.NaN(), "NaN", true} {
 		if got, err := (Bash{}).timeoutFor(map[string]any{"timeout": v}); err == nil {
 			t.Fatalf("timeout %v: expected error, got %s", v, got)
 		}
@@ -288,6 +292,56 @@ func TestBash_OuterDeadlineIsNotBlamedOnTheRequestedTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "agent's deadline") {
 		t.Fatalf("error should attribute the stop to the outer deadline, got %v", err)
+	}
+}
+
+func TestBash_AgentDeadlineReportsTimeBeforeTheKill(t *testing.T) {
+	// The elapsed time in that message has to be measured when the command is
+	// stopped. Reaping a child that escaped the process group can take far
+	// longer than the command ran, and reporting that total tells the model a
+	// command killed on the spot was the slow one.
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid is needed to detach a child from the process group")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	out, err := Bash{}.Run(ctx, map[string]any{"command": "setsid sleep 1 & sleep 5"})
+	if err == nil {
+		t.Fatalf("expected deadline error, got nil (out=%q)", out)
+	}
+	m := regexp.MustCompile(`stopped after ([0-9a-z.µ]+) by`).FindStringSubmatch(err.Error())
+	if m == nil {
+		t.Fatalf("error does not report how long the command ran, got %v", err)
+	}
+	ran, parseErr := time.ParseDuration(m[1])
+	if parseErr != nil {
+		t.Fatalf("reported duration %q is unparseable: %v", m[1], parseErr)
+	}
+	if ran >= 500*time.Millisecond {
+		t.Fatalf("reported %s, but the command was killed at the 100ms deadline: %v", ran, err)
+	}
+}
+
+func TestBash_CommandTimeoutIsNotBlamedOnTheAgentDeadline(t *testing.T) {
+	// Reaping can outlast the agent's budget: a child that left the process
+	// group survives the kill and holds the output pipe open, so the wait
+	// after the kill runs past the outer deadline. The command still died of
+	// its own timeout, and the error has to say that.
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid is needed to detach a child from the process group")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	b := Bash{Timeout: 100 * time.Millisecond}
+	out, err := b.Run(ctx, map[string]any{"command": "setsid sleep 1 & sleep 5"})
+	if err == nil {
+		t.Fatalf("expected timeout error, got nil (out=%q)", out)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected a deadline error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "exceeded timeout 100ms") {
+		t.Fatalf("error should blame the command's own timeout, got %v", err)
 	}
 }
 

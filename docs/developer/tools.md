@@ -38,14 +38,18 @@ never yields less than saying nothing.
 
 A request above the ceiling is clamped rather than rejected, so an over-eager
 number still runs the command instead of wasting a turn. A value that is not a
-positive number is an error: falling back to the default would kill the long
-command anyway, with a message that never mentions the ignored argument.
+positive number is an error, as is one too small to survive the conversion to a
+duration: falling back to the default would kill the long command anyway, with a
+message that never mentions the ignored argument, and a zero deadline would
+cancel the command before it started.
 
 The command's own deadline is not the only one it can hit. `neo run` bounds the
 whole session (10 minutes by default, `--timeout` to change it), and when that
 expires first the error says so rather than blaming the requested timeout. It
 also means a `timeout` near the ceiling is only reachable in interactive chat or
-with a raised headless budget.
+with a raised headless budget. Which deadline fired is read when the command is
+stopped, not after it is reaped, so a slow reap that outlasts the run budget
+still reports the command's own timeout.
 
 ## Stale edits
 
