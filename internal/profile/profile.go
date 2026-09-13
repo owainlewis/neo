@@ -8,6 +8,7 @@
 package profile
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,7 +42,7 @@ func dirs(cwd string) []string {
 
 // Load returns the named profile. An unknown name is an error listing what is
 // available: falling back to the built-in prompt would turn a typo into a
-// silently wrong agent.
+// silently wrong agent. A found profile may accompany non-fatal discovery errors.
 func Load(cwd, name string) (Profile, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
@@ -52,15 +53,12 @@ func Load(cwd, name string) (Profile, error) {
 	}
 
 	found, err := List(cwd)
-	if err != nil {
-		return Profile{}, err
-	}
 	for _, p := range found {
 		if p.Name == name {
-			return p, nil
+			return p, err
 		}
 	}
-	return Profile{}, fmt.Errorf("agent %q not found%s", name, availableSuffix(found, cwd))
+	return Profile{}, errors.Join(err, fmt.Errorf("agent %q not found%s", name, availableSuffix(found, cwd)))
 }
 
 func availableSuffix(found []Profile, cwd string) string {
@@ -75,13 +73,15 @@ func availableSuffix(found []Profile, cwd string) string {
 }
 
 // List returns every discovered profile, sorted by name, with project files
-// shadowing user-global ones. A missing directory is not an error.
+// shadowing user-global ones. Read errors accompany the valid profiles.
+// A missing directory is not an error.
 func List(cwd string) ([]Profile, error) {
+	var loadErrs []error
 	byName := map[string]Profile{}
 	for _, dir := range dirs(cwd) {
 		found, err := loadDir(dir)
 		if err != nil {
-			return nil, err
+			loadErrs = append(loadErrs, err)
 		}
 		for _, p := range found {
 			byName[p.Name] = p
@@ -92,7 +92,7 @@ func List(cwd string) ([]Profile, error) {
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return out, errors.Join(loadErrs...)
 }
 
 func loadDir(dir string) ([]Profile, error) {
@@ -104,6 +104,7 @@ func loadDir(dir string) ([]Profile, error) {
 		return nil, fmt.Errorf("read %s: %w", dir, err)
 	}
 	var out []Profile
+	var loadErrs []error
 	for _, e := range entries {
 		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".md") {
 			continue
@@ -111,7 +112,8 @@ func loadDir(dir string) ([]Profile, error) {
 		path := filepath.Join(dir, e.Name())
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
+			loadErrs = append(loadErrs, fmt.Errorf("read %s: %w", path, err))
+			continue
 		}
 		body := strings.TrimSpace(string(b))
 		if body == "" {
@@ -123,5 +125,5 @@ func loadDir(dir string) ([]Profile, error) {
 			Path: path,
 		})
 	}
-	return out, nil
+	return out, errors.Join(loadErrs...)
 }
