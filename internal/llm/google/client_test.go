@@ -422,3 +422,40 @@ func TestToParts_DropsForeignRawBlocks(t *testing.T) {
 		t.Fatalf("foreign raw block leaked into Gemini request: %+v", parts)
 	}
 }
+
+// Gemini omits args on a zero-argument call. The raw part is replayed
+// verbatim on continuation, so it must be normalized to {} there too:
+// args is required and null is rejected.
+func TestComplete_ReplaysZeroArgumentCallWithEmptyArgs(t *testing.T) {
+	var captured request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"ls"}}]}}]}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	first, err := client.Complete(context.Background(), llm.Request{Model: "gemini-test", Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "list"}}},
+	}})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	call := first.Content[0]
+	if call.Type != "tool_use" || call.Input == nil {
+		t.Fatalf("zero-argument call not normalized: %+v", call)
+	}
+
+	if _, err := client.Complete(context.Background(), llm.Request{Model: "gemini-test", Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "text", Text: "list"}}},
+		{Role: llm.RoleAssistant, Content: first.Content},
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: "tool_result", ToolUseID: call.ID, Content: "a.txt"}}},
+	}}); err != nil {
+		t.Fatalf("continuation: %v", err)
+	}
+	raw, _ := json.Marshal(captured.Contents[1].Parts[0])
+	if !strings.Contains(string(raw), `"args":{}`) {
+		t.Fatalf("replayed zero-argument call = %s, want \"args\":{}", raw)
+	}
+}

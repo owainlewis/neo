@@ -76,7 +76,22 @@ type wireMessage struct {
 
 type wireBlock struct {
 	llm.ContentBlock
-	CacheControl *cacheControl `json:"cache_control,omitempty"`
+	// Input shadows ContentBlock.Input, whose omitempty tag drops an empty map.
+	// The Messages API requires input on every tool_use, so a zero-argument
+	// call must still send {} or the request is rejected on replay.
+	Input        json.RawMessage `json:"input,omitempty"`
+	CacheControl *cacheControl   `json:"cache_control,omitempty"`
+}
+
+// newWireBlock converts a neutral block for the wire, materializing tool_use
+// input as JSON so an empty object survives.
+func newWireBlock(b llm.ContentBlock) wireBlock {
+	b.Raw = nil
+	out := wireBlock{ContentBlock: b}
+	if b.Type == "tool_use" {
+		out.Input = llm.MarshalToolInput(b.Input)
+	}
+	return out
 }
 
 // systemBlock is an Anthropic system content block. A non-nil CacheControl marks
@@ -162,8 +177,7 @@ func wireMessages(in []llm.Message, cache bool) []wireMessage {
 		for _, b := range m.Content {
 			switch b.Type {
 			case "text", "tool_use", "tool_result", "image":
-				b.Raw = nil
-				blocks = append(blocks, wireBlock{ContentBlock: b})
+				blocks = append(blocks, newWireBlock(b))
 			}
 		}
 		if len(blocks) == 0 {

@@ -261,12 +261,11 @@ func toInput(req llm.Request) []inputItem {
 					}
 				case "tool_use":
 					flushMessage()
-					args, _ := json.Marshal(b.Input)
 					out = append(out, inputItem{
 						Type:      "function_call",
 						CallID:    b.ID,
 						Name:      b.Name,
-						Arguments: string(args),
+						Arguments: string(llm.MarshalToolInput(b.Input)),
 					})
 				case "raw":
 					if len(b.Raw) > 0 && replayableRawItem(b.Raw) {
