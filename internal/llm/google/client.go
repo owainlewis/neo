@@ -311,6 +311,11 @@ func toParts(blocks []llm.ContentBlock, toolRefs map[string]toolRef) []part {
 		case "tool_use":
 			wireID := b.ID
 			if p, ok := replayPart(b); ok && p.FunctionCall != nil && p.FunctionCall.Name == b.Name {
+				if p.FunctionCall.Args == nil {
+					// Gemini omits args on a zero-argument call; args is
+					// required on replay, so send {} rather than null.
+					p.FunctionCall.Args = map[string]any{}
+				}
 				parts = append(parts, p)
 				wireID = p.FunctionCall.ID
 			} else {
