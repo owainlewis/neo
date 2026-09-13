@@ -21,7 +21,6 @@ import (
 	"github.com/owainlewis/neo/internal/config"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
-	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/profile"
 	"github.com/owainlewis/neo/internal/projectctx"
 	"github.com/owainlewis/neo/internal/session"
@@ -310,13 +309,13 @@ func newRegistry(cwd, root string, extra ...tools.Tool) *tools.Registry {
 }
 
 // chatSystem builds the chat agent's system prompt as ordered blocks: a stable,
-// cacheable base (the static instructions plus phase and skill catalogs) followed by
+// cacheable base (the static instructions plus the skill catalog) followed by
 // uncached dynamic session context blocks. Splitting it this way lets prompt
 // caching reuse the base across turns and sessions while the project tail
 // varies. Discovery errors are non-fatal, warning and falling back to the blocks
 // built so far rather than failing to start.
 func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, agentProfile profile.Profile, reg *tools.Registry, errOut io.Writer) (string, []llm.SystemBlock) {
-	// Base block: static instructions plus phase and skill catalogs. Stable within a session
+	// Base block: static instructions plus the skill catalog. Stable within a session
 	// and largely reused across them, so it's the cache breakpoint.
 	//
 	// An agent profile replaces the instructions outright rather than appending
@@ -327,8 +326,7 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, agentProfile 
 		instructions = agentProfile.Body
 	}
 	instructions += capabilitySections(reg)
-	base := phase.Augment(instructions, cfg.NamedPhases())
-	base = skills.Augment(base, sk)
+	base := skills.Augment(instructions, sk)
 	cache := cfg.PromptCachingEnabled()
 	blocks := []llm.SystemBlock{{Text: base, Cache: cache}}
 	// Dynamic tail: everything below is kept uncached and after the breakpoint
@@ -462,9 +460,10 @@ func runHeadless(ctx context.Context, args []string, agentName string, streams s
 	if !ok {
 		return 1
 	}
-	sk := loadSkills(cfg, cwd, streams.err)
+	// Skills are not advertised in headless runs: /name and $name invocation
+	// are interactive, so the catalog would only spend prompt tokens.
 	reg := newRegistry(cwd, root)
-	system, systemBlocks := chatSystem(cfg, cwd, sk, agentProfile, reg, streams.err)
+	system, systemBlocks := chatSystem(cfg, cwd, nil, agentProfile, reg, streams.err)
 
 	var toolCalls, toolErrors int
 	ag := agent.New(agent.Config{
@@ -722,7 +721,6 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	if err := tui.Run(ctx, ag, model, Version, cwd, sk,
 		tui.WithAfterSend(saveSession),
-		tui.WithPhases(cfg.NamedPhases()),
 		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName, streams.err), switchModel),
 		tui.WithStepEvents(stepEvents),
 		tui.WithWorkflowEvents(workflowEvents),
@@ -767,16 +765,17 @@ func sessionMetadata(sess *session.Session) session.Metadata {
 // sessionBackend restores a saved backend when its local credential source is
 // still configured. Otherwise resume is explicit about falling back to the
 // current config rather than applying a model id to the wrong provider.
-// loadSkills discovers skills when the feature is enabled. A discovery error is
-// non-fatal — it warns and returns no skills rather than failing to start.
+// loadSkills returns the built-in skills plus any discovered ones when the
+// feature is enabled. A discovery error is non-fatal — it warns and falls
+// back to the built-ins rather than failing to start.
 func loadSkills(cfg *config.Config, cwd string, errOut io.Writer) []skills.Skill {
 	if !cfg.SkillsEnabled() || cwd == "" {
-		return nil
+		return skills.Defaults()
 	}
 	sk, err := skills.Load(cwd)
 	if err != nil {
 		fmt.Fprintf(errOut, "warning: skills: %v\n", err)
-		return nil
+		return skills.Defaults()
 	}
 	return sk
 }

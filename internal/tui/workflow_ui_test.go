@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/owainlewis/neo/internal/agent"
-	"github.com/owainlewis/neo/internal/phase"
+	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/workflow"
 )
 
@@ -115,12 +115,12 @@ func TestWorkflowStartsCollapsedWithProgressInStatus(t *testing.T) {
 	}
 }
 
-func TestPhaseLabelStaysAheadOfWorkflowProgress(t *testing.T) {
+func TestSkillLabelStaysAheadOfWorkflowProgress(t *testing.T) {
 	m := makeTestModel()
-	m.phases, _ = phase.Resolve(nil)
+	m.skills = skills.Defaults()
 	cmd := m.handleSlashCommand("/review")
 	if cmd == nil {
-		t.Fatal("expected review phase to start")
+		t.Fatal("expected review skill to start")
 	}
 	m.handleWorkflowEvent(workflow.Event{
 		Action: "create",
@@ -142,9 +142,9 @@ func TestPhaseLabelStaysAheadOfWorkflowProgress(t *testing.T) {
 	}
 }
 
-func TestFailedPhaseWorkflowKeepsPhaseInCompletionReceipt(t *testing.T) {
+func TestFailedSkillWorkflowKeepsLabelInCompletionReceipt(t *testing.T) {
 	m := makeTestModel()
-	m.turn = turnStats{phase: "Review", workflow: true}
+	m.turn = turnStats{label: "Review", workflow: true}
 	m.workflow = &workflowBlock{items: []workflow.Item{
 		{ID: "1", Text: "Inspect", Status: workflow.Done},
 		{ID: "2", Text: "Verify", Status: workflow.Failed},

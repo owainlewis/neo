@@ -22,7 +22,6 @@ import (
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/logx"
-	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/tools"
@@ -36,7 +35,6 @@ type Options struct {
 	ModelSwitcher  func(string) error
 	StepEvents     <-chan subagent.Event
 	WorkflowEvents <-chan workflow.Event
-	Phases         []phase.Definition
 	Verbose        bool
 	Input          io.Reader
 	Output         io.Writer
@@ -67,12 +65,6 @@ func WithStepEvents(ch <-chan subagent.Event) Option {
 
 func WithWorkflowEvents(ch <-chan workflow.Event) Option {
 	return func(opts *Options) { opts.WorkflowEvents = ch }
-}
-
-// WithPhases supplies the built-in and configured named prompts shown as slash
-// commands and as a compact label for the active turn.
-func WithPhases(definitions []phase.Definition) Option {
-	return func(opts *Options) { opts.Phases = definitions }
 }
 
 // WithVerbose controls tool activity rendering: false (the default) shows live
@@ -184,7 +176,8 @@ type turnStats struct {
 	errors   int
 	workflow bool
 	direct   bool
-	phase    string
+	// label names the slash-invoked skill driving this turn, if any.
+	label string
 }
 
 type queuedTurn struct {
@@ -261,11 +254,9 @@ type model struct {
 	mdStyleName string
 
 	// skills drives $name expansion of the user's input and /name skill
-	// invocations before a turn is sent.
+	// invocations before a turn is sent. A slash-invoked skill also labels the
+	// turn in the status line and receipt.
 	skills []skills.Skill
-	// phases are named prompts. They add one temporary turn label but leave the
-	// generic workflow state and rendering unchanged.
-	phases []phase.Definition
 
 	afterSend     func() error
 	modelChoices  []ModelChoice
@@ -367,7 +358,6 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version, workingDi
 		files:         newFilePicker(absCWD),
 		md:            md,
 		skills:        sk,
-		phases:        opts.Phases,
 		afterSend:     opts.AfterSend,
 		modelChoices:  normalizeModelChoices(modelTag, opts.ModelChoices),
 		modelSwitcher: opts.ModelSwitcher,
@@ -705,17 +695,6 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 	case "/quit", "/exit":
 		return m.quitNow()
 	default:
-		if definition, ok := phase.Find(m.phases, cmd); ok {
-			if m.busy {
-				m.appendBlock(errorBlock{err: fmt.Errorf("%s is unavailable while a turn is running", cmd)})
-				return nil
-			}
-			args := strings.TrimSpace(strings.TrimPrefix(line, cmd))
-			expanded := phase.ExpandInvocation(definition, args)
-			send := m.submitUserTurnWithSkillExpansion(line, expanded, nil, false)
-			m.turn.phase = phase.DisplayName(definition.Name)
-			return send
-		}
 		if sk, ok := m.slashSkill(cmd); ok {
 			if m.busy {
 				m.appendBlock(errorBlock{err: fmt.Errorf("%s is unavailable while a turn is running", cmd)})
@@ -724,6 +703,7 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 			args := strings.TrimSpace(strings.TrimPrefix(line, cmd))
 			expanded := skills.ExpandInvocation(sk, args)
 			send := m.submitUserTurnWithSkillExpansion(line, expanded, nil, false)
+			m.turn.label = skills.DisplayName(sk.Name)
 			m.appendBlock(noticeBlock{text: "applied skill: " + sk.Name})
 			return send
 		}
@@ -812,7 +792,7 @@ func (m *model) finishApproval(ok bool) {
 }
 
 func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBlock, bool) {
-	if !m.turn.direct && m.turn.tools == 0 && !m.turn.workflow && m.turn.phase == "" {
+	if !m.turn.direct && m.turn.tools == 0 && !m.turn.workflow && m.turn.label == "" {
 		return resultSummaryBlock{}, false
 	}
 	maxTurns := errors.Is(err, agent.ErrMaxTurns)
@@ -826,18 +806,18 @@ func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBl
 	// completes the turn. Direct commands and failed workflow items are final
 	// outcomes, so their receipts stay visibly incomplete.
 	failed := !maxTurns && (err != nil || (m.turn.direct && m.turn.errors > 0) || workflowFailed > 0)
-	phaseLabel := strings.TrimSpace(m.turn.phase)
-	label := phaseLabel
+	skillLabel := strings.TrimSpace(m.turn.label)
+	label := skillLabel
 	if label == "" {
 		label = "Done"
 	}
 	if maxTurns {
-		if phaseLabel != "" {
-			label = phaseLabel + " paused"
+		if skillLabel != "" {
+			label = skillLabel + " paused"
 		} else {
 			label = "Paused"
 		}
-	} else if m.turn.phase == "" && m.workflow != nil && strings.TrimSpace(m.workflow.title) != "" {
+	} else if m.turn.label == "" && m.workflow != nil && strings.TrimSpace(m.workflow.title) != "" {
 		label = strings.TrimSpace(m.workflow.title)
 	} else if m.turn.direct {
 		label = "Command complete"
@@ -845,8 +825,8 @@ func (m *model) resultSummary(err error, elapsed time.Duration) (resultSummaryBl
 			label = "Command finished with issues"
 		}
 	} else if failed {
-		if phaseLabel != "" {
-			label = phaseLabel + " finished with issues"
+		if skillLabel != "" {
+			label = skillLabel + " finished with issues"
 		} else {
 			label = "Finished with issues"
 		}
@@ -953,8 +933,8 @@ func statusHintForWidth(available int, full, compact string, minimumActivityWidt
 
 func (m *model) statusActivity() string {
 	parts := []string{}
-	if m.turn.phase != "" {
-		parts = append(parts, m.turn.phase)
+	if m.turn.label != "" {
+		parts = append(parts, m.turn.label)
 	}
 	if m.approval != nil {
 		parts = append(parts, "Waiting for approval")
@@ -1364,7 +1344,7 @@ func (m *model) handleEvent(e agent.Event) {
 		// The same error comes back from Send and is rendered once from
 		// sendResultMsg, which also knows whether it was a cancellation.
 	case agent.EventMaxTurnsReached:
-		m.appendBlock(maxTurnsBlock{limit: e.MaxTurns, phase: m.turn.phase})
+		m.appendBlock(maxTurnsBlock{limit: e.MaxTurns, label: m.turn.label})
 	case agent.EventDone:
 		m.settleParallel(nil)
 	}

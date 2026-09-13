@@ -14,7 +14,9 @@
 package skills
 
 import (
+	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,6 +30,31 @@ import (
 
 const fileName = "SKILL.md"
 
+// defaultsFS holds the skills Neo ships with: design, plan, build, and
+// review. They are ordinary SKILL.md files, so a user or project skill with
+// the same name replaces one outright.
+//
+//go:embed defaults/*/SKILL.md
+var defaultsFS embed.FS
+
+// Defaults returns fresh copies of the built-in skills in product order.
+func Defaults() []Skill {
+	var out []Skill
+	for _, name := range []string{"design", "plan", "build", "review"} {
+		path := "defaults/" + name + "/" + fileName
+		b, err := fs.ReadFile(defaultsFS, path)
+		if err != nil {
+			panic("skills: missing embedded default " + path)
+		}
+		s, err := parseSkill(name, b, "builtin:"+name)
+		if err != nil {
+			panic("skills: " + err.Error())
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 // Skill is one discovered skill: how it's invoked, what it's for, and the body
 // that gets expanded into a turn when invoked.
 type Skill struct {
@@ -37,16 +64,25 @@ type Skill struct {
 	Path        string // source SKILL.md path
 }
 
-// Load discovers skills for a session rooted at cwd. It looks in:
+// Load returns the built-in skills plus those discovered for a session rooted
+// at cwd. Discovery looks in:
 //
 //   - ~/.neo/skills/<name>/SKILL.md            user-global
 //   - <repo-or-cwd>/.neo/skills/<name>/SKILL.md   project (overrides global)
 //
 // A skill's invocation name is its frontmatter `name`, falling back to the
-// directory name. Project skills override global ones of the same name. Missing
+// directory name. Later sources override earlier ones of the same name, so a
+// project skill beats a global one and both beat a built-in. Missing
 // directories are skipped; only a genuine read/parse error is returned.
+//
+// Built-ins keep their product order at the front of the result; discovered
+// skills follow sorted by name.
 func Load(cwd string) ([]Skill, error) {
 	byName := map[string]Skill{}
+	defaults := Defaults()
+	for _, s := range defaults {
+		byName[s.Name] = s
+	}
 
 	var dirs []string
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
@@ -65,12 +101,48 @@ func Load(cwd string) ([]Skill, error) {
 		}
 	}
 
+	return order(defaults, byName), nil
+}
+
+// order places built-ins first in product order, then the rest by name.
+func order(defaults []Skill, byName map[string]Skill) []Skill {
 	out := make([]Skill, 0, len(byName))
-	for _, s := range byName {
-		out = append(out, s)
+	builtin := map[string]bool{}
+	for _, d := range defaults {
+		builtin[d.Name] = true
+		out = append(out, byName[d.Name])
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	var rest []Skill
+	for name, s := range byName {
+		if !builtin[name] {
+			rest = append(rest, s)
+		}
+	}
+	sort.Slice(rest, func(i, j int) bool { return rest[i].Name < rest[j].Name })
+	return append(out, rest...)
+}
+
+// Find returns one skill by its case-insensitive invocation name, with or
+// without a leading slash or dollar sign.
+func Find(sk []Skill, name string) (Skill, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.TrimPrefix(strings.TrimPrefix(name, "/"), "$")
+	for _, s := range sk {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return Skill{}, false
+}
+
+// DisplayName turns an invocation name into a compact UI label: "code-review"
+// becomes "Code review".
+func DisplayName(name string) string {
+	name = strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(name), "-", " "), "_", " ")
+	if name == "" {
+		return "Skill"
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
 }
 
 func loadDir(dir string) ([]Skill, error) {
@@ -156,7 +228,7 @@ func Augment(base string, sk []Skill) string {
 	var b strings.Builder
 	b.WriteString(base)
 	b.WriteString("\n\n# Available skills\n\n")
-	b.WriteString("These named skills can be applied to a task. The user invokes one by ")
+	b.WriteString("Skills are focused instructions for one turn. The user invokes one by ")
 	b.WriteString("mentioning `$name` in a message or by running `/name args`; its instructions are then expanded into ")
 	b.WriteString("that turn. You may also suggest a relevant skill by name.\n")
 	for _, s := range sk {

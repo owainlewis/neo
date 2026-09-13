@@ -9,7 +9,6 @@ import (
 	"github.com/owainlewis/neo/internal/agent"
 	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/llmtest"
-	"github.com/owainlewis/neo/internal/phase"
 	"github.com/owainlewis/neo/internal/skills"
 	"github.com/owainlewis/neo/internal/subagent"
 	"github.com/owainlewis/neo/internal/tools"
@@ -41,7 +40,7 @@ func TestResetConversationClearsConversationState(t *testing.T) {
 		items: []workflow.Item{{ID: "step", Text: "Old step", Status: workflow.Running}},
 	}
 	m.workflowVisible = true
-	m.turn = turnStats{tools: 2, errors: 1, workflow: true, direct: true, phase: "Review"}
+	m.turn = turnStats{tools: 2, errors: 1, workflow: true, direct: true, label: "Review"}
 	tree := newTreeBlock()
 	m.activeTree = tree
 	m.treeIndex = map[int]*treeBlock{1: tree}
@@ -113,7 +112,6 @@ func TestResetConversationRetainsLongLivedSettings(t *testing.T) {
 	m.branch = "feature"
 	m.mdStyleName = "light"
 	m.skills = []skills.Skill{{Name: "review", Body: "Review it"}}
-	m.phases = []phase.Definition{{Name: "plan", Prompt: "Plan it"}}
 	m.modelChoices = []ModelChoice{{ID: "selected-model", Name: "Selected"}}
 	m.verbose = true
 	m.files.root = "/workspace"
@@ -147,9 +145,8 @@ func TestResetConversationRetainsLongLivedSettings(t *testing.T) {
 		t.Fatalf("presentation settings changed: style=%q verbose=%v", m.mdStyleName, m.verbose)
 	}
 	if !reflect.DeepEqual(m.skills, []skills.Skill{{Name: "review", Body: "Review it"}}) ||
-		!reflect.DeepEqual(m.phases, []phase.Definition{{Name: "plan", Prompt: "Plan it"}}) ||
 		!reflect.DeepEqual(m.modelChoices, []ModelChoice{{ID: "selected-model", Name: "Selected"}}) {
-		t.Fatalf("commands or model choices changed: skills=%#v phases=%#v choices=%#v", m.skills, m.phases, m.modelChoices)
+		t.Fatalf("commands or model choices changed: skills=%#v choices=%#v", m.skills, m.modelChoices)
 	}
 	if m.files.root != "/workspace" || !reflect.DeepEqual(m.files.files, []string{"cached.go"}) || m.files.err != nil {
 		t.Fatalf("file picker configuration/cache changed: %#v", m.files)
