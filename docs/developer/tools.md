@@ -16,6 +16,13 @@ Neo exposes a small built-in tool surface to the model.
 Independent inspect calls issued in one model response can run concurrently.
 Inspect children receive only `read_file`, `grep`, and `glob`.
 
+The supervisor allows up to 20 in-flight subagents by default. Completion,
+failure, cancellation, and timeout all release capacity, so sequential
+delegations do not exhaust a session budget. A call above the concurrent cap
+returns `admission_denied` with a message to wait for an active subagent to
+finish. Each child has a 15-minute wall-clock limit; expiry of the parent
+context is reported as cancellation, not as the child hitting that limit.
+
 ## Output size
 
 `tools.MaxOutputBytes` (64 KiB, roughly 16k tokens) is the single limit on what

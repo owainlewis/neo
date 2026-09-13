@@ -296,3 +296,54 @@ func TestRunnerErrorFormatting(t *testing.T) {
 		t.Fatalf("result=%+v", res)
 	}
 }
+
+func TestAgentCapacityReleasedAfterEveryOutcome(t *testing.T) {
+	for _, code := range []string{"", "execution_error", "empty_result", "timeout", "canceled"} {
+		t.Run(code, func(t *testing.T) {
+			budget := testBudget()
+			budget.MaxAgents = 1
+			if code == "timeout" {
+				budget.MaxWall = time.Millisecond
+			}
+			sup, dir := newTestSupervisor(t, func(ctx context.Context, _, _ string, _ chan<- AgentEvent) (string, error) {
+				switch code {
+				case "execution_error":
+					return "partial", errors.New("failed")
+				case "empty_result":
+					return "", nil
+				case "timeout", "canceled":
+					<-ctx.Done()
+					return "partial", ctx.Err()
+				default:
+					return "done", nil
+				}
+			}, budget)
+			ctx := context.Background()
+			if code == "canceled" {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			for i := range DefaultBudget().MaxAgents + 1 {
+				res := sup.RunAgentPrompt(ctx, dir, "review")
+				if res.Code != code || res.Ok != (code == "") {
+					t.Fatalf("run %d: result=%+v", i, res)
+				}
+			}
+		})
+	}
+}
+
+func TestParentDeadlineIsNotSubagentTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	sup, dir := newTestSupervisor(t, func(ctx context.Context, _, _ string, _ chan<- AgentEvent) (string, error) {
+		<-ctx.Done()
+		return "partial findings", ctx.Err()
+	}, testBudget())
+	res := sup.RunAgentPrompt(ctx, dir, "review")
+	if res.Ok || res.Code != "canceled" || !strings.Contains(res.Output, "context deadline exceeded") ||
+		!strings.Contains(res.Output, "partial findings") || strings.Contains(res.Output, "wall-clock limit") {
+		t.Fatalf("result=%+v", res)
+	}
+}
