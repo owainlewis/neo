@@ -720,7 +720,15 @@ func runChatSession(ctx context.Context, store *session.Store, sess *session.Ses
 
 	if err := tui.Run(ctx, ag, model, Version, cwd, sk,
 		tui.WithAfterSend(saveSession),
-		tui.WithModelSwitcher(providerName, modelChoices(ctx, cfg, providerName, streams.err), switchModel),
+		tui.WithModelSwitcher(providerName, nil, switchModel),
+		tui.WithModelLoader(func(loadCtx context.Context) ([]tui.ModelChoice, error) {
+			var warnings strings.Builder
+			choices := modelChoices(loadCtx, cfg, providerName, &warnings)
+			if warning := strings.TrimSpace(warnings.String()); warning != "" {
+				return choices, errors.New(warning)
+			}
+			return choices, nil
+		}),
 		tui.WithWorkflowEvents(workflowEvents),
 		tui.WithVerbose(cfg.VerboseEnabled()),
 		tui.WithIO(streams.in, streams.out),

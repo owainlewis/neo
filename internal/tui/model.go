@@ -31,6 +31,7 @@ import (
 type Options struct {
 	AfterSend      func() error
 	ModelChoices   []ModelChoice
+	ModelLoader    func(context.Context) ([]ModelChoice, error)
 	Provider       string
 	ModelSwitcher  func(string) error
 	WorkflowEvents <-chan workflow.Event
@@ -53,6 +54,12 @@ func WithModelSwitcher(provider string, choices []ModelChoice, fn func(string) e
 		opts.ModelChoices = choices
 		opts.ModelSwitcher = fn
 	}
+}
+
+// WithModelLoader loads choices asynchronously on the first /model opening.
+// Choices (including fallbacks) and any warning are cached for the TUI session.
+func WithModelLoader(fn func(context.Context) ([]ModelChoice, error)) Option {
+	return func(opts *Options) { opts.ModelLoader = fn }
 }
 
 func WithWorkflowEvents(ch <-chan workflow.Event) Option {
@@ -246,6 +253,11 @@ type model struct {
 
 	afterSend     func() error
 	modelChoices  []ModelChoice
+	modelLoader   func(context.Context) ([]ModelChoice, error)
+	modelsLoading bool
+	modelsLoaded  bool
+	modelsLoadErr error
+	modelSpin     spinner.Model
 	modelSwitcher func(string) error
 	verbose       bool
 }
@@ -347,6 +359,8 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version, workingDi
 		afterSend:     opts.AfterSend,
 		modelChoices:  normalizeModelChoices(modelTag, opts.ModelChoices),
 		modelSwitcher: opts.ModelSwitcher,
+		modelLoader:   opts.ModelLoader,
+		modelSpin:     spinner.New(spinner.WithSpinner(spinner.Dot)),
 		verbose:       opts.Verbose,
 		steer:         ag.Steer,
 	}
@@ -495,7 +509,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 
+	case modelsLoadedMsg:
+		m.modelsLoading = false
+		m.modelsLoaded = true
+		m.modelsLoadErr = msg.err
+		m.modelChoices = normalizeModelChoices(m.modelTag, msg.choices)
+		m.ensureModelSelection()
+
 	case spinner.TickMsg:
+		if m.modelsLoading && m.models.visible {
+			var cmd tea.Cmd
+			m.modelSpin, cmd = m.modelSpin.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		if m.busy {
@@ -668,7 +694,7 @@ func (m *model) handleSlashCommand(line string) tea.Cmd {
 	case "/help":
 		m.appendBlock(helpBlock{commands: m.slashCommands()})
 	case "/model":
-		m.openModelBrowser()
+		return m.openModelBrowser()
 	case "/clear":
 		m.resetConversation()
 		if err := m.persistSession(); err != nil {
