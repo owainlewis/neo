@@ -218,9 +218,21 @@ type model struct {
 
 	blocks []block
 	md     *glamour.TermRenderer
+	// mdWidth is the wrap width m.md was built for, so layout only rebuilds
+	// the renderer (style parse plus chroma setup) when the width changes.
+	mdWidth int
+	// rendered caches each block's output at renderedWidth, index-aligned with
+	// blocks. Rendering a block means a glamour pass for markdown, so redoing
+	// the whole transcript on every event made each event cost O(transcript).
+	// Entries are dropped when the width changes, when blocks are reset, and
+	// from the first mutated index onward; pointer blocks that mutate in place
+	// are never cached.
+	rendered      []string
+	renderedWidth int
 
 	busy            bool
 	busySince       time.Time
+	spinning        bool // a spinner tick is scheduled
 	currentTool     *toolCallBlock
 	parallelGroups  map[string]*parallelBlock
 	parallelCalls   map[string]*parallelCallRow
@@ -370,12 +382,15 @@ func newModel(ctx context.Context, ag *agent.Agent, modelTag, version, workingDi
 	return m, nil
 }
 
+// Init starts nothing: the spinner ticks only while a turn is running (see
+// the end of Update), so an idle session does not wake up every second.
 func (m *model) Init() tea.Cmd {
-	return m.spin.Tick
+	return nil
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	wasBusy := m.busy
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -500,7 +515,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
-		cmds = append(cmds, cmd)
+		if m.busy {
+			cmds = append(cmds, cmd)
+		} else {
+			m.spinning = false
+		}
 		// Live subagent activity shows elapsed time; repaint on
 		// the spinner's cadence so the counters don't freeze between events.
 		if (m.activeTree != nil && m.activeTree.running()) || m.activeParallelGroup("") != nil {
@@ -524,6 +543,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	// The spinner drives elapsed-time displays, so it runs only while a turn
+	// is active: it starts when a message makes the model busy and a tick
+	// that arrives after the turn ends is not rescheduled.
+	if m.busy && !wasBusy && !m.spinning {
+		m.spinning = true
+		cmds = append(cmds, m.spin.Tick)
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -1066,7 +1092,7 @@ func (m *model) layout() {
 		m.viewport.SetYOffset(previousOffset)
 	}
 	m.input.SetWidth(m.width - 2)
-	if m.md != nil {
+	if m.md != nil && m.mdWidth != m.width-2 {
 		// Re-create renderer at the new width so code blocks wrap nicely.
 		// Use the cached style name — no re-probing the terminal here.
 		if r, err := glamour.NewTermRenderer(
@@ -1074,6 +1100,7 @@ func (m *model) layout() {
 			glamour.WithWordWrap(m.width-2),
 		); err == nil {
 			m.md = r
+			m.mdWidth = m.width - 2
 		}
 	}
 }
@@ -1112,6 +1139,7 @@ func (m *model) toggleLatestToolResultExpansion() bool {
 		}
 		b.expanded = !b.expanded
 		m.blocks[i] = b
+		m.invalidateRenderedFrom(i)
 		m.refreshViewport()
 		return true
 	}
@@ -1184,12 +1212,29 @@ func (m *model) refreshViewport() {
 	}
 	followOutput := m.viewport.AtBottom()
 	previousOffset := m.viewport.YOffset()
+	if m.renderedWidth != m.width {
+		m.rendered = m.rendered[:0]
+		m.renderedWidth = m.width
+	}
+	if len(m.rendered) > len(m.blocks) {
+		m.rendered = m.rendered[:len(m.blocks)]
+	}
 	var sb strings.Builder
 	for i, b := range m.blocks {
 		if i > 0 {
 			sb.WriteString(blockSeparator(m.blocks[i-1], b))
 		}
-		sb.WriteString(b.render(m.width, m.md))
+		if i < len(m.rendered) && !mutableBlock(b) {
+			sb.WriteString(m.rendered[i])
+		} else {
+			out := b.render(m.width, m.md)
+			if i < len(m.rendered) {
+				m.rendered[i] = out
+			} else {
+				m.rendered = append(m.rendered, out)
+			}
+			sb.WriteString(out)
+		}
 		sb.WriteString("\n")
 	}
 	m.viewport.SetContent(sb.String())
@@ -1197,6 +1242,24 @@ func (m *model) refreshViewport() {
 		m.viewport.GotoBottom()
 	} else {
 		m.viewport.SetYOffset(previousOffset)
+	}
+}
+
+// mutableBlock reports whether a block is updated in place after it is
+// appended, which makes its cached rendering stale.
+func mutableBlock(b block) bool {
+	switch b.(type) {
+	case *parallelBlock, *treeBlock, *workflowBlock:
+		return true
+	}
+	return false
+}
+
+// invalidateRenderedFrom drops cached renderings from index i onward. Callers
+// that replace a value block in m.blocks use it before refreshing.
+func (m *model) invalidateRenderedFrom(i int) {
+	if i < len(m.rendered) {
+		m.rendered = m.rendered[:i]
 	}
 }
 
