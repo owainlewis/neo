@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/owainlewis/neo/internal/llm"
+	"github.com/owainlewis/neo/internal/llm/retry"
 )
 
 // maxStreamLineBytes bounds one SSE data line. Deltas are small; a line beyond
@@ -62,7 +63,7 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 		}
 		var ev streamEvent
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			return nil, fmt.Errorf("decode stream event: %w (data: %s)", err, payload)
+			return nil, retry.Permanent(fmt.Errorf("decode stream event: %w (data: %s)", err, payload))
 		}
 		if ev.Error != nil {
 			return nil, fmt.Errorf("anthropic: %s", ev.Error.Message)
@@ -108,7 +109,7 @@ func parseStream(r io.Reader) (*llm.Response, error) {
 			// buffer means a tool with no arguments, which is valid.
 			if raw := b.String(); raw != "" {
 				if err := json.Unmarshal([]byte(raw), &out.Content[pos].Input); err != nil {
-					return nil, fmt.Errorf("decode tool input for %s: %w", out.Content[pos].Name, err)
+					return nil, retry.Permanent(fmt.Errorf("decode tool input for %s: %w", out.Content[pos].Name, err))
 				}
 			}
 		case "message_stop":

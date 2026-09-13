@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm/chatcompletions"
+	"github.com/owainlewis/neo/internal/llm/retry"
 )
 
 const (
@@ -35,7 +36,7 @@ func New() (*chatcompletions.Client, error) {
 		APIKey:       key,
 		Endpoint:     DefaultEndpoint,
 		DefaultModel: DefaultModel,
-		HTTP:         &http.Client{Timeout: 5 * time.Minute},
+		HTTP:         retry.NewHTTPClient(),
 		MaxRetries:   4,
 		BaseDelay:    500 * time.Millisecond,
 	}, nil

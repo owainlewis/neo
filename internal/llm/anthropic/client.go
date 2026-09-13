@@ -19,10 +19,9 @@ import (
 const defaultEndpoint = "https://api.anthropic.com/v1/messages"
 const defaultVersion = "2023-06-01"
 
-// defaultMaxTokens caps output for a single completion. Current Claude models
-// allow far more, but Neo sends non-streaming requests, so the ceiling is what
-// fits comfortably inside the HTTP timeout rather than what the model supports.
-// Raise this once responses stream.
+// defaultMaxTokens caps output for a single completion. Responses stream and
+// the transport has no total deadline, so this is a cost and runaway guard
+// rather than a timeout budget.
 const defaultMaxTokens = 16384
 
 type Client struct {
@@ -43,11 +42,10 @@ func New() (*Client, error) {
 		APIKey:   key,
 		Endpoint: defaultEndpoint,
 		Version:  defaultVersion,
-		// No client deadline. A fixed timeout caps how long a single generation
-		// may take, which is exactly the cliff streaming is here to remove; the
-		// caller's context is what bounds the request, and every caller has one
-		// (Ctrl-C in chat, --timeout headless).
-		HTTP:       &http.Client{},
+		// No total deadline: a fixed timeout caps how long a generation may
+		// take. The connection is bounded instead by header and idle deadlines
+		// (see retry.NewHTTPClient) and by the caller's context.
+		HTTP:       retry.NewHTTPClient(),
 		MaxRetries: 4,
 		BaseDelay:  500 * time.Millisecond,
 	}, nil
@@ -245,18 +243,23 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 		RetryAfterBody: parseRetryAfterBody,
 	}, func(ctx context.Context) (retry.AttemptResult, error) {
 		streamed = nil
+		// The idle guard cancels this context when the stream stalls, so it
+		// is per attempt: the outer ctx stays clean for the retry decision.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		resp, err := c.send(ctx, body)
 		if err != nil {
 			return retry.AttemptResult{}, err
 		}
-		defer resp.Body.Close()
+		body := retry.IdleBody(resp.Body, retry.IdleTimeout, cancel)
+		defer body.Close()
 		retryAfter := retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now())
 
 		if resp.StatusCode >= 400 {
-			raw, readErr := io.ReadAll(resp.Body)
+			raw, readErr := io.ReadAll(body)
 			return retry.AttemptResult{Body: raw, Status: resp.StatusCode, RetryAfter: retryAfter}, readErr
 		}
-		parsed, err := parseStream(resp.Body)
+		parsed, err := parseStream(body)
 		if err != nil {
 			return retry.AttemptResult{Status: resp.StatusCode, RetryAfter: retryAfter}, err
 		}

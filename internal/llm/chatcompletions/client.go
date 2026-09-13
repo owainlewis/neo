@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -61,8 +60,10 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
 	httpClient := c.HTTP
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 5 * time.Minute}
+		httpClient = retry.NewHTTPClient()
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, retry.Absent(), err
@@ -73,8 +74,7 @@ func (c *Client) doRequest(ctx context.Context, body []byte) ([]byte, int, retry
 	if err != nil {
 		return nil, 0, retry.Absent(), err
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := retry.ReadAllIdle(resp.Body, cancel)
 	if err != nil {
 		return nil, resp.StatusCode, retry.Absent(), fmt.Errorf("read response body: %w", err)
 	}

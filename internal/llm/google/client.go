@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -42,7 +41,7 @@ func New() (*Client, error) {
 	return &Client{
 		APIKey:     key,
 		Endpoint:   DefaultEndpoint,
-		HTTP:       &http.Client{Timeout: 5 * time.Minute},
+		HTTP:       retry.NewHTTPClient(),
 		MaxRetries: 4,
 		BaseDelay:  500 * time.Millisecond,
 	}, nil
@@ -119,8 +118,10 @@ func validateRequest(req llm.Request) error {
 func (c *Client) doRequest(ctx context.Context, model string, body []byte) ([]byte, int, retry.RetryAfter, error) {
 	httpClient := c.HTTP
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 5 * time.Minute}
+		httpClient = retry.NewHTTPClient()
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	endpoint := strings.TrimRight(c.Endpoint, "/") + "/" + url.PathEscape(model) + ":generateContent"
 	u, err := url.Parse(endpoint)
 	if err != nil {
@@ -136,8 +137,7 @@ func (c *Client) doRequest(ctx context.Context, model string, body []byte) ([]by
 	if err != nil {
 		return nil, 0, retry.Absent(), err
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := retry.ReadAllIdle(resp.Body, cancel)
 	if err != nil {
 		return nil, resp.StatusCode, retry.Absent(), fmt.Errorf("read response body: %w", err)
 	}

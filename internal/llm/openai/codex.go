@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -48,7 +47,7 @@ func NewCodex(src CredentialSource) *CodexClient {
 	return &CodexClient{
 		Source:     src,
 		Endpoint:   codexEndpoint,
-		HTTP:       &http.Client{Timeout: 5 * time.Minute},
+		HTTP:       retry.NewHTTPClient(),
 		MaxRetries: 4,
 		BaseDelay:  500 * time.Millisecond,
 	}
@@ -106,9 +105,12 @@ func (c *CodexClient) Complete(ctx context.Context, req llm.Request) (*llm.Respo
 func (c *CodexClient) doRequest(ctx context.Context, body []byte) ([]byte, int, retry.RetryAfter, error) {
 	access, accountID, err := c.Source.Token(ctx)
 	if err != nil {
-		return nil, 0, retry.Absent(), err
+		// A missing or unrefreshable login does not get better on retry.
+		return nil, 0, retry.Absent(), retry.Permanent(err)
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, retry.Absent(), err
@@ -124,11 +126,10 @@ func (c *CodexClient) doRequest(ctx context.Context, body []byte) ([]byte, int, 
 	if err != nil {
 		return nil, 0, retry.Absent(), err
 	}
-	defer resp.Body.Close()
 	// Propagate the read error. Discarding it turns a cancelled request into an
 	// apparently successful empty body, which then surfaces as a confusing
 	// decode failure instead of the cancellation that actually happened.
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := retry.ReadAllIdle(resp.Body, cancel)
 	return raw, resp.StatusCode, retry.ParseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()), err
 }
 
