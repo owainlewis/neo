@@ -82,6 +82,18 @@ func TestMakeViewEnablesMouseReportingSoTheWheelScrolls(t *testing.T) {
 	}
 }
 
+func TestApprovalBarFitsNarrowTerminal(t *testing.T) {
+	m := makeTestModel()
+	m.width = 24
+	m.approval = &approvalState{selected: 'y'}
+
+	for i, line := range strings.Split(m.approvalBarView(), "\n") {
+		if got := lipgloss.Width(line); got > m.width {
+			t.Fatalf("approval line %d width = %d, want <= %d: %q", i, got, m.width, plain(line))
+		}
+	}
+}
+
 func TestPageKeysAndMouseWheelScrollTranscript(t *testing.T) {
 	t.Parallel()
 

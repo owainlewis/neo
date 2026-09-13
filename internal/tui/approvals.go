@@ -27,5 +27,9 @@ func (m *model) approvalBarView() string {
 		styTool.Render("esc") + styMuted.Render(" deny"),
 	}, "    ")
 	line := styAccent.Render("approve?") + "  " + choices
-	return lipgloss.NewStyle().Padding(1, 1).Render(line)
+	width := max(m.width, 1)
+	if width <= 2 {
+		return truncate(line, width)
+	}
+	return lipgloss.NewStyle().Padding(1, 1).Render(truncate(line, width-2))
 }

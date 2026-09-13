@@ -430,6 +430,40 @@ func TestApprovalRequiresSelectionImmediatelyBeforeEnter(t *testing.T) {
 	}
 }
 
+func TestApprovalSelectionClearsAfterUnrelatedEvents(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "paste", msg: tea.PasteMsg{Content: "unrelated"}},
+		{name: "mouse wheel", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp})},
+		{name: "mouse click", msg: tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := makeTestModel()
+			reply := make(chan bool, 1)
+			m.Update(approvalRequestMsg{
+				req:   agent.ApprovalRequest{ToolName: "bash"},
+				reply: reply,
+			})
+
+			m.Update(keyPress('y'))
+			m.Update(tt.msg)
+			m.Update(keyPress(tea.KeyEnter))
+
+			select {
+			case <-reply:
+				t.Fatal("unrelated event left approval selection armed")
+			default:
+			}
+			if m.approval == nil || m.approval.selected != 0 {
+				t.Fatalf("approval selection = %v, want pending and cleared", m.approval)
+			}
+		})
+	}
+}
+
 func TestBangCommand_EmptyShowsHelpfulError(t *testing.T) {
 	m := makeTestModel()
 

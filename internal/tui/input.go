@@ -109,6 +109,13 @@ func (m *model) handleApprovalKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func (m *model) clearApprovalSelection() {
+	if m.approval != nil && m.approval.selected != 0 {
+		m.approval.selected = 0
+		m.layout()
+	}
+}
+
 func (m *model) requestQuit() tea.Cmd {
 	logx.Debug("tui quit requested", "busy", m.busy, "pending", m.quitPending)
 	if m.quitPending {
