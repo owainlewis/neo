@@ -1298,7 +1298,8 @@ func (m *model) handleEvent(e agent.Event) {
 			})
 		}
 	case agent.EventError:
-		m.appendBlock(errorBlock{err: e.Err})
+		// The same error comes back from Send and is rendered once from
+		// sendResultMsg, which also knows whether it was a cancellation.
 	case agent.EventMaxTurnsReached:
 		m.appendBlock(maxTurnsBlock{limit: e.MaxTurns, phase: m.turn.phase})
 	case agent.EventDone:

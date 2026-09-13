@@ -82,7 +82,7 @@ func (c *Client) Complete(ctx context.Context, req llm.Request) (*llm.Response, 
 	}
 	raw, status := result.Body, result.Status
 	if status >= 400 {
-		return nil, fmt.Errorf("google %d: %s", status, string(raw))
+		return nil, llm.NewHTTPError("google", status, raw)
 	}
 	var out response
 	if err := json.Unmarshal(raw, &out); err != nil {
