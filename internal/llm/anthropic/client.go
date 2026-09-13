@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 
 const defaultEndpoint = "https://api.anthropic.com/v1/messages"
 const defaultVersion = "2023-06-01"
+const apiKeyURL = "https://console.anthropic.com/settings/keys"
 
 // defaultMaxTokens caps output for a single completion. Responses stream and
 // the transport has no total deadline, so this is a cost and runaway guard
@@ -34,9 +33,9 @@ type Client struct {
 }
 
 func New() (*Client, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set")
+	key, err := llm.APIKeyFromEnv("ANTHROPIC_API_KEY", apiKeyURL)
+	if err != nil {
+		return nil, err
 	}
 	return &Client{
 		APIKey:   key,

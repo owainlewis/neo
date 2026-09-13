@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/owainlewis/neo/internal/llm"
 	"github.com/owainlewis/neo/internal/llm/chatcompletions"
 	"github.com/owainlewis/neo/internal/llm/retry"
 )
@@ -18,6 +19,7 @@ import (
 const (
 	DefaultEndpoint = "https://openrouter.ai/api/v1/chat/completions"
 	DefaultModel    = "anthropic/claude-sonnet-5"
+	apiKeyURL       = "https://openrouter.ai/keys"
 )
 
 // ModelsEndpoint returns OpenRouter's live model catalogue. It is public
@@ -27,9 +29,9 @@ var ModelsEndpoint = "https://openrouter.ai/api/v1/models"
 
 // New constructs an OpenRouter provider from OPENROUTER_API_KEY.
 func New() (*chatcompletions.Client, error) {
-	key := os.Getenv("OPENROUTER_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("OPENROUTER_API_KEY is not set")
+	key, err := llm.APIKeyFromEnv("OPENROUTER_API_KEY", apiKeyURL)
+	if err != nil {
+		return nil, err
 	}
 	return &chatcompletions.Client{
 		ProviderName: "openrouter",

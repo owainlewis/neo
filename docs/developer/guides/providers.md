@@ -53,6 +53,12 @@ surfaces as a decode failure rather than the cancellation that happened.
 | `provider: openrouter` | `OPENROUTER_API_KEY` | `internal/llm/openrouter` |
 | `provider: google` | `GOOGLE_API_KEY` | `internal/llm/google` |
 
+When an API-key provider is selected without its key, Neo names the required
+environment variable, links to the provider's key-creation page, shows an
+`export` command with a placeholder value, and suggests `neo doctor` to check
+the local setup. This guidance does not apply to OpenAI subscription auth,
+which uses `neo login` instead.
+
 ## How Models Are Chosen
 
 The config `model` value is passed through to the provider. If omitted, Neo chooses a provider-aware default.

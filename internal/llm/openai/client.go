@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
@@ -15,6 +14,7 @@ import (
 )
 
 const defaultEndpoint = "https://api.openai.com/v1/responses"
+const apiKeyURL = "https://platform.openai.com/api-keys"
 
 // Client talks to the OpenAI Responses API using API-key authentication.
 type Client struct {
@@ -27,9 +27,9 @@ type Client struct {
 
 // New constructs a Client from the OPENAI_API_KEY environment variable.
 func New() (*Client, error) {
-	key := os.Getenv("OPENAI_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("OPENAI_API_KEY is not set")
+	key, err := llm.APIKeyFromEnv("OPENAI_API_KEY", apiKeyURL)
+	if err != nil {
+		return nil, err
 	}
 	return &Client{
 		APIKey:     key,
