@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/owainlewis/neo/internal/llm"
 )
@@ -32,8 +31,7 @@ type fileState struct {
 // fileStamp is enough to catch a real external write. Hashing would be exact
 // but a stat is free and the difference does not come up in practice.
 type fileStamp struct {
-	modTime time.Time
-	size    int64
+	info os.FileInfo
 }
 
 func newFileState() *fileState { return &fileState{seen: map[string]fileStamp{}} }
@@ -43,7 +41,7 @@ func stamp(path string) (fileStamp, bool) {
 	if err != nil {
 		return fileStamp{}, false
 	}
-	return fileStamp{modTime: info.ModTime(), size: info.Size()}, true
+	return fileStamp{info: info}, true
 }
 
 func stateKey(path string) string {
@@ -53,7 +51,7 @@ func stateKey(path string) string {
 	return path
 }
 
-// record notes the file's current state as what the agent has seen.
+// record notes the file's current state, including known aliases, as seen.
 func (s *fileState) record(path string) {
 	if s == nil {
 		return
@@ -63,6 +61,11 @@ func (s *fileState) record(path string) {
 		return
 	}
 	s.mu.Lock()
+	for key, previous := range s.seen {
+		if os.SameFile(previous.info, current.info) {
+			s.seen[key] = current
+		}
+	}
 	s.seen[stateKey(path)] = current
 	s.mu.Unlock()
 }
@@ -85,7 +88,9 @@ func (s *fileState) changedSinceRead(path string) bool {
 	if !ok {
 		return false
 	}
-	return current != previous
+	return !os.SameFile(current.info, previous.info) ||
+		!current.info.ModTime().Equal(previous.info.ModTime()) ||
+		current.info.Size() != previous.info.Size()
 }
 
 type ReadFile struct {
