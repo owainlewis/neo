@@ -89,7 +89,7 @@ output:
 # Uses your ChatGPT/Codex plan instead of an API key.
 # Run `neo login` once to authorize (device-code flow); credentials are stored
 # in ~/.neo/auth.json. Remove them later with `neo logout`.
-# Leave `model` unset to use the subscription's supported default.
+# Leave `model` unset to use gpt-6.1-sol.
 #
 # provider: openai
 # openai_auth: subscription

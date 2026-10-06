@@ -21,9 +21,9 @@ import (
 const codexEndpoint = "https://chatgpt.com/backend-api/codex/responses"
 
 // DefaultCodexModel is the model used for subscription requests when the config
-// omits one. The Codex backend accepts the Codex-tuned model ids; override via
+// omits one. Override via
 // the `model:` config key if needed.
-const DefaultCodexModel = "gpt-5-codex"
+const DefaultCodexModel = "gpt-6.1-sol"
 
 // CredentialSource yields a valid subscription access token and its associated
 // ChatGPT account id, refreshing as needed. It is satisfied by

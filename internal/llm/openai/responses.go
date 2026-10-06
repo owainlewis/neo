@@ -23,7 +23,7 @@ import (
 )
 
 // DefaultModel is used when an API-key request carries no model.
-const DefaultModel = "gpt-4o"
+const DefaultModel = "gpt-6.1-sol"
 
 // --- wire types -------------------------------------------------------------
 

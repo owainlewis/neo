@@ -19,8 +19,8 @@ const (
 	userConfigName    = "config.yaml"
 
 	defaultModel           = "claude-opus-5"
-	defaultOpenAIModel     = "gpt-5.6-sol"
-	defaultCodexModel      = "gpt-5-codex"
+	defaultOpenAIModel     = "gpt-6.1-sol"
+	defaultCodexModel      = "gpt-6.1-sol"
 	defaultOpenRouterModel = "anthropic/claude-sonnet-5"
 	defaultGoogleModel     = "gemini-3.5-flash"
 	defaultProvider        = "anthropic"

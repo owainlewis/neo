@@ -234,3 +234,9 @@ func TestCodexDoRequest_ReturnsRetryAfterHeader(t *testing.T) {
 		t.Fatalf("delay = %s, want within HTTP-date window", retryAfter.Delay)
 	}
 }
+
+func TestOpenAIDefaultModels(t *testing.T) {
+	if DefaultModel != "gpt-6.1-sol" || DefaultCodexModel != "gpt-6.1-sol" {
+		t.Fatalf("default models = %q/%q, want gpt-6.1-sol for both", DefaultModel, DefaultCodexModel)
+	}
+}

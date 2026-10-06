@@ -515,3 +515,21 @@ func TestPermissions_RejectsRemovedConfigWithMigration(t *testing.T) {
 		}
 	})
 }
+
+func TestLoad_OpenAIDefaultModels(t *testing.T) {
+	for _, auth := range []string{OpenAIAuthAPIKey, OpenAIAuthSubscription} {
+		t.Run(auth, func(t *testing.T) {
+			withTempDir(t, func(dir string) {
+				t.Setenv("HOME", dir)
+				writeFile(t, filepath.Join(dir, "neo.yaml"), "provider: openai\nopenai_auth: "+auth+"\nsubagents:\n  provider: openai\n")
+				cfg, err := Load()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Model != "gpt-6.1-sol" || cfg.Subagents.Model != "gpt-6.1-sol" {
+					t.Fatalf("default models = %q/%q, want gpt-6.1-sol for both", cfg.Model, cfg.Subagents.Model)
+				}
+			})
+		})
+	}
+}

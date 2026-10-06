@@ -1,0 +1,11 @@
+# Local testing config. Not committed — see .gitignore.
+#
+# Config files are NOT merged: the first one found wins, and ./neo.yaml beats
+# ~/.neo/config.yaml. Delete this file to fall back to the global setup.
+provider: openai
+openai_auth: subscription
+
+# Leave model unset to use the subscription's supported default.
+
+features:
+  prompt_caching: false

@@ -236,11 +236,11 @@ func providerModelChoices(ctx context.Context, cfg *config.Config, provider stri
 	case "openai":
 		if cfg.OpenAIAuth == config.OpenAIAuthSubscription {
 			return []tui.ModelChoice{
-				{ID: "gpt-5-codex", Name: "GPT-5 Codex", Description: "Supported ChatGPT/Codex subscription model"},
+				{ID: openai.DefaultCodexModel, Name: "GPT-6.1 Sol", Description: "Supported ChatGPT/Codex subscription model"},
 			}
 		}
 		return []tui.ModelChoice{
-			{ID: "gpt-5.6-sol", Name: "GPT-5.6 Sol", Description: "Recommended flagship model for coding and agentic tasks"},
+			{ID: openai.DefaultModel, Name: "GPT-6.1 Sol", Description: "Recommended flagship model for coding and agentic tasks"},
 			{ID: "gpt-5.6-terra", Name: "GPT-5.6 Terra", Description: "Balance of intelligence and cost, competitive with GPT-5.5"},
 			{ID: "gpt-5.6-luna", Name: "GPT-5.6 Luna", Description: "Fastest, most affordable GPT-5.6 model"},
 			{ID: "gpt-5.2", Name: "GPT-5.2", Description: "Previous-generation flagship model"},

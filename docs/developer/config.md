@@ -66,6 +66,9 @@ The embedded source, including annotated provider examples, is
 | `provider: openrouter` | `OPENROUTER_API_KEY` | `internal/llm/openrouter` |
 | `provider: google` | `GOOGLE_API_KEY` | `internal/llm/google` |
 
+When `provider: openai` omits `model`, both API-key and subscription auth default
+to `gpt-6.1-sol`. Explicit model settings and saved-session models are unchanged.
+
 Subscription credentials are created with `neo login` and removed with `neo logout`. The docs describe only where credentials live and which flow uses them; token values are never generated into developer docs.
 
 The top-level `provider` selects the backend for a session. In the TUI, `/model` lists models for that provider and switches the model and compactor for the current session without rewriting configuration. Start a new session with a different `provider` value to change backends.

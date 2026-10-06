@@ -34,8 +34,8 @@ func TestModelChoices_OpenAISubscriptionOnlyListsSupportedCodexModel(t *testing.
 	if len(choices) != 1 {
 		t.Fatalf("subscription choices = %d, want 1: %#v", len(choices), choices)
 	}
-	if choices[0].ID != "gpt-5-codex" {
-		t.Fatalf("subscription model = %q, want gpt-5-codex", choices[0].ID)
+	if choices[0].ID != "gpt-6.1-sol" {
+		t.Fatalf("subscription model = %q, want gpt-6.1-sol", choices[0].ID)
 	}
 }
 
