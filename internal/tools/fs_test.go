@@ -151,7 +151,7 @@ func TestReadFile_PaginatedSelectionExceedsCap(t *testing.T) {
 	}
 }
 
-func TestWriteFile_CreatesAndIsAtomic(t *testing.T) {
+func TestWriteFile_CreatesParentAndFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "out.txt")
 	_, err := WriteFile{}.Run(context.Background(), map[string]any{
@@ -171,13 +171,7 @@ func TestWriteFile_CreatesAndIsAtomic(t *testing.T) {
 	if got := fileMode(t, path); got != 0o644 {
 		t.Fatalf("mode = %v, want %v", got, os.FileMode(0o644))
 	}
-	// No leftover temp files in the target directory.
-	entries, _ := os.ReadDir(filepath.Dir(path))
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".neo-write-") {
-			t.Fatalf("leftover temp file: %s", e.Name())
-		}
-	}
+
 }
 
 func TestWriteFile_PreservesExistingMode(t *testing.T) {
@@ -470,5 +464,128 @@ func TestReadFile_CancelledContextBeforeOpen(t *testing.T) {
 	// A missing path must still report cancellation, not the filesystem error.
 	if _, err := (ReadFile{}).Run(ctx, map[string]any{"path": filepath.Join(t.TempDir(), "absent")}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestFileWritesPreserveLinks(t *testing.T) {
+	for _, tool := range []Tool{WriteFile{}, EditFile{}} {
+		for _, linkType := range []string{"symlink", "hardlink"} {
+			t.Run(tool.Name()+"/"+linkType, func(t *testing.T) {
+				dir := t.TempDir()
+				target := filepath.Join(dir, "target.txt")
+				path := filepath.Join(dir, "link.txt")
+				writeFileWithMode(t, target, []byte("old content"), 0o640)
+				before, err := os.Stat(target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if linkType == "symlink" {
+					err = os.Symlink("target.txt", path)
+				} else {
+					err = os.Link(target, path)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = tool.Run(context.Background(), map[string]any{
+					"path": path, "content": "new", "old_string": "old content", "new_string": "new",
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, name := range []string{target, path} {
+					content, err := os.ReadFile(name)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if string(content) != "new" {
+						t.Fatalf("%s content = %q, want new", name, content)
+					}
+					after, err := os.Stat(name)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !os.SameFile(before, after) {
+						t.Fatalf("%s file identity changed", name)
+					}
+					if after.Mode().Perm() != 0o640 {
+						t.Fatalf("%s mode = %v, want 0640", name, after.Mode().Perm())
+					}
+				}
+				if linkType == "symlink" {
+					got, err := os.Readlink(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got != "target.txt" {
+						t.Fatalf("symlink target = %q", got)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestFileState_LinkedAliases(t *testing.T) {
+	for _, linkType := range []string{"symlink", "hardlink"} {
+		for _, operation := range []string{"write", "edit"} {
+			for _, reverse := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/reverse=%t", linkType, operation, reverse), func(t *testing.T) {
+					dir := t.TempDir()
+					target, alias := filepath.Join(dir, "target"), filepath.Join(dir, "alias")
+					writeFileWithMode(t, target, []byte("original"), 0o644)
+					var err error
+					if linkType == "symlink" {
+						err = os.Symlink("target", alias)
+					} else {
+						err = os.Link(target, alias)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					readPath, writePath := target, alias
+					if reverse {
+						readPath, writePath = alias, target
+					}
+					files := NewFileTools()
+					ctx := context.Background()
+					if _, err := files[0].Run(ctx, map[string]any{"path": readPath}); err != nil {
+						t.Fatal(err)
+					}
+					writer := files[1]
+					if operation == "edit" {
+						writer = files[2]
+					}
+					if _, err := writer.Run(ctx, map[string]any{"path": writePath, "content": "agent update", "old_string": "original", "new_string": "agent update"}); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := files[2].Run(ctx, map[string]any{"path": readPath, "old_string": "agent update", "new_string": "final"}); err != nil {
+						t.Fatalf("edit after own alias write: %v", err)
+					}
+					got, err := os.ReadFile(writePath)
+					if err != nil || string(got) != "final" {
+						t.Fatalf("content = %q, err = %v", got, err)
+					}
+					if err := os.WriteFile(writePath, []byte("final external addition"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := files[2].Run(ctx, map[string]any{"path": readPath, "old_string": "final", "new_string": "bad"}); err == nil || !strings.Contains(err.Error(), "changed since you read it") {
+						t.Fatalf("external alias write should be stale: %v", err)
+					}
+					// Replacing the tracked alias must not be hidden by recording
+					// an agent write to the inode it used to reference.
+					if err := os.Remove(alias); err != nil {
+						t.Fatal(err)
+					}
+					writeFileWithMode(t, alias, []byte("replacement"), 0o644)
+					if _, err := files[1].Run(ctx, map[string]any{"path": target, "content": "own update"}); err != nil {
+						t.Fatal(err)
+					}
+					if !files[2].(EditFile).State.changedSinceRead(alias) {
+						t.Fatal("replacement should remain stale")
+					}
+				})
+			}
+		}
 	}
 }
