@@ -10,6 +10,10 @@ The flattened `Request.System` string remains available for providers that do no
 2. Dynamic environment section: working directory, repository root, platform, date. Not cacheable.
 3. Dynamic AGENTS.md project context. Not cacheable.
 
+Each AGENTS.md file is limited to 32 KiB before injection. Oversized files are
+skipped with a path-specific warning; other valid instruction files still load.
+Reads are bounded, including reads through the project workspace root.
+
 The goal is to cache stable instructions without letting the per-session tail evict that prefix.
 
 ## Conversation Breakpoint

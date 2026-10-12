@@ -262,3 +262,68 @@ func TestExpandInvocation_IncludesBodyAndArguments(t *testing.T) {
 		t.Fatalf("expanded invocation = %q, want %q", got, want)
 	}
 }
+
+func TestLoad_PreservesGoodSkillsAroundBadFiles(t *testing.T) {
+	root, cwd, home := repo(t)
+	writeSkill(t, home, "review", "global review")
+	writeSkill(t, home, "global", "global skill")
+	writeSkill(t, root, "review", "---\nname: [broken\n---\nbad")
+	writeSkill(t, root, "oversized", strings.Repeat("x", 32*1024+1))
+	writeSkill(t, root, "good", "project skill")
+	writeSkill(t, root, "unreadable", "body")
+	badPath := filepath.Join(root, ".neo", "skills", "unreadable", "SKILL.md")
+	if err := os.Remove(badPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(badPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(cwd)
+	if err == nil {
+		t.Fatal("expected per-file diagnostics")
+	}
+	for _, name := range []string{"review", "oversized", "unreadable"} {
+		if !strings.Contains(err.Error(), filepath.Join(name, "SKILL.md")) {
+			t.Fatalf("missing warning for %s: %v", name, err)
+		}
+	}
+	for name, body := range map[string]string{"review": "global review", "global": "global skill", "good": "project skill"} {
+		s, ok := Find(got, name)
+		if !ok || s.Body != body {
+			t.Fatalf("%s = %+v, found %v", name, s, ok)
+		}
+	}
+	if _, ok := Find(got, "oversized"); ok {
+		t.Fatal("oversized skill loaded")
+	}
+}
+
+func TestLoad_SymlinkedSkillDirectoryAndCRLF(t *testing.T) {
+	_, cwd, home := repo(t)
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("---\r\nname: linked\r\ndescription: Linked skill\r\n---\r\nDo this.\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, ".neo", "skills")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, ok := Find(got, "linked")
+	if !ok || s.Body != "Do this." || s.Description != "Linked skill" {
+		t.Fatalf("linked skill = %+v, found %v", s, ok)
+	}
+}
+
+func TestSplitFrontmatter_OnlyWholeLineClosesFence(t *testing.T) {
+	s, err := parseSkill("fallback", []byte("---\r\nname: good\r\n---suffix\r\n"), "test")
+	if err != nil || s.Name != "fallback" {
+		t.Fatalf("partial fence treated as delimiter: %+v, %v", s, err)
+	}
+}

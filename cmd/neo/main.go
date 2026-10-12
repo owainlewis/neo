@@ -210,8 +210,11 @@ func loadProfile(cwd, name string, errOut io.Writer) (profile.Profile, bool) {
 	}
 	p, err := profile.Load(cwd, name)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
-		return profile.Profile{}, false
+		if p.Name == "" {
+			fmt.Fprintln(errOut, err)
+			return profile.Profile{}, false
+		}
+		warnFiles(errOut, "agents", err)
 	}
 	return p, true
 }
@@ -220,8 +223,7 @@ func runAgents(streams stdio) int {
 	cwd, _ := os.Getwd()
 	found, err := profile.List(cwd)
 	if err != nil {
-		fmt.Fprintf(streams.err, "agents: %v\n", err)
-		return 1
+		warnFiles(streams.err, "agents", err)
 	}
 	if len(found) == 0 {
 		fmt.Fprintln(streams.out, "No agents defined. Create one at ~/.neo/agents/<name>.md or .neo/agents/<name>.md")
@@ -337,7 +339,7 @@ func chatSystem(cfg *config.Config, cwd string, sk []skills.Skill, agentProfile 
 	if cfg.AgentsFileEnabled() && cwd != "" {
 		docs, err := projectctx.Load(cwd)
 		if err != nil {
-			fmt.Fprintf(errOut, "warning: AGENTS.md: %v\n", err)
+			warnFiles(errOut, "AGENTS.md", err)
 		}
 		if section := projectctx.Augment("", docs); section != "" {
 			blocks = append(blocks, llm.SystemBlock{Text: section})
@@ -760,20 +762,22 @@ func sessionMetadata(sess *session.Session) session.Metadata {
 	return sess.Metadata
 }
 
-// sessionBackend restores a saved backend when its local credential source is
-// still configured. Otherwise resume is explicit about falling back to the
-// current config rather than applying a model id to the wrong provider.
 // loadSkills returns the built-in skills plus any discovered ones when the
-// feature is enabled. A discovery error is non-fatal — it warns and falls
-// back to the built-ins rather than failing to start.
+// feature is enabled. Discovery errors warn without discarding valid skills.
 func loadSkills(cfg *config.Config, cwd string, errOut io.Writer) []skills.Skill {
 	if !cfg.SkillsEnabled() || cwd == "" {
 		return skills.Defaults()
 	}
 	sk, err := skills.Load(cwd)
 	if err != nil {
-		fmt.Fprintf(errOut, "warning: skills: %v\n", err)
-		return skills.Defaults()
+		warnFiles(errOut, "skills", err)
 	}
 	return sk
+}
+
+// warnFiles keeps each discovery diagnostic visible as its own warning.
+func warnFiles(out io.Writer, kind string, err error) {
+	for _, line := range strings.Split(err.Error(), "\n") {
+		fmt.Fprintf(out, "warning: %s: %s\n", kind, line)
+	}
 }

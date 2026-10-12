@@ -303,3 +303,25 @@ func TestAugment_AppendsLabelledSections(t *testing.T) {
 		t.Errorf("expected pkg section to follow repo-root section")
 	}
 }
+
+func TestLoad_SkipsOversizedGlobalAndProjectFiles(t *testing.T) {
+	root, cwd, home := repo(t)
+	global := filepath.Join(home, ".neo", "AGENTS.md")
+	project := filepath.Join(root, "AGENTS.md")
+	for _, path := range []string{global, project} {
+		write(t, path, strings.Repeat("x", 32*1024+1))
+	}
+	write(t, filepath.Join(cwd, "AGENTS.md"), "safe local rules")
+	docs, err := Load(cwd)
+	if err == nil {
+		t.Fatal("expected size warnings")
+	}
+	for _, path := range []string{global, project} {
+		if !strings.Contains(err.Error(), path) {
+			t.Fatalf("missing warning for %s: %v", path, err)
+		}
+	}
+	if len(docs) != 1 || docs[0].Content != "safe local rules" {
+		t.Fatalf("docs = %+v", docs)
+	}
+}

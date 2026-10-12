@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/owainlewis/neo/internal/promptfile"
 	"github.com/owainlewis/neo/internal/workspace"
 )
 
@@ -99,7 +100,12 @@ func Load(cwd string) ([]Doc, error) {
 // selects the target, including for absolute in-workspace symlinks; the rooted
 // read ensures that replacing that target before use still cannot escape.
 func readRootedDoc(root *os.Root, name, sourcePath string) (doc Doc, ok bool, err error) {
-	b, err := root.ReadFile(name)
+	f, err := root.Open(name)
+	var b []byte
+	if err == nil {
+		defer f.Close()
+		b, err = promptfile.Read(f)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Doc{}, false, nil
@@ -116,7 +122,7 @@ func readRootedDoc(root *os.Root, name, sourcePath string) (doc Doc, ok bool, er
 // readDoc reads a single instruction file. A missing or whitespace-only file
 // yields ok=false with no error; only an unexpected read failure errors.
 func readDoc(path string) (doc Doc, ok bool, err error) {
-	b, err := os.ReadFile(path)
+	b, err := promptfile.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Doc{}, false, nil

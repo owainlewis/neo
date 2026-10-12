@@ -125,3 +125,29 @@ func TestList_SkipsNonMarkdownAndEmptyFiles(t *testing.T) {
 		t.Fatalf("names = %v, want good and upper only", names)
 	}
 }
+
+func TestListAndLoad_PreserveGoodProfilesAroundReadFailures(t *testing.T) {
+	cwd, home := workspaceWithAgents(t, map[string]string{"good.md": "good prompt"})
+	writeAgents(t, filepath.Join(home, ".neo", "agents"), map[string]string{"fallback.md": "global prompt"})
+	bad := filepath.Join(cwd, ".neo", "agents", "fallback.md")
+	if err := os.Symlink(filepath.Join(cwd, "missing"), bad); err != nil {
+		t.Fatal(err)
+	}
+	found, err := List(cwd)
+	if err == nil || !strings.Contains(err.Error(), bad) {
+		t.Fatalf("missing file diagnostic: %v", err)
+	}
+	if len(found) != 2 {
+		t.Fatalf("valid profiles lost: %+v", found)
+	}
+	for name, body := range map[string]string{"good": "good prompt", "fallback": "global prompt"} {
+		p, err := Load(cwd, name)
+		if p.Body != body || err == nil {
+			t.Fatalf("Load(%s) = %+v, %v", name, p, err)
+		}
+	}
+	p, err := Load(cwd, "unknown")
+	if p.Name != "" || err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("unknown profile = %+v, %v", p, err)
+	}
+}

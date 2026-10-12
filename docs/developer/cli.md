@@ -29,6 +29,10 @@ lists what exists rather than falling back to the coding prompt. Sessions record
 the agent they were started with, so `neo resume` keeps it unless a different
 `--agent` is given.
 
+Unreadable agent profiles produce path-specific warnings while valid profiles
+remain listed and selectable with `--agent`. A broken project profile leaves
+a valid user-global profile of the same name available.
+
 ## Environment
 
 - `ANTHROPIC_API_KEY` is required when `provider: anthropic`.

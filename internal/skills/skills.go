@@ -15,6 +15,7 @@ package skills
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -25,6 +26,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/owainlewis/neo/internal/promptfile"
 	"github.com/owainlewis/neo/internal/workspace"
 )
 
@@ -74,11 +76,12 @@ type Skill struct {
 // A skill's invocation name is its frontmatter `name`, falling back to the
 // directory name. Later sources override earlier ones of the same name, so a
 // project skill beats a global one and both beat a built-in. Missing
-// directories are skipped; only a genuine read/parse error is returned.
+// directories are skipped. Read/parse errors are returned alongside valid skills.
 //
 // Built-ins keep their product order at the front of the result; discovered
 // skills follow sorted by name.
 func Load(cwd string) ([]Skill, error) {
+	var loadErrs []error
 	byName := map[string]Skill{}
 	defaults := Defaults()
 	for _, s := range defaults {
@@ -95,14 +98,14 @@ func Load(cwd string) ([]Skill, error) {
 	for _, dir := range dirs {
 		found, err := loadDir(dir)
 		if err != nil {
-			return nil, err
+			loadErrs = append(loadErrs, err)
 		}
 		for _, s := range found {
 			byName[s.Name] = s
 		}
 	}
 
-	return order(defaults, byName), nil
+	return order(defaults, byName), errors.Join(loadErrs...)
 }
 
 // order places built-ins first in product order, then the rest by name.
@@ -155,28 +158,37 @@ func loadDir(dir string) ([]Skill, error) {
 		return nil, fmt.Errorf("read %s: %w", dir, err)
 	}
 	var out []Skill
+	var loadErrs []error
 	for _, e := range entries {
-		if !e.IsDir() {
+		entryPath := filepath.Join(dir, e.Name())
+		info, err := os.Stat(entryPath)
+		if err != nil {
+			loadErrs = append(loadErrs, fmt.Errorf("stat %s: %w", entryPath, err))
+			continue
+		}
+		if !info.IsDir() {
 			continue
 		}
 		path := filepath.Join(dir, e.Name(), fileName)
-		b, err := os.ReadFile(path)
+		b, err := promptfile.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, fmt.Errorf("read %s: %w", path, err)
+			loadErrs = append(loadErrs, fmt.Errorf("read %s: %w", path, err))
+			continue
 		}
 		s, err := parseSkill(e.Name(), b, path)
 		if err != nil {
-			return nil, err
+			loadErrs = append(loadErrs, err)
+			continue
 		}
 		if s.Body == "" {
 			continue // nothing to expand; skip
 		}
 		out = append(out, s)
 	}
-	return out, nil
+	return out, errors.Join(loadErrs...)
 }
 
 func parseSkill(dirName string, content []byte, path string) (Skill, error) {
@@ -205,16 +217,17 @@ func parseSkill(dirName string, content []byte, path string) (Skill, error) {
 // splitFrontmatter separates optional leading `---`-fenced YAML frontmatter from
 // the body. With no frontmatter it returns (nil, content).
 func splitFrontmatter(content []byte) (fm, body []byte) {
-	s := string(content)
+	s := strings.ReplaceAll(string(content), "\r\n", "\n")
 	if !strings.HasPrefix(s, "---\n") {
 		return nil, content
 	}
 	rest := s[len("---\n"):]
-	// Closing fence on its own line, or at EOF.
-	for _, sep := range []string{"\n---\n", "\n---"} {
-		if i := strings.Index(rest, sep); i >= 0 {
-			return []byte(rest[:i]), []byte(strings.TrimLeft(rest[i+len(sep):], "\n"))
+	offset := 0
+	for _, line := range strings.Split(rest, "\n") {
+		if line == "---" {
+			return []byte(rest[:offset]), []byte(strings.TrimLeft(rest[offset+len(line):], "\n"))
 		}
+		offset += len(line) + 1
 	}
 	return nil, content // unterminated — treat the whole file as body
 }
