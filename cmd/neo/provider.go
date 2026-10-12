@@ -274,7 +274,7 @@ func providerModelChoices(ctx context.Context, cfg *config.Config, provider stri
 // move fast, so the picker is populated from OpenRouter's /models endpoint rather
 // than a hardcoded list. On failure (offline, timeout, API change) it falls back
 // to the provider default so the picker still works. The fetch is time-boxed so
-// startup never hangs on a slow network.
+// the model picker finishes loading even on a slow network.
 func openRouterModelChoices(ctx context.Context, errOut io.Writer) []tui.ModelChoice {
 	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
