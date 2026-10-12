@@ -36,7 +36,7 @@ const (
 	AgentModeInspect AgentMode = "inspect"
 )
 
-var ErrAgents = errors.New("denied: session agent cap reached")
+var ErrAgents = errors.New("denied: concurrent agent cap reached; wait for an active subagent to finish")
 
 var (
 	dynamicAgentTools = []string{"bash", "read_file", "write_file", "edit_file", "grep", "glob"}
@@ -53,7 +53,6 @@ type Supervisor struct {
 	mu     sync.Mutex
 	nodes  map[int]*Node
 	nextID int
-	agents int // subagents admitted in this session
 }
 
 func NewSupervisor(runner Runner, b Budget) *Supervisor {
@@ -107,13 +106,12 @@ func (s *Supervisor) admitAndRegister(input string, call tools.CallMetadata, gen
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.agents >= s.budget.MaxAgents {
+	if len(s.nodes) >= s.budget.MaxAgents {
 		return 0, ErrAgents
 	}
 	s.nextID++
 	id := s.nextID
 	s.nodes[id] = &Node{ID: id, Task: clip(input, 60), Call: call, Generation: generation}
-	s.agents++
 	return id, nil
 }
 
@@ -134,7 +132,7 @@ func (s *Supervisor) runAgent(ctx context.Context, id int, dir, input string, op
 	close(ch)
 	wg.Wait()
 	if err != nil {
-		if cctx.Err() == context.DeadlineExceeded {
+		if ctx.Err() == nil && cctx.Err() == context.DeadlineExceeded {
 			return out + "\n[subagent hit its wall-clock limit]", false, "timeout"
 		}
 		if cctx.Err() != nil {
@@ -169,6 +167,9 @@ func (s *Supervisor) finish(id int, out string, ok bool) {
 		kind = "fail"
 	}
 	s.attribute(id, AgentEvent{Kind: kind, Body: clip(out, 100)})
+	s.mu.Lock()
+	delete(s.nodes, id)
+	s.mu.Unlock()
 }
 
 // AgentTool exposes subagent delegation to the model through Neo's tool registry.
