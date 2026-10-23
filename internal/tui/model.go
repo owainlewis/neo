@@ -223,6 +223,10 @@ type model struct {
 	quitting       bool
 	quitPending    bool
 	persistenceErr error
+	// quitArmed and cancelArmed record a first ctrl+c or esc press that is
+	// waiting for its confirming second press. Any other key clears them.
+	quitArmed   bool
+	cancelArmed bool
 
 	// cancel for the currently in-flight Send, if any.
 	sendCancel      context.CancelFunc
@@ -377,14 +381,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.models.visible {
+			m.disarm()
 			return m.handleModelBrowserKey(msg)
 		}
 		if m.approval != nil {
+			m.disarm()
 			return m, m.handleApprovalKey(msg)
 		}
 		cmds = append(cmds, m.handleKey(msg))
 
 	case tea.PasteMsg:
+		m.disarm()
 		if m.approval != nil {
 			m.clearApprovalSelection()
 			break
@@ -430,6 +437,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sendResultMsg:
 		elapsed := time.Since(m.busySince)
 		m.busy = false
+		m.cancelArmed = false
 		m.clearInflight()
 		m.layout()
 		if m.sendCancel != nil {
@@ -587,7 +595,7 @@ func (m *model) submitUserTurn(displayText, agentText string, images []string) t
 func (m *model) steerActiveTurn(displayText, agentText string) {
 	sent, used := skills.Expand(agentText, m.skills)
 	if m.steer == nil || !m.steer(sent) {
-		m.appendBlock(errorBlock{err: fmt.Errorf("this operation cannot be steered; use ctrl+enter to queue a follow-up")})
+		m.appendBlock(errorBlock{err: fmt.Errorf("this operation cannot be steered; use ctrl+enter to queue a follow-up (Kitty keyboard protocol terminals only)")})
 		return
 	}
 	m.resetInput()
