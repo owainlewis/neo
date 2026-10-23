@@ -399,6 +399,22 @@ func TestOtherKeyDisarmsQuit(t *testing.T) {
 	}
 }
 
+func TestPasteAfterArmedCtrlCKeepsDraft(t *testing.T) {
+	m := makeTestModel()
+
+	m.Update(ctrlC())
+	m.Update(tea.PasteMsg{Content: "draft"})
+	if _, cmd := m.Update(ctrlC()); cmd != nil || m.quitting {
+		t.Fatal("ctrl+c after a paste quit and lost the draft")
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("composer = %q, want the draft cleared", got)
+	}
+	if _, cmd := m.Update(ctrlC()); cmd != nil || m.quitting {
+		t.Fatal("clearing the pasted draft armed quit; the next ctrl+c should only arm")
+	}
+}
+
 func TestCtrlDWithTextDoesNotQuit(t *testing.T) {
 	m := makeTestModel()
 	m.input.SetValue("ab")

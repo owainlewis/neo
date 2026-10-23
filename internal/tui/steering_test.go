@@ -146,6 +146,20 @@ func TestEscapeNeedsSecondPressToCancel(t *testing.T) {
 	}
 }
 
+func TestPasteDisarmsEscapeCancel(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	cancelCalls := 0
+	m.sendCancel = func() { cancelCalls++ }
+
+	m.Update(keyPress(tea.KeyEsc))
+	m.Update(tea.PasteMsg{Content: "follow-up"})
+	m.Update(keyPress(tea.KeyEsc))
+	if cancelCalls != 0 {
+		t.Fatal("escape after a paste canceled the turn without a fresh confirmation")
+	}
+}
+
 func TestEscapeClosingPickerDoesNotArmCancel(t *testing.T) {
 	m := makeTestModel()
 	m.busy = true

@@ -30,7 +30,7 @@ var keyBindings = []struct {
 }{
 	{"↩", "send"},
 	{"↩ (working)", "steer after the current tool boundary"},
-	{"ctrl+↩", "queue a follow-up; needs Kitty keyboard protocol, else acts as ↩"},
+	{"ctrl+↩", "queue a follow-up (Kitty terminals; else ↩)"},
 	{"⌥↩ / ctrl+j", "newline"},
 	{"!cmd", "run shell command"},
 	{"wheel/pgup/pgdn", "scroll transcript"},

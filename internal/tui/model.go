@@ -391,6 +391,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleKey(msg))
 
 	case tea.PasteMsg:
+		m.disarm()
 		if m.approval != nil {
 			m.clearApprovalSelection()
 			break

@@ -152,12 +152,17 @@ func (m *model) requestQuit() tea.Cmd {
 // draft, and on an empty composer it needs a second press to quit. While a
 // turn runs or a quit is already pending, requestQuit owns the sequence.
 func (m *model) handleInterrupt(armed bool) tea.Cmd {
-	if m.busy || m.quitPending || armed {
+	if m.busy || m.quitPending {
 		return m.requestQuit()
 	}
+	// Text in the composer always wins over an armed quit, so a draft that
+	// arrived after the first press (for example by paste) is never lost.
 	if m.input.Value() != "" {
 		m.resetInput()
 		return nil
+	}
+	if armed {
+		return m.requestQuit()
 	}
 	m.quitArmed = true
 	m.appendBlock(noticeBlock{text: "press ctrl+c again to quit"})
