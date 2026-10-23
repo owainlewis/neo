@@ -106,6 +106,7 @@ func TestEscapeCancelsAndReturnsQueuedFollowUpToComposer(t *testing.T) {
 	m.queued = &queuedTurn{displayText: "run the review", agentText: "run the review"}
 
 	m.Update(keyPress(tea.KeyEsc))
+	m.Update(keyPress(tea.KeyEsc))
 	if !canceled {
 		t.Fatal("escape did not cancel the active turn")
 	}
@@ -122,6 +123,87 @@ func TestEscapeCancelsAndReturnsQueuedFollowUpToComposer(t *testing.T) {
 	}
 	if got := plain(m.viewportContent()); !strings.Contains(got, "turn canceled") || !strings.Contains(got, "returned to the composer") {
 		t.Fatalf("cancel transition is not visible:\n%s", got)
+	}
+}
+
+func TestEscapeNeedsSecondPressToCancel(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	cancelCalls := 0
+	m.sendCancel = func() { cancelCalls++ }
+
+	m.Update(keyPress(tea.KeyEsc))
+	if cancelCalls != 0 {
+		t.Fatal("first escape canceled the turn")
+	}
+	if got := renderBlocks(m); !strings.Contains(got, "press esc again to cancel the turn") {
+		t.Fatalf("cancel confirmation is not visible:\n%s", got)
+	}
+
+	m.Update(keyPress(tea.KeyEsc))
+	if cancelCalls != 1 {
+		t.Fatalf("cancel calls after second escape = %d, want 1", cancelCalls)
+	}
+}
+
+func TestEscapeClosingPickerDoesNotArmCancel(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	cancelCalls := 0
+	m.sendCancel = func() { cancelCalls++ }
+	m.input.SetValue("/")
+	m.updateSlashPicker()
+	if !m.picker.visible {
+		t.Fatal("slash picker did not open")
+	}
+
+	m.Update(keyPress(tea.KeyEsc))
+	if m.picker.visible {
+		t.Fatal("escape did not close the slash picker")
+	}
+	m.Update(keyPress(tea.KeyEsc))
+	if cancelCalls != 0 {
+		t.Fatal("escape after closing the picker canceled the turn")
+	}
+	m.Update(keyPress(tea.KeyEsc))
+	if cancelCalls != 1 {
+		t.Fatalf("cancel calls after confirmed escape = %d, want 1", cancelCalls)
+	}
+}
+
+func TestApprovalKeysDisarmCancel(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	cancelCalls := 0
+	m.sendCancel = func() { cancelCalls++ }
+
+	m.Update(keyPress(tea.KeyEsc))
+	m.approval = &approvalState{reply: make(chan bool, 1)}
+	m.Update(keyPress('y'))
+	m.Update(keyPress(tea.KeyEnter))
+	if m.approval != nil {
+		t.Fatal("approval was not answered")
+	}
+	m.Update(keyPress(tea.KeyEsc))
+	if cancelCalls != 0 {
+		t.Fatal("escape armed before an approval canceled the turn on one press")
+	}
+}
+
+func TestTurnEndDisarmsCancel(t *testing.T) {
+	m := makeTestModel()
+	m.busy = true
+	m.sendCancel = func() {}
+
+	m.Update(keyPress(tea.KeyEsc))
+	m.Update(sendResultMsg{})
+
+	m.busy = true
+	cancelCalls := 0
+	m.sendCancel = func() { cancelCalls++ }
+	m.Update(keyPress(tea.KeyEsc))
+	if cancelCalls != 0 {
+		t.Fatal("escape armed in a finished turn canceled the next turn")
 	}
 }
 

@@ -10,7 +10,12 @@ import (
 
 func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
-	if key == "ctrl+c" || key == "ctrl+d" {
+	quitArmed, cancelArmed := m.quitArmed, m.cancelArmed
+	m.disarm()
+	switch {
+	case key == "ctrl+c":
+		return m.handleInterrupt(quitArmed)
+	case key == "ctrl+d" && m.input.Value() == "":
 		return m.requestQuit()
 	}
 	if m.quitPending {
@@ -18,7 +23,7 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	switch key {
 	case "esc":
-		m.handleEscape()
+		m.handleEscape(cancelArmed)
 	case "ctrl+enter":
 		if m.busy {
 			if text := strings.TrimSpace(m.input.Value()); text != "" {
@@ -143,7 +148,30 @@ func (m *model) requestQuit() tea.Cmd {
 	return tea.Quit
 }
 
-func (m *model) handleEscape() {
+// handleInterrupt makes an idle ctrl+c safe to press by reflex: it clears a
+// draft, and on an empty composer it needs a second press to quit. While a
+// turn runs or a quit is already pending, requestQuit owns the sequence.
+func (m *model) handleInterrupt(armed bool) tea.Cmd {
+	if m.busy || m.quitPending || armed {
+		return m.requestQuit()
+	}
+	if m.input.Value() != "" {
+		m.resetInput()
+		return nil
+	}
+	m.quitArmed = true
+	m.appendBlock(noticeBlock{text: "press ctrl+c again to quit"})
+	return nil
+}
+
+// disarm drops any pending ctrl+c or esc confirmation, so a later press needs
+// a fresh first press.
+func (m *model) disarm() {
+	m.quitArmed = false
+	m.cancelArmed = false
+}
+
+func (m *model) handleEscape(armed bool) {
 	if m.files.visible {
 		m.dismissFilePicker()
 		m.layout()
@@ -154,10 +182,16 @@ func (m *model) handleEscape() {
 		m.layout()
 		return
 	}
-	if m.busy && m.sendCancel != nil {
-		logx.Debug("tui send canceled", "mode", "soft_interrupt")
-		m.sendCancel()
+	if !m.busy || m.sendCancel == nil {
+		return
 	}
+	if !armed {
+		m.cancelArmed = true
+		m.appendBlock(noticeBlock{text: "press esc again to cancel the turn"})
+		return
+	}
+	logx.Debug("tui send canceled", "mode", "soft_interrupt")
+	m.sendCancel()
 }
 
 func (m *model) handleEnter() tea.Cmd {

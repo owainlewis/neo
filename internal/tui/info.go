@@ -30,17 +30,17 @@ var keyBindings = []struct {
 }{
 	{"↩", "send"},
 	{"↩ (working)", "steer after the current tool boundary"},
-	{"ctrl+↩", "queue one follow-up after the current turn"},
-	{"⌥↩", "newline"},
+	{"ctrl+↩", "queue a follow-up; needs Kitty keyboard protocol, else acts as ↩"},
+	{"⌥↩ / ctrl+j", "newline"},
 	{"!cmd", "run shell command"},
 	{"wheel/pgup/pgdn", "scroll transcript"},
 	{"shift+↑/↓", "scroll transcript one line"},
 	{"shift+drag", "select terminal text"},
 	{"tab", "accept the picker selection"},
 	{"ctrl+o", "expand/collapse latest truncated tool output"},
-	{"esc", "cancel the current turn"},
+	{"esc", "cancel the current turn (press twice)"},
 	{"ctrl+l", "clear the screen"},
-	{"ctrl+c", "quit"},
+	{"ctrl+c", "clear input; on empty input press twice to quit"},
 }
 
 func (h helpBlock) render(width int, _ *glamour.TermRenderer) string {

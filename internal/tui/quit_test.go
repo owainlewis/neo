@@ -114,6 +114,9 @@ func TestQuitSaveFailureStaysOpenAndCanRetry(t *testing.T) {
 		t.Fatalf("save failure was not explained to the user:\n%s", rendered)
 	}
 
+	if _, cmd := m.Update(ctrlC); cmd != nil {
+		t.Fatal("idle ctrl+c retried the save without a confirming press")
+	}
 	_, retry := m.Update(ctrlC)
 	if retry == nil {
 		t.Fatal("retry quit did not return a persistence command")
@@ -167,6 +170,9 @@ func TestQuitDuringDirectCommandDoesNotBypassStalePersistenceFailure(t *testing.
 		t.Fatalf("stale save failure was not explained to the user:\n%s", rendered)
 	}
 
+	if _, cmd := m.Update(ctrlC); cmd != nil {
+		t.Fatal("idle ctrl+c retried the save without a confirming press")
+	}
 	_, retry := m.Update(ctrlC)
 	if retry == nil {
 		t.Fatal("retry quit did not return a persistence command")
@@ -343,4 +349,86 @@ func TestSlashQuitExitsEvenIfTheSaveFails(t *testing.T) {
 	if !strings.Contains(renderBlocks(m), "disk full") {
 		t.Fatal("the save failure should still be reported")
 	}
+}
+
+func TestCtrlCClearsComposerWithText(t *testing.T) {
+	m := makeTestModel()
+	m.input.SetValue("draft")
+
+	_, cmd := m.Update(ctrlC())
+
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("composer = %q, want cleared", got)
+	}
+	if m.quitting || cmd != nil {
+		t.Fatalf("ctrl+c with a draft quit: quitting %t, command %v", m.quitting, cmd != nil)
+	}
+	if _, cmd := m.Update(ctrlC()); cmd != nil || m.quitting {
+		t.Fatal("clearing the draft armed quit; the next ctrl+c should only arm")
+	}
+}
+
+func TestCtrlCOnEmptyComposerNeedsSecondPress(t *testing.T) {
+	m := makeTestModel()
+
+	if _, cmd := m.Update(ctrlC()); cmd != nil || m.quitting {
+		t.Fatal("first ctrl+c on an empty composer quit")
+	}
+	if got := renderBlocks(m); !strings.Contains(got, "press ctrl+c again to quit") {
+		t.Fatalf("quit confirmation is not visible:\n%s", got)
+	}
+
+	_, cmd := m.Update(ctrlC())
+	assertQuitCommand(t, cmd)
+	if !m.quitting {
+		t.Fatal("second ctrl+c did not enter final quitting state")
+	}
+}
+
+func TestOtherKeyDisarmsQuit(t *testing.T) {
+	m := makeTestModel()
+
+	m.Update(ctrlC())
+	m.Update(keyPress('x'))
+	m.Update(keyPress(tea.KeyBackspace))
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("composer = %q, want empty before the last ctrl+c", got)
+	}
+	if _, cmd := m.Update(ctrlC()); cmd != nil || m.quitting {
+		t.Fatal("ctrl+c after another key quit without a fresh confirmation")
+	}
+}
+
+func TestCtrlDWithTextDoesNotQuit(t *testing.T) {
+	m := makeTestModel()
+	m.input.SetValue("ab")
+	m.input.MoveToBegin()
+
+	m.Update(ctrlD())
+
+	if m.quitting || m.quitPending {
+		t.Fatal("ctrl+d with a draft quit")
+	}
+	if got := m.input.Value(); got != "b" {
+		t.Fatalf("composer = %q, want ctrl+d to delete forward", got)
+	}
+}
+
+func TestCtrlDOnEmptyComposerQuits(t *testing.T) {
+	m := makeTestModel()
+
+	_, cmd := m.Update(ctrlD())
+
+	assertQuitCommand(t, cmd)
+	if !m.quitting {
+		t.Fatal("ctrl+d on an empty composer did not quit")
+	}
+}
+
+func ctrlC() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
+}
+
+func ctrlD() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: 'd', Mod: tea.ModCtrl})
 }
